@@ -2190,3 +2190,49 @@ fn bash_approve_strips_display_notes_from_edited_command() {
         "ls"
     );
 }
+
+#[test]
+fn side_question_request_has_empty_history() {
+    let v = side_request("aether-btw-1", "why?");
+    assert_eq!(v["type"], "control_request");
+    assert_eq!(v["request_id"], "aether-btw-1");
+    assert_eq!(v["request"]["subtype"], "side_question");
+    assert_eq!(v["request"]["question"], "why?");
+    assert_eq!(v["request"]["history"], json!([]));
+}
+
+#[test]
+fn side_answer_routes_to_its_reply_only() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State { active: true, ..State::default() };
+    s.sides.insert("aether-btw-1".into(), tx);
+    let progress = r#"{"type":"system","subtype":"control_request_progress","request_id":"aether-btw-1","status":"started"}"#;
+    assert!(map_line(&mut s, progress).is_empty());
+    let done = r#"{"type":"control_response","response":{"subtype":"success","request_id":"aether-btw-1","response":{"response":"because","synthetic":false}}}"#;
+    assert!(map_line(&mut s, done).is_empty());
+    assert_eq!(rx.try_recv().unwrap(), Update::Final("because".into()));
+    assert!(s.sides.is_empty());
+    assert!(s.active);
+}
+
+#[test]
+fn side_error_response_is_an_error() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State::default();
+    s.sides.insert("aether-btw-2".into(), tx);
+    let line = r#"{"type":"control_response","response":{"subtype":"error","request_id":"aether-btw-2","error":"Unsupported control request subtype: side_question"}}"#;
+    assert!(map_line(&mut s, line).is_empty());
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        Update::Error("Unsupported control request subtype: side_question".into())
+    );
+}
+
+#[test]
+fn process_exit_fails_pending_side_questions() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State::default();
+    s.sides.insert("aether-btw-3".into(), tx);
+    on_exit(&mut s, "gone".into());
+    assert_eq!(rx.try_recv().unwrap(), Update::Error("gone".into()));
+}

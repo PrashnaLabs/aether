@@ -76,13 +76,44 @@ impl ChatApp {
         let id = chat.id;
         self.side_runs += 1;
         let n = self.side_runs;
-        let key = side_key(id, n);
         let mut card = SideCard::new(n, question.clone());
         if chat.provider == Provider::OpenRouter && self.api_key.is_none() {
             card.error = Some("No OpenRouter API key. Add one in Settings.".into());
             self.add_side(id, card);
             return cx.notify();
         }
+        let native = self.agent.side_question(&chat.id.to_string(), &question);
+        card.running = true;
+        self.add_side(id, card);
+        match native {
+            Some(Reply { mut updates, .. }) => {
+                cx.spawn(async move |this, cx| {
+                    while let Some(update) = updates.next().await {
+                        if matches!(update, Update::Error(_)) {
+                            this.update(cx, |this, cx| this.run_emulated(id, n, question, cx)).ok();
+                            return;
+                        }
+                        let last = matches!(update, Update::Final(_));
+                        if this.update(cx, |this, cx| this.apply_side(id, n, update, cx)).is_err() {
+                            return;
+                        }
+                        if last {
+                            break;
+                        }
+                    }
+                    this.update(cx, |this, cx| this.finish_native(id, n, cx)).ok();
+                })
+                .detach();
+                cx.notify();
+            }
+            None => self.run_emulated(id, n, question, cx),
+        }
+    }
+
+    fn run_emulated(&mut self, id: i64, n: u64, question: String, cx: &mut Context<Self>) {
+        let Some(ix) = self.chats.iter().position(|c| c.id == id) else { return };
+        let chat = &self.chats[ix];
+        let key = side_key(id, n);
         let hist = side_history(history(&chat.messages));
         let (settings, mut session) = self.cli_request(ix);
         session.key = key.clone();
@@ -92,8 +123,10 @@ impl ChatApp {
         if chat.provider == Provider::OpenRouter
             && let Err(e) = self.agent.fork_session(&key, &hist)
         {
-            card.error = Some(e.to_string());
-            self.add_side(id, card);
+            if let Some(card) = self.side_card(id, n) {
+                card.error = Some(e.to_string());
+                card.running = false;
+            }
             return cx.notify();
         }
         let api_key = self.api_key.clone().unwrap_or_default();
@@ -107,9 +140,10 @@ impl ChatApp {
             &hist,
             &session,
         );
-        card.cancel = Some(cancel);
-        card.running = true;
-        self.add_side(id, card);
+        match self.side_card(id, n) {
+            Some(card) => card.cancel = Some(cancel),
+            None => return cancel.cancel(),
+        }
         cx.spawn(async move |this, cx| {
             while let Some(update) = updates.next().await {
                 if this.update(cx, |this, cx| this.apply_side(id, n, update, cx)).is_err() {
@@ -119,6 +153,13 @@ impl ChatApp {
             this.update(cx, |this, cx| this.finish_side(id, n, cx)).ok();
         })
         .detach();
+        cx.notify();
+    }
+
+    fn finish_native(&mut self, id: i64, n: u64, cx: &mut Context<Self>) {
+        if let Some(card) = self.side_card(id, n) {
+            card.running = false;
+        }
         cx.notify();
     }
 

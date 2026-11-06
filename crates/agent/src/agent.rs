@@ -88,7 +88,11 @@ enum Command {
     /// Stops a background task or terminal by tool row id.
     StopTool(String),
     NoticeAction(String),
+    /// A native side question and the reply its answer goes to.
+    Side(String, UnboundedSender<Update>),
 }
+
+pub const SIDE_UNSUPPORTED: &str = "native side questions are unsupported";
 
 type TurnTx = Arc<Mutex<Option<UnboundedSender<Update>>>>;
 
@@ -740,6 +744,11 @@ impl Agent {
                         }
                     }
                     Command::NoticeAction(action) => driver.notice_action(&action),
+                    Command::Side(question, reply) => {
+                        if !driver.side_question(&question, reply.clone()) {
+                            let _ = reply.unbounded_send(Update::Error(SIDE_UNSUPPORTED.into()));
+                        }
+                    }
                 }
                 report(&*driver);
             }
@@ -926,6 +935,15 @@ impl Agent {
         if let Some(session) = self.live.guard().get(chat_key) {
             let _ = session.commands.send(Command::NoticeAction(action.to_string()));
         }
+    }
+
+    /// Asks `question` through the chat's live CLI without touching its turn. None when no
+    /// session is live. A CLI that can't take it answers with `Update::Error(SIDE_UNSUPPORTED)`.
+    pub fn side_question(&self, chat_key: &str, question: &str) -> Option<Reply> {
+        let commands = self.live.guard().get(chat_key)?.commands.clone();
+        let (tx, updates) = mpsc::unbounded();
+        commands.send(Command::Side(question.to_string(), tx)).ok()?;
+        Some(Reply { updates, cancel: Cancel::inert() })
     }
 
     pub fn health(&self, chat_key: &str) -> Option<SessionHealth> {

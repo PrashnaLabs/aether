@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use aether_core::{AccessMode, Answer, Attachment, Provider, Settings};
+use aether_core::{AccessMode, Answer, Attachment, Provider, Settings, Update};
+use futures::channel::mpsc::UnboundedSender;
 
 pub mod antigravity;
 pub mod catalog;
@@ -127,6 +128,12 @@ pub trait Driver: Send {
     }
     /// Runs a notice action, offered by a notice whose `url` is `"aether:<action>"`.
     fn notice_action(&mut self, _action: &str) {}
+    /// Asks `question` natively, off the main turn: the answer comes on `reply` as one
+    /// `Update::Final` or an `Update::Error`, never on the driver's own stream. False,
+    /// sending nothing, when the CLI can't.
+    fn side_question(&mut self, _question: &str, _reply: UnboundedSender<Update>) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

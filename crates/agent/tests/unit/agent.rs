@@ -881,3 +881,46 @@ fn lead_session_gets_lead_tools_and_stable_token() {
     assert_eq!(opts.lead, None);
     assert_ne!(key_on, key_off);
 }
+
+struct Side(UnboundedSender<Update>, bool);
+
+impl Driver for Side {
+    fn prompt(&mut self, text: String, _: Vec<Attachment>) {
+        let _ = self.0.unbounded_send(Update::Final(text));
+    }
+    fn steer(&mut self, _: String, _: Vec<Attachment>) -> bool {
+        false
+    }
+    fn cancel(&mut self) {}
+    fn resumed(&self) -> bool {
+        true
+    }
+    fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
+        if self.1 {
+            let _ = reply.unbounded_send(Update::Final(format!("re:{question}")));
+        }
+        self.1
+    }
+}
+
+#[test]
+fn side_question_needs_a_live_driver_that_takes_it() {
+    let can = std::sync::atomic::AtomicBool::new(true);
+    let can = Arc::new(can);
+    let flag = can.clone();
+    let factory: Factory = Arc::new(move |_, _, tx| {
+        Box::new(Side(tx, flag.load(std::sync::atomic::Ordering::SeqCst)))
+    });
+    let agent = Agent::with_factory(factory, Duration::from_secs(600)).unwrap();
+    assert!(agent.side_question("1", "q").is_none());
+    drain(&agent, agent.send("x", "a".into(), vec![], &cli_settings(), "", vec![], &[], &chat("")));
+    let reply = agent.side_question("1", "q").expect("live driver");
+    let got: Vec<Update> = agent.rt.block_on(reply.updates.take(1).collect());
+    assert_eq!(got, [Update::Final("re:q".into())]);
+    agent.close_session("1");
+    can.store(false, std::sync::atomic::Ordering::SeqCst);
+    drain(&agent, agent.send("x", "a".into(), vec![], &cli_settings(), "", vec![], &[], &chat("")));
+    let reply = agent.side_question("1", "q").expect("live session");
+    let got: Vec<Update> = agent.rt.block_on(reply.updates.take(1).collect());
+    assert_eq!(got[0], Update::Error(SIDE_UNSUPPORTED.into()));
+}
