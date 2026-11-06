@@ -39,8 +39,8 @@ impl ClaudeDriver {
             me.die(why);
             return me;
         }
-        let (mut args, mut id, mut resumed) = launch_args(&opts);
-        let mut note = None;
+        let (mut args, mut id, mut resumed, note) = launch_args(&opts);
+        let mut note = note;
         for attempt in 0..2 {
             me.notice(Notice {
                 state: NoticeState::Running,
@@ -287,8 +287,22 @@ pub(crate) fn apply_fix(
     }
 }
 
-/// CLI args, session id, and whether that id resumes a stored session.
-pub(crate) fn launch_args(opts: &DriverStartOptions) -> (Vec<String>, String, bool) {
+pub(crate) fn lost_resume(requested: &str, resumed: bool) -> Option<Notice> {
+    if !requested.is_empty() && !resumed {
+        Some(Notice::new(
+            "info-resume",
+            NoticeKind::Info,
+            "Couldn't find the earlier Claude session, so this is a new one.",
+        ))
+    } else {
+        None
+    }
+}
+
+/// CLI args, session id, whether that id resumes a stored session, and any lost-resume notice.
+pub(crate) fn launch_args(
+    opts: &DriverStartOptions,
+) -> (Vec<String>, String, bool, Option<Notice>) {
     let mode = match opts.access {
         AccessMode::AutoEdit => "acceptEdits",
         AccessMode::Auto => "auto",
@@ -338,9 +352,10 @@ pub(crate) fn launch_args(opts: &DriverStartOptions) -> (Vec<String>, String, bo
         }
     }
     let resumed = !opts.resume.is_empty() && session_exists(&opts.resume);
+    let note = lost_resume(&opts.resume, resumed);
     let id = if resumed { opts.resume.clone() } else { new_uuid() };
     args.extend([if resumed { "--resume" } else { "--session-id" }.to_string(), id.clone()]);
-    (args, id, resumed)
+    (args, id, resumed, note)
 }
 
 pub(crate) fn write_mcp_config(lead: &crate::LeadTools) -> std::io::Result<PathBuf> {

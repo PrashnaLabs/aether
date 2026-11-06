@@ -39,7 +39,11 @@ pub(crate) fn external_state_text(state: &ExternalState, exact: bool) -> String 
 pub(crate) fn open_blocker(a: &ExternalAgent) -> Option<&'static str> {
     if a.session.is_empty() {
         Some("No session to open")
-    } else if a.pid.is_none() {
+    } else if a.pid.is_none()
+        && !(a.provider == Provider::OpenCode
+            && a.session.starts_with("ses_")
+            && a.session.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+    {
         Some("Busy in another OpenCode client")
     } else {
         None
@@ -69,7 +73,12 @@ pub(crate) fn externally_locked<'a>(
     external: &'a [ExternalAgent],
 ) -> Option<&'a ExternalAgent> {
     external.iter().find(|a| {
-        a.pid.is_some() && (a.pid == pid || (!session.is_empty() && a.session == session))
+        (a.pid.is_some() && (a.pid == pid || (!session.is_empty() && a.session == session)))
+            || (a.pid.is_none()
+                && a.provider == Provider::OpenCode
+                && !session.is_empty()
+                && a.session == session
+                && matches!(a.state, ExternalState::Working | ExternalState::Waiting(_)))
     })
 }
 
@@ -84,7 +93,16 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if a.session.is_empty() || a.pid.is_none() {
+        if let Some(why) = open_blocker(&a) {
+            let hint = if a.pid.is_none() {
+                "Open it in that OpenCode client, or stop it there first."
+            } else {
+                "Aether hasn't found its session yet. Wait for its first reply, then try again."
+            };
+            let text = SharedString::from(format!("{why}. {hint}"));
+            aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
+                alert.title("Can't open this agent here").description(text.clone())
+            });
             return;
         }
         if let Some(at) = self.external_chat(&a) {

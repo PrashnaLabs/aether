@@ -81,9 +81,12 @@ pub fn scan(own_pid: u32, own_sessions: &HashSet<String>) -> Option<Vec<External
             };
             match provider {
                 Provider::Claude => claude_registry(&mut a, row.pid),
-                Provider::Pi => {
-                    pi_session(&mut a, &home_dir().join(".pi/agent/sessions"), own_sessions)
-                }
+                Provider::Pi => pi_session(
+                    &mut a,
+                    &home_dir().join(".pi/agent/sessions"),
+                    own_sessions,
+                    &row.command,
+                ),
                 Provider::Codex => codex_session(&mut a, &home_dir().join(".codex"), own_sessions),
                 Provider::Antigravity => antigravity_session(
                     &mut a,
@@ -130,9 +133,22 @@ fn claude_registry(a: &mut ExternalAgent, pid: u32) {
     (a.session, a.title, a.state, a.exact) = (session, title, state, true);
 }
 
-fn pi_session(a: &mut ExternalAgent, root: &Path, own: &HashSet<String>) {
+fn pi_session(a: &mut ExternalAgent, root: &Path, own: &HashSet<String>, command: &str) {
+    if let Some(path) =
+        pi_exact_path(a, root, command).filter(|p| !own.contains(p.to_string_lossy().as_ref()))
+    {
+        let quiet = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .map_or(0, |d| d.as_secs());
+        a.state = pi_state(&tail(&path, 64 * 1024), quiet);
+        a.session = path.to_string_lossy().into_owned();
+        a.exact = true;
+        return;
+    }
     let cwd = a.cwd.to_string_lossy();
-    let dir = format!("--{}--", cwd.strip_prefix('/').unwrap_or(&cwd).replace(['/', ':'], "-"));
+    let dir = pi_bucket(&cwd);
     let age = Duration::from_secs(etime_secs(&a.elapsed) + 1);
     let start = SystemTime::now().checked_sub(age).unwrap_or(SystemTime::UNIX_EPOCH);
     let newest = std::fs::read_dir(root.join(dir))
@@ -148,6 +164,61 @@ fn pi_session(a: &mut ExternalAgent, root: &Path, own: &HashSet<String>) {
     let quiet = mtime.elapsed().map_or(0, |d| d.as_secs());
     a.state = pi_state(&tail(&path, 64 * 1024), quiet);
     a.session = path.to_string_lossy().into_owned();
+}
+
+fn pi_bucket(cwd: &str) -> String {
+    format!("--{}--", cwd.strip_prefix('/').unwrap_or(cwd).replace(['/', ':'], "-"))
+}
+
+fn pi_exact_path(a: &ExternalAgent, root: &Path, command: &str) -> Option<PathBuf> {
+    if let Some(path) = pi_session_arg(command) {
+        let path = if path.is_absolute() { path } else { a.cwd.join(path) };
+        return path.exists().then_some(path);
+    }
+    let id = pi_session_id(command)?;
+    find_pi_session_by_id(root, &a.cwd, &id)
+}
+
+fn pi_flag_value<'a>(command: &'a str, flag: &str, short: &str) -> Option<&'a str> {
+    let mut it = command.split_whitespace();
+    while let Some(arg) = it.next() {
+        if arg == flag || arg == short {
+            return it.next();
+        }
+        if let Some(v) = arg.strip_prefix(&format!("{flag}=")) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn pi_session_arg(command: &str) -> Option<PathBuf> {
+    let v = pi_flag_value(command, "--session", "-s")?;
+    (v.ends_with(".jsonl") || v.contains(['/', '\\'])).then(|| PathBuf::from(v))
+}
+
+fn pi_session_id(command: &str) -> Option<String> {
+    if let Some(id) = pi_flag_value(command, "--session-id", "") {
+        return Some(id.to_string());
+    }
+    let v = pi_flag_value(command, "--session", "-s")?;
+    (!v.ends_with(".jsonl") && !v.contains(['/', '\\']) && !v.is_empty()).then(|| v.to_string())
+}
+
+fn find_pi_session_by_id(root: &Path, cwd: &Path, id: &str) -> Option<PathBuf> {
+    let dir = pi_bucket(&cwd.to_string_lossy());
+    std::fs::read_dir(root.join(dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .find_map(|path| {
+            let mut head = String::new();
+            File::open(&path).ok()?.take(8192).read_to_string(&mut head).ok()?;
+            let v: Value = serde_json::from_str(head.lines().next()?).ok()?;
+            (v["id"].as_str() == Some(id)).then_some(path)
+        })
 }
 
 fn codex_session(a: &mut ExternalAgent, root: &Path, own: &HashSet<String>) {
@@ -514,6 +585,12 @@ pub fn transcript(a: &ExternalAgent) -> Vec<(Role, String)> {
         Provider::Claude => {
             claude_file(&a.session).map(|t| claude_transcript(&t)).unwrap_or_default()
         }
+        Provider::Codex if !a.session.is_empty() => {
+            codex_file(&home_dir().join(".codex"), &a.session)
+                .and_then(read_lossy)
+                .map(|t| codex_transcript(&t))
+                .unwrap_or_default()
+        }
         Provider::Pi if a.session.ends_with(".jsonl") => {
             read_lossy(&a.session).map(|t| pi_transcript(&t)).unwrap_or_default()
         }
@@ -578,6 +655,66 @@ fn claude_transcript(jsonl: &str) -> Vec<(Role, String)> {
             let text = text_of(&v["message"]["content"]);
             let echo = text.starts_with("<command-name>") || text.starts_with("<local-command-");
             Some((role_of(v["type"].as_str()?)?, text)).filter(|(_, t)| !t.is_empty() && !echo)
+        })
+        .collect()
+}
+
+fn codex_file(root: &Path, session: &str) -> Option<String> {
+    if session.is_empty() || session.contains(['/', '\\']) {
+        return None;
+    }
+    let suffix = format!("-{session}.jsonl");
+    let base = root.join("sessions");
+    for year in std::fs::read_dir(&base).ok()?.flatten() {
+        if !year.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        for month in std::fs::read_dir(year.path()).ok()?.flatten() {
+            if !month.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            for day in std::fs::read_dir(month.path()).ok()?.flatten() {
+                if !day.file_type().is_ok_and(|t| t.is_dir()) {
+                    continue;
+                }
+                for file in std::fs::read_dir(day.path()).ok()?.flatten() {
+                    if file.file_name().to_string_lossy().ends_with(&suffix) {
+                        return Some(file.path().to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn codex_transcript(jsonl: &str) -> Vec<(Role, String)> {
+    jsonl
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| {
+            let p = &v["payload"];
+            if v["type"] != "response_item" || p["type"] != "message" {
+                return None;
+            }
+            let text = p["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|c| {
+                    matches!(c["type"].as_str(), Some("input_text" | "output_text" | "text"))
+                })
+                .filter_map(|c| c["text"].as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .filter(|t| {
+                    !["<environment_context>", "<user_instructions>"]
+                        .iter()
+                        .any(|tag| t.starts_with(tag))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some((role_of(p["role"].as_str()?)?, text)).filter(|(_, t)| !t.is_empty())
         })
         .collect()
 }

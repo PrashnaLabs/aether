@@ -889,7 +889,7 @@ fn full_access_args_start_fresh_session() {
         background: Vec::new(),
         lead: None,
     };
-    let (args, id, resumed) = launch_args(&opts);
+    let (args, id, resumed, _) = launch_args(&opts);
     let has = |pair: [&str; 2]| args.windows(2).any(|w| w == pair);
     assert!(has(["--permission-mode", "bypassPermissions"]));
     assert!(args.iter().any(|a| a == "--dangerously-skip-permissions"));
@@ -952,7 +952,7 @@ fn auto_access_uses_auto_permission_mode_without_bypass() {
         background: Vec::new(),
         lead: None,
     };
-    let (args, _, _) = launch_args(&opts);
+    let (args, ..) = launch_args(&opts);
     assert!(args.windows(2).any(|w| w == ["--permission-mode", "auto"]));
     assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions"));
 }
@@ -1188,7 +1188,7 @@ fn ask_opts() -> DriverStartOptions {
 
 #[test]
 fn launch_uses_public_flags_and_hook_events() {
-    let (args, _, _) = launch_args(&ask_opts());
+    let (args, ..) = launch_args(&ask_opts());
     let pair = |a: &str, b: &str| args.windows(2).any(|w| w[0] == a && w[1] == b);
     assert!(pair("--permission-prompts", "host") && pair("--permission-mode", "manual"));
     assert!(args.iter().any(|a| a == "--include-hook-events"));
@@ -1253,6 +1253,25 @@ fn modes_map_and_unknown_is_none() {
 }
 
 #[test]
+fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
+    let notice = lost_resume("no-such-session-aether-test", false).unwrap();
+    assert_eq!(notice.id, "info-resume");
+    assert_eq!(notice.kind, NoticeKind::Info);
+    assert_eq!(
+        notice.text,
+        "Couldn't find the earlier Claude session, so this is a new one."
+    );
+    assert!(lost_resume("", false).is_none());
+    assert!(lost_resume("abc", true).is_none());
+    let opts = DriverStartOptions { resume: "no-such-session-aether-test".into(), ..ask_opts() };
+    let (_, _, resumed, note) = launch_args(&opts);
+    assert!(!resumed);
+    assert_eq!(note.unwrap().text, notice.text);
+    let fresh = DriverStartOptions { resume: String::new(), ..ask_opts() };
+    assert!(launch_args(&fresh).3.is_none());
+}
+
+#[test]
 fn resume_failures_pick_fresh_or_fork() {
     let mut tail = StderrTail::default();
     tail.push("No conversation found with session ID: 1234");
@@ -1271,7 +1290,7 @@ fn fatal_fixture_fails_and_resume_fixture_does_not() {
 
 #[test]
 fn read_only_launches_plan_and_plan_init_is_no_mismatch() {
-    let (args, _, _) =
+    let (args, ..) =
         launch_args(&DriverStartOptions { access: AccessMode::ReadOnly, ..ask_opts() });
     assert!(args.windows(2).any(|w| w[0] == "--permission-mode" && w[1] == "plan"));
     let mut s = State { requested: AccessMode::ReadOnly, ..State::default() };

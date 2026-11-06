@@ -177,6 +177,76 @@ fn merge_matches_opencode_tuis_and_drops_own_sessions() {
 }
 
 #[test]
+fn pi_session_arg_parses_path_flags() {
+    let want = Some(PathBuf::from("/x/y.jsonl"));
+    assert_eq!(pi_session_arg("pi --session /x/y.jsonl foo"), want.clone());
+    assert_eq!(pi_session_arg("pi -s /x/y.jsonl"), want.clone());
+    assert_eq!(
+        pi_session_arg("node /x/pi-coding-agent/dist/cli.js --session /x/y.jsonl"),
+        want.clone()
+    );
+    assert_eq!(pi_session_arg("pi --session=/x/y.jsonl"), want);
+    assert_eq!(
+        pi_session_arg("pi --session relative.jsonl"),
+        Some(PathBuf::from("relative.jsonl"))
+    );
+    assert_eq!(pi_session_arg("pi"), None);
+    assert_eq!(pi_session_arg("pi --resume"), None);
+    assert_eq!(pi_session_arg("pi --sessionx /x/y.jsonl"), None);
+    assert_eq!(pi_session_arg("pi --session abc"), None);
+}
+
+#[test]
+fn pi_session_id_parses_bare_ids() {
+    assert_eq!(pi_session_id("pi --session abc"), Some("abc".into()));
+    assert_eq!(pi_session_id("pi --session=/x/y.jsonl"), None);
+    assert_eq!(pi_session_id("pi --session-id abc"), Some("abc".into()));
+    assert_eq!(pi_session_id("pi"), None);
+}
+
+#[test]
+fn pi_session_prefers_session_arg_over_newest_file() {
+    let root = std::env::temp_dir().join(format!("aether-pi-exact-{}-a", std::process::id()));
+    let dir = root.join("--w--");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stop = r#"{"type":"message","message":{"role":"assistant","stopReason":"stop"}}"#;
+    let now = SystemTime::now();
+    let file = |name: &str, age: u64| {
+        let path = dir.join(name);
+        std::fs::write(&path, stop).unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(now - Duration::from_secs(age))
+            .unwrap();
+        path
+    };
+    let old = file("2020-01-01T00-00-00-000Z_old-id.jsonl", 100_000);
+    file("newer.jsonl", 10);
+    let cmd = format!("pi --session {}", old.display());
+    let mut a = agent(Provider::Pi, "/w", "");
+    pi_session(&mut a, &root, &HashSet::new(), &cmd);
+    assert_eq!((a.session.as_str(), a.exact), (old.to_string_lossy().as_ref(), true));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn pi_session_resolves_bare_id_to_bucket_file() {
+    let root = std::env::temp_dir().join(format!("aether-pi-exact-{}-b", std::process::id()));
+    let dir = root.join("--w--");
+    std::fs::create_dir_all(&dir).unwrap();
+    let id = "01a1b1f1-a601-723a-bc93-f0b7df1fc391";
+    let path = dir.join(format!("2026-11-06T17-39-26-337Z_{id}.jsonl"));
+    std::fs::write(&path, format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"cwd\":\"/w\"}}\n{{\"type\":\"message\",\"message\":{{\"role\":\"assistant\",\"stopReason\":\"stop\"}}}}")).unwrap();
+    let cmd = format!("pi --session {id}");
+    let mut a = agent(Provider::Pi, "/w", "");
+    pi_session(&mut a, &root, &HashSet::new(), &cmd);
+    assert_eq!((a.session.as_str(), a.exact), (path.to_string_lossy().as_ref(), true));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn pi_session_picks_newest_outside_file() {
     let root = std::env::temp_dir().join(format!("aether-pi-scan-{}", std::process::id()));
     let dir = root.join("--w--");
@@ -197,9 +267,9 @@ fn pi_session_picks_newest_outside_file() {
     let (mine, theirs) = (file("mine.jsonl", 10), file("theirs.jsonl", 20));
     file("before-start.jsonl", 1000);
     let mut a = agent(Provider::Pi, "/w", "");
-    pi_session(&mut a, &root, &HashSet::from([mine.clone()]));
+    pi_session(&mut a, &root, &HashSet::from([mine.clone()]), "pi");
     assert_eq!((a.session.as_str(), a.state.clone()), (theirs.as_str(), Idle));
-    pi_session(&mut a, &root, &HashSet::new());
+    pi_session(&mut a, &root, &HashSet::new(), "pi");
     assert_eq!(a.session, mine);
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -300,6 +370,47 @@ fn pi_transcript_keeps_user_and_assistant_text() {
     ]
     .join("\n");
     assert_eq!(pi_transcript(&t), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+}
+
+#[test]
+fn codex_transcript_keeps_user_and_assistant_text() {
+    let t = [
+        r#"{"type":"session_meta","payload":{"id":"01a10f51-211c-7610-a20f-ac9f43c1c667"}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"system"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/x</cwd>\n</environment_context>"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>agents</user_instructions>"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"hm"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"custom_tool_call","name":"x","input":"{}"}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"again"},{"type":"input_image","image_url":"x"}]}}"#,
+        "not json",
+    ]
+    .join("\n");
+    assert_eq!(
+        codex_transcript(&t),
+        [
+            (Role::User, "hi".into()),
+            (Role::Assistant, "hello".into()),
+            (Role::User, "again".into()),
+        ]
+    );
+}
+
+#[test]
+fn codex_file_finds_rollout_by_thread_id() {
+    let root = std::env::temp_dir().join(format!("aether-codex-lookup-{}", std::process::id()));
+    let dir = root.join("sessions/2026/10/06");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rollout-2026-10-06T09-30-37-01a10f51-211c-7610-a20f-ac9f43c1c667.jsonl");
+    std::fs::write(&path, "{}").unwrap();
+    assert_eq!(
+        codex_file(&root, "01a10f51-211c-7610-a20f-ac9f43c1c667"),
+        Some(path.to_string_lossy().into_owned())
+    );
+    assert_eq!(codex_file(&root, "missing"), None);
+    assert_eq!(codex_file(&root, "../escape"), None);
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]

@@ -215,9 +215,25 @@ impl ChatApp {
         let locked = lock.is_some();
         let banner = lock.map(|a| {
             let origin = if a.origin.is_empty() { "another terminal" } else { a.origin.as_str() };
-            h_flex().px_2().text_xs().text_color(cx.theme().muted_foreground).child(format!(
-                "Running in {origin}. Stop it or wait for it to finish to continue here."
-            ))
+            let outside = a.clone();
+            h_flex()
+                .px_2()
+                .gap_2()
+                .justify_between()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("Running in {origin}. Stop it or wait for it to finish to continue here."))
+                .child(
+                    div().debug_selector(|| "composer-stop-external".into()).child(
+                        aether_ui::button("composer-stop-external")
+                            .outline()
+                            .xsmall()
+                            .label("Stop to continue here")
+                            .on_click(self.session_listener(cx, move |this, _, window, cx| {
+                                this.stop_external(outside.clone(), window, cx)
+                            })),
+                    ),
+                )
         });
         let editing = self.editing.is_some().then(|| {
             h_flex()

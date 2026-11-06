@@ -76,6 +76,9 @@ pub(super) fn start(
     };
     let info = setup().inspect_err(|_| step(tx, NoticeState::Failed, label))?;
     let resumed = info.is_some();
+    if let Some(notice) = lost_resume(resume, resumed) {
+        let _ = tx.unbounded_send(Update::Notice(notice));
+    }
     step(tx, NoticeState::Done, label);
     let _ = tx.unbounded_send(Update::Mode(opts.access));
     let name = served_model(info.as_ref().map(|i| &i["data"]["model"]), &mut state.guard().model);
@@ -109,6 +112,18 @@ pub(super) fn served_model(info: Option<&Value>, seeded: &mut Option<Value>) -> 
     }
     let m = seeded.as_ref()?;
     Some(format!("{}/{}", m["providerID"].as_str()?, m["id"].as_str()?))
+}
+
+pub(super) fn lost_resume(requested: bool, resumed: bool) -> Option<Notice> {
+    if requested && !resumed {
+        Some(Notice::new(
+            "info-resume",
+            NoticeKind::Info,
+            "Couldn't find the earlier OpenCode session, so this is a new one.",
+        ))
+    } else {
+        None
+    }
 }
 
 fn step(tx: &UnboundedSender<Update>, state: NoticeState, text: &str) {
