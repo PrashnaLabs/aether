@@ -1,9 +1,10 @@
 pkgname=aether
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Aether"
+pkgdesc="Coding agents side by side, in one native window"
 arch=('x86_64')
-license=('custom')
+url="https://aether.prashnalabs.com"
+license=('MIT')
 depends=('gtk3' 'webkit2gtk-4.1' 'libxkbcommon-x11' 'fontconfig' 'vulkan-icd-loader' 'libsecret' 'git' 'hicolor-icon-theme')
 optdepends=('vulkan-radeon: AMD GPU' 'vulkan-intel: Intel GPU' 'nvidia-utils: NVIDIA GPU')
 makedepends=('cargo' 'cmake' 'pkgconf' 'clang')
@@ -23,5 +24,6 @@ package() {
   for s in 16 32 48 64 128 256 512 1024; do
     install -Dm644 "$icons/$s.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/$id.png"
   done
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$icons/aether.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$id.svg"
 }

@@ -2,6 +2,10 @@
 name = "aether"
 version.workspace = true
 edition.workspace = true
+description = "Coding agents side by side, in one native window"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
