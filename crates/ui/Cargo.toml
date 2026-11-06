@@ -1,0 +1,17 @@
+[package]
+name = "aether-ui"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core.workspace = true
+gpui-kit.workspace = true
+markdown.workspace = true
+serde_json.workspace = true
+spellbook = "0.4.2"
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
