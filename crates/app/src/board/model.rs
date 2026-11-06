@@ -150,9 +150,27 @@ pub(crate) fn open_lines(cards: &[BoardCard]) -> String {
     if lines.is_empty() { "No open cards.".into() } else { lines.join("\n") }
 }
 
+/// First `max` lines of `body`, with "…" when more follow.
+pub(crate) fn preview(body: &str, max: usize) -> String {
+    let lines: Vec<&str> = body.trim().lines().collect();
+    let mut text = lines.iter().take(max).copied().collect::<Vec<_>>().join("\n");
+    if lines.len() > max {
+        text.push('…');
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_keeps_four_lines_and_marks_the_cut() {
+        assert_eq!(preview("a\nb", 4), "a\nb");
+        assert_eq!(preview("a\nb\nc\nd", 4), "a\nb\nc\nd");
+        assert_eq!(preview("a\nb\nc\nd\ne", 4), "a\nb\nc\nd…");
+        assert_eq!(preview("  a\n\n", 4), "a");
+    }
 
     fn card(col: Col, chat: Option<i64>) -> BoardCard {
         BoardCard {

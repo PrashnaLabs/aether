@@ -9,7 +9,7 @@ use gpui_kit::{
     AnyElement, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*, px,
 };
 
-use super::model::{BoardCard, Col};
+use super::model::{BoardCard, Col, preview};
 use crate::app::{Chat, ChatApp, now_ms};
 use crate::project_page::model::{CardStatus, badge};
 use crate::project_page::view::{pill, status_tint};
@@ -400,8 +400,8 @@ impl ChatApp {
                         .text_size(px(12.5))
                         .line_height(px(17.))
                         .text_color(muted)
-                        .line_clamp(2)
-                        .child(card.body.clone()),
+                        .line_clamp(4)
+                        .child(preview(&card.body, 4)),
                 )
             })
             .children(footer)

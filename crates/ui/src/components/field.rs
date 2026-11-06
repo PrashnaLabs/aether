@@ -92,7 +92,8 @@ impl FieldArea {
 
 impl RenderOnce for FieldArea {
     fn render(self, _: &mut gpui_kit::Window, cx: &mut App) -> impl IntoElement {
-        shell(cx).px(px(12.)).py(px(12.)).child(
+        // Textarea pads itself 10px x / 8px y; outer tops up to 12 like Field.
+        shell(cx).px(px(2.)).py(px(4.)).child(
             Textarea::new(&self.state)
                 .appearance(false)
                 .when_some(self.aria, |input, label| input.aria_label(label)),
