@@ -1,0 +1,12 @@
+[package]
+name = "aether-explorer"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core.workspace = true
+aether-git.workspace = true
+regex.workspace = true
