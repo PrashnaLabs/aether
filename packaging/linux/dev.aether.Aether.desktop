@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Aether
+Comment=Agent workspace with terminals, Git, and a project explorer
+Exec=aether
+Icon=dev.aether.Aether
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=dev.aether.Aether
+StartupNotify=true
