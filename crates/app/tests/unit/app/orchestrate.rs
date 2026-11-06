@@ -271,12 +271,8 @@ fn call_for_non_lead_chat_replies_error(cx: &mut TestAppContext) {
         .update(cx, |app, window, cx| {
             app.chats[1].lead = false;
             let (reply, answer) = std::sync::mpsc::channel();
-            let call = OrchCall {
-                lead: "10".into(),
-                tool: "list_agents".into(),
-                args: json!({}),
-                reply,
-            };
+            let call =
+                OrchCall { lead: "10".into(), tool: "list_agents".into(), args: json!({}), reply };
             app.orchestrate(call, window, cx);
             assert_eq!(answer.try_recv().unwrap(), Err("lead chat not found".into()));
         })
@@ -426,10 +422,14 @@ fn delivery_text_formats_finished_failed_and_stopped() {
     reply.text = "partial".into();
     reply.error = Some("boom".into());
     assert!(
-        delivery_text(&child, &reply, "failed").contains(" failed.\n\nboom\n\npartial\n\nUse the read_agent tool")
+        delivery_text(&child, &reply, "failed")
+            .contains(" failed.\n\nboom\n\npartial\n\nUse the read_agent tool")
     );
     reply.text.clear();
-    assert!(delivery_text(&child, &reply, "failed").contains(" failed.\n\nboom\n\nUse the read_agent tool"));
+    assert!(
+        delivery_text(&child, &reply, "failed")
+            .contains(" failed.\n\nboom\n\nUse the read_agent tool")
+    );
     reply.error = None;
     reply.text = "x".repeat(4001);
     assert!(
@@ -1596,9 +1596,27 @@ fn read_agent_on_running_child_adds_note(cx: &mut TestAppContext) {
 fn stranded_texts_drops_prompts_but_keeps_deliveries() {
     let mut chat = chat_with("kid", &[]);
     chat.queue = vec![
-        Queued { text: "fix it".into(), attachments: vec![], delivering: false, from_children: false, deliveries: vec![] },
-        Queued { text: "result".into(), attachments: vec![], delivering: false, from_children: true, deliveries: vec![Delivery { child: 3, reply_ix: Some(1), text: "result".into() }] },
-        Queued { text: "again".into(), attachments: vec![], delivering: false, from_children: false, deliveries: vec![] },
+        Queued {
+            text: "fix it".into(),
+            attachments: vec![],
+            delivering: false,
+            from_children: false,
+            deliveries: vec![],
+        },
+        Queued {
+            text: "result".into(),
+            attachments: vec![],
+            delivering: false,
+            from_children: true,
+            deliveries: vec![Delivery { child: 3, reply_ix: Some(1), text: "result".into() }],
+        },
+        Queued {
+            text: "again".into(),
+            attachments: vec![],
+            delivering: false,
+            from_children: false,
+            deliveries: vec![],
+        },
     ];
     assert_eq!(stranded_texts(&mut chat), ["fix it", "again"]);
     assert_eq!(chat.queue.len(), 1);
@@ -1612,11 +1630,16 @@ fn delivery_head_carries_child_result_provenance() {
     child.provider = Provider::Codex;
     child.provider_model = "gpt-5".into();
     let text = delivery_text(&child, &child.messages[1], "finished");
-    assert!(text.starts_with("[Aether child result] Agent 7 \"kid\" (codex/gpt-5) finished."), "{text}");
+    assert!(
+        text.starts_with("[Aether child result] Agent 7 \"kid\" (codex/gpt-5) finished."),
+        "{text}"
+    );
 }
 
 #[gpui_kit::test]
 fn spawn_retry_with_same_nonce_returns_existing_child(cx: &mut TestAppContext) {
+    // a successful spawn starts a real CLI run whose worker thread sends updates
+    cx.background_executor.allow_parking();
     let window = lead_app(cx);
     window
         .update(cx, |app, window, cx| {
