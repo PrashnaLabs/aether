@@ -1,0 +1,442 @@
+use crate::settings_view::SettingsTab;
+
+pub(crate) struct SettingItem {
+    pub id: &'static str,
+    pub tab: SettingsTab,
+    pub title: &'static str,
+    pub description: &'static str,
+    pub keywords: &'static [&'static str],
+}
+
+static SETTING_CATALOG: &[SettingItem] = &[
+    SettingItem {
+        id: "notes-enabled",
+        tab: SettingsTab::Tools,
+        title: "Enable notes",
+        description: "Shows Notes in the sidebar and palette, its shortcuts, and Save to note in menus.",
+        keywords: &["notes", "turn off", "hide"],
+    },
+    SettingItem {
+        id: "hackernews-enabled",
+        tab: SettingsTab::Tools,
+        title: "Enable Hacker News",
+        description: "Shows Hacker News in the sidebar and palette, and its shortcuts.",
+        keywords: &["news", "hn", "ycombinator", "stories", "turn off", "hide"],
+    },
+    SettingItem {
+        id: "notes-directory",
+        tab: SettingsTab::Tools,
+        title: "Notes directory",
+        description: "Folder containing your plain-text notes.",
+        keywords: &["folder", "root", "path"],
+    },
+    SettingItem {
+        id: "notes-editor",
+        tab: SettingsTab::Tools,
+        title: "Notes default editor",
+        description: "Open notes in Aether or Neovim/tmux.",
+        keywords: &["native", "nvim"],
+    },
+    SettingItem {
+        id: "notes-scope",
+        tab: SettingsTab::Tools,
+        title: "Notes default scope",
+        description: "Use global notes or the current project by default.",
+        keywords: &["project", "global"],
+    },
+    SettingItem {
+        id: "notes-nvim",
+        tab: SettingsTab::Tools,
+        title: "Notes Neovim executable",
+        description: "Neovim binary override, resolved using PATH.",
+        keywords: &["binary", "nvim", "command"],
+    },
+    SettingItem {
+        id: "notes-tmux",
+        tab: SettingsTab::Tools,
+        title: "Notes tmux executable",
+        description: "tmux binary override, resolved using PATH.",
+        keywords: &["binary", "command", "terminal"],
+    },
+    SettingItem {
+        id: "notes-session",
+        tab: SettingsTab::Tools,
+        title: "Notes tmux session",
+        description: "Dedicated tmux session name for notes.",
+        keywords: &["terminal", "window"],
+    },
+    SettingItem {
+        id: "notes-socket",
+        tab: SettingsTab::Tools,
+        title: "Notes Neovim socket",
+        description: "Empty uses XDG_RUNTIME_DIR/notes-nvim.sock or /tmp/notes-nvim.sock.",
+        keywords: &["nvim", "server", "listen"],
+    },
+    SettingItem {
+        id: "theme",
+        tab: SettingsTab::Appearance,
+        title: "Theme",
+        description: "System, dark, light, or a color scheme.",
+        keywords: &[
+            "color",
+            "scheme",
+            "appearance",
+            "catppuccin",
+            "latte",
+            "frappe",
+            "frappé",
+            "macchiato",
+            "mocha",
+            "rose pine",
+            "rosé pine",
+            "main",
+            "moon",
+            "dawn",
+            "gruvbox",
+            "solarized",
+            "nord",
+            "dracula",
+        ],
+    },
+    SettingItem {
+        id: "icon-pack",
+        tab: SettingsTab::Appearance,
+        title: "Icon pack",
+        description: "Icon style used across the app. Applies on next launch.",
+        keywords: &["lucide", "iconoir", "remix", "solar"],
+    },
+    SettingItem {
+        id: "corners",
+        tab: SettingsTab::Appearance,
+        title: "Corners",
+        description: "Roundness of buttons, cards and panels.",
+        keywords: &["radius", "square", "subtle", "rounded", "round", "shape"],
+    },
+    SettingItem {
+        id: "notifications",
+        tab: SettingsTab::Appearance,
+        title: "Notifications",
+        description: "Notify when a chat finishes, fails or needs you while looking elsewhere.",
+        keywords: &["desktop", "alerts"],
+    },
+    SettingItem {
+        id: "font",
+        tab: SettingsTab::Appearance,
+        title: "Font",
+        description: "Default follows the system.",
+        keywords: &["typeface", "text", "family", "UI"],
+    },
+    SettingItem {
+        id: "font-size",
+        tab: SettingsTab::Appearance,
+        title: "Font size",
+        description: "Scales text across the app.",
+        keywords: &["UI", "small", "default", "large", "extra", "large"],
+    },
+    SettingItem {
+        id: "window-opacity",
+        tab: SettingsTab::Appearance,
+        title: "Opacity",
+        description: "How see-through the window is.",
+        keywords: &["window", "transparent", "translucent", "transparency"],
+    },
+    #[cfg(target_os = "macos")]
+    SettingItem {
+        id: "window-blur",
+        tab: SettingsTab::Appearance,
+        title: "Blur window",
+        description: "Blur what shows through a translucent window.",
+        keywords: &["window", "transparent", "translucent", "frosted", "vibrancy"],
+    },
+    SettingItem {
+        id: "sidebar-style",
+        tab: SettingsTab::Appearance,
+        title: "Sidebar style",
+        description: "Default project folders, Minimal by recency or project, or Focus by what needs you.",
+        keywords: &["sidebar", "layout", "minimal", "focus", "default", "list"],
+    },
+    SettingItem {
+        id: "chat-layout",
+        tab: SettingsTab::Appearance,
+        title: "Chat layout",
+        description: "Tabbed uses tabs for tools. Sidebar keeps chat visible with tools in a right panel.",
+        keywords: &["tabbed", "sidebar", "split", "layout", "panel"],
+    },
+    SettingItem {
+        id: "right-panel-width",
+        tab: SettingsTab::Appearance,
+        title: "Right panel width",
+        description: "Width of the right panel in Sidebar and Split layouts.",
+        keywords: &["panel", "sidebar", "right", "dock", "width"],
+    },
+    SettingItem {
+        id: "tile-layout",
+        tab: SettingsTab::Tiling,
+        title: "Tiling layout",
+        description: "Manual, Stack, Columns, Grid or Monocle for docked session panes.",
+        keywords: &["tiling", "tile", "layout", "panes", "split", "monocle", "tabs"],
+    },
+    SettingItem {
+        id: "tile-ratio",
+        tab: SettingsTab::Tiling,
+        title: "Main pane width",
+        description: "Share of the width the Stack layout's first pane takes.",
+        keywords: &["tiling", "stack", "ratio", "width", "master"],
+    },
+    SettingItem {
+        id: "tile-gap",
+        tab: SettingsTab::Tiling,
+        title: "Tile gap",
+        description: "Space between docked session panes.",
+        keywords: &["tiling", "gap", "spacing", "gutter"],
+    },
+    SettingItem {
+        id: "tile-shortcuts",
+        tab: SettingsTab::Tiling,
+        title: "Tiling shortcuts",
+        description: "Keys to change layout and swap, promote or float panes.",
+        keywords: &["tiling", "keyboard", "keys", "hotkeys"],
+    },
+    SettingItem {
+        id: "show-running-agents",
+        tab: SettingsTab::Appearance,
+        title: "Show running agents",
+        description: "List running chats in the sidebar's Agents section.",
+        keywords: &["sidebar", "agents", "working", "section"],
+    },
+    SettingItem {
+        id: "watch-enabled",
+        tab: SettingsTab::Appearance,
+        title: "Watch list",
+        description: "Shows the corner button, its shortcut, and Watch in session and terminal menus.",
+        keywords: &["watching", "fab", "peek", "menu", "button"],
+    },
+    SettingItem {
+        id: "watch-corner",
+        tab: SettingsTab::Appearance,
+        title: "Watch-list button position",
+        description: "Which window corner holds the watch-list button.",
+        keywords: &["watch", "watching", "list", "fab", "corner", "button", "position"],
+    },
+    SettingItem {
+        id: "chat-detail",
+        tab: SettingsTab::Appearance,
+        title: "Detail level",
+        description: "Compact hides thinking. Verbose opens every step, tool output and thought.",
+        keywords: &["chat", "verbose", "compact", "thinking", "reasoning", "tool", "details"],
+    },
+    SettingItem {
+        id: "show-hooks",
+        tab: SettingsTab::Appearance,
+        title: "Show hooks",
+        description: "List hook runs in a reply's steps. Failed hooks always show.",
+        keywords: &["chat", "timeline", "thinking", "steps", "activity"],
+    },
+    SettingItem {
+        id: "status-bar-time-format",
+        tab: SettingsTab::Appearance,
+        title: "Time format",
+        description: "Choose 12-hour (with AM/PM) or 24-hour clock.",
+        keywords: &["clock", "time", "12", "24", "hour", "military", "am", "pm"],
+    },
+    SettingItem {
+        id: "status-bar-date-format",
+        tab: SettingsTab::Appearance,
+        title: "Date format",
+        description: "Display style for the globally visible date.",
+        keywords: &["date", "calendar", "day", "month", "year", "short", "numeric", "full"],
+    },
+    SettingItem {
+        id: "status-bar-seconds",
+        tab: SettingsTab::Appearance,
+        title: "Display seconds",
+        description: "Include seconds in the status bar clock.",
+        keywords: &["seconds", "clock", "precision", "tick"],
+    },
+    #[cfg(unix)]
+    SettingItem {
+        id: "terminal-theme",
+        tab: SettingsTab::Terminal,
+        title: "Color theme",
+        description: "Terminal palette. Auto pairs Mocha for dark and Latte for light appearance.",
+        keywords: &["catppuccin", "mocha", "macchiato", "frappe", "latte", "aether"],
+    },
+    #[cfg(unix)]
+    SettingItem {
+        id: "terminal-font-size",
+        tab: SettingsTab::Terminal,
+        title: "Font size",
+        description: "Terminal text size, independent of the app UI size.",
+        keywords: &["terminal", "font", "scale"],
+    },
+    #[cfg(unix)]
+    SettingItem {
+        id: "terminal-font-family",
+        tab: SettingsTab::Terminal,
+        title: "Font family",
+        description: "System monospace for the terminal. Use a Nerd Font for prompt icons. Empty uses the theme font; symbol fonts are fallbacks. Restart after installing a font.",
+        keywords: &["terminal", "font", "nerd", "meslo", "jetbrains", "tofu"],
+    },
+    #[cfg(unix)]
+    SettingItem {
+        id: "terminal-cursor",
+        tab: SettingsTab::Terminal,
+        title: "Cursor style",
+        description: "Block, bar or underline. Programs like Neovim can still set their own.",
+        keywords: &["terminal", "caret", "beam", "shape"],
+    },
+    SettingItem {
+        id: "terminal-meta",
+        tab: SettingsTab::Terminal,
+        title: "Use Option as Meta key",
+        description: "Option+key sends Esc+key for word moves and deletes in the shell. Off, Option types its character.",
+        keywords: &["terminal", "alt", "keyboard"],
+    },
+    SettingItem {
+        id: "voice-enabled",
+        tab: SettingsTab::Composer,
+        title: "Dictation",
+        description: "Shows the mic button in the composer and turns on its shortcut.",
+        keywords: &["voice", "mic", "microphone", "speech", "transcribe"],
+    },
+    SettingItem {
+        id: "voice-model",
+        tab: SettingsTab::Composer,
+        title: "Speech model",
+        description: "Download or remove the 141 MB model that runs on this device.",
+        keywords: &["voice", "whisper", "dictation", "disk"],
+    },
+    SettingItem {
+        id: "default-model",
+        tab: SettingsTab::Model,
+        title: "Default model",
+        description: "Used for new OpenRouter chats. Also changeable from the composer.",
+        keywords: &["llm", "selector"],
+    },
+    SettingItem {
+        id: "reasoning",
+        tab: SettingsTab::Model,
+        title: "Reasoning",
+        description: "How hard the model thinks before answering. Higher is slower and costs more. Off stops asking, though some models still reason by default.",
+        keywords: &["effort", "budget", "thinking"],
+    },
+    SettingItem {
+        id: "web-search",
+        tab: SettingsTab::Model,
+        title: "Web search",
+        description: "Let the assistant search DuckDuckGo. Same as the Search chip.",
+        keywords: &["internet", "online"],
+    },
+    SettingItem {
+        id: "instructions",
+        tab: SettingsTab::Model,
+        title: "Instructions",
+        description: "Added to every conversation.",
+        keywords: &["custom", "instructions", "system", "prompt"],
+    },
+    SettingItem {
+        id: "workspace",
+        tab: SettingsTab::Providers,
+        title: "Folder",
+        description: "Coding agents run here. Defaults to your home folder.",
+        keywords: &["workspace", "root", "directory", "path"],
+    },
+    SettingItem {
+        id: "claude",
+        tab: SettingsTab::Providers,
+        title: "Claude Code",
+        description: "Binary path, default model and default access mode for Claude Code.",
+        keywords: &["coding", "agents", "anthropic", "cli", "permissions", "overrides"],
+    },
+    SettingItem {
+        id: "codex",
+        tab: SettingsTab::Providers,
+        title: "Codex",
+        description: "Binary path, default model and default access mode for Codex.",
+        keywords: &["coding", "agents", "openai", "cli", "permissions", "overrides"],
+    },
+    SettingItem {
+        id: "pi",
+        tab: SettingsTab::Providers,
+        title: "Pi",
+        description: "Binary path, default model and default access mode for Pi.",
+        keywords: &["coding", "agents", "cli", "permissions", "overrides"],
+    },
+    SettingItem {
+        id: "opencode",
+        tab: SettingsTab::Providers,
+        title: "OpenCode",
+        description: "Binary path, default model and default access mode for OpenCode.",
+        keywords: &["coding", "agents", "cli", "permissions", "overrides"],
+    },
+    SettingItem {
+        id: "antigravity",
+        tab: SettingsTab::Providers,
+        title: "Antigravity",
+        description: "Binary path, default model and default access mode for Antigravity.",
+        keywords: &["coding", "agents", "cli", "permissions", "overrides"],
+    },
+    SettingItem {
+        id: "worktrees",
+        tab: SettingsTab::Worktrees,
+        title: "Worktrees",
+        description: "Linked worktrees, branches and folders. Open, remove or prune checkouts.",
+        keywords: &["git", "isolated", "checkout", "reveal"],
+    },
+    SettingItem {
+        id: "web_search",
+        tab: SettingsTab::Tools,
+        title: "Web search",
+        description: "Searches DuckDuckGo, so it asks by default.",
+        keywords: &["tool", "approvals", "permissions", "ask", "allow"],
+    },
+    SettingItem {
+        id: "load_skill",
+        tab: SettingsTab::Tools,
+        title: "Load skill",
+        description: "Reads one of your enabled skills.",
+        keywords: &["tool", "approvals", "permissions", "ask", "allow"],
+    },
+    SettingItem {
+        id: "plan-first",
+        tab: SettingsTab::Tools,
+        title: "Plan first",
+        description: "The model proposes a plan and waits for your approval before doing the work. Same as the Plan chip.",
+        keywords: &["planning", "confirm"],
+    },
+    SettingItem {
+        id: "api-key",
+        tab: SettingsTab::Account,
+        title: "API key",
+        description: "Stored in your system keychain, never in the settings file.",
+        keywords: &["openrouter", "credentials", "token", "authentication", "secure"],
+    },
+];
+
+pub(crate) fn all_setting_items() -> &'static [SettingItem] {
+    SETTING_CATALOG
+}
+
+/// Match every query token against the category, title, description or keywords.
+pub(crate) fn search_settings(query: &str) -> Vec<&'static SettingItem> {
+    let query = query.to_lowercase();
+    let tokens: Vec<_> = query.split_whitespace().collect();
+    all_setting_items()
+        .iter()
+        .filter(|item| {
+            let text = format!(
+                "{} {} {} {}",
+                item.tab.label(),
+                item.title,
+                item.description,
+                item.keywords.join(" ")
+            )
+            .to_lowercase();
+            tokens.iter().all(|token| text.contains(token))
+        })
+        .collect()
+}
+
+pub(crate) fn tab_match_count(tab: SettingsTab, matches: &[&SettingItem]) -> usize {
+    matches.iter().filter(|item| item.tab == tab).count()
+}

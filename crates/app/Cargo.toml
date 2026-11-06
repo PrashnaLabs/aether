@@ -1,0 +1,46 @@
+[package]
+name = "aether"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core.workspace = true
+aether-agent.workspace = true
+aether-driver.workspace = true
+aether-explorer.workspace = true
+aether-git.workspace = true
+aether-terminal.workspace = true
+aether-ui.workspace = true
+aether-voice.workspace = true
+chrono.workspace = true
+dotenvy.workspace = true
+futures.workspace = true
+gpui-kit.workspace = true
+image.workspace = true
+keyring.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+# The browser panel embeds a native webview as a child of the window.
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+wry.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSButton", "NSCell", "NSControl", "NSCustomTouchBarItem", "NSDockTile", "NSImage", "NSResponder", "NSTouchBar", "NSTouchBarItem", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSBundle", "NSError", "NSObject", "NSSet", "NSString", "NSURL"] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "block2", "UNNotificationAttachment", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+block2 = "0.6"
+resvg = { version = "0.46", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk.workspace = true
+
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }

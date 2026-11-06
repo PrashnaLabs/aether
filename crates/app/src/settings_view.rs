@@ -1,0 +1,1758 @@
+use crate::settings_search::{SettingItem, search_settings, tab_match_count};
+use aether_core::{
+    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor, Reasoning,
+    Settings, THEME_FAMILIES, TerminalCursor, TerminalTheme, ThemeFamily, TileLayout, TimeFormat,
+    ToolPolicy, WatchCorner, family_index,
+};
+use aether_driver::{DriverStartOptions, ProviderProbe};
+use aether_git::Listed;
+use aether_ui::schemes::{scheme_thumbnail, thumbnail_sides};
+use aether_ui::theme::Corners;
+use aether_ui::{
+    AgentSelector, CAROUSEL_CARD_WIDTH, CardCarousel, CardRow, ChoiceCard, Segmented, SettingsPage,
+    SettingsRow, SettingsSection, field, field_area, field_fill, overlay_strong,
+};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::select::Select;
+use gpui_kit::component::{
+    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt,
+    button::{Button, ButtonCustomVariant, ButtonVariants},
+    h_flex,
+    slider::Slider,
+    switch::Switch,
+    v_flex,
+};
+use gpui_kit::rems;
+use gpui_kit::{
+    Anchor, Context, PathPromptOptions, Role, SharedString, Window, div, prelude::*, px,
+};
+
+use crate::app::{CLIS, ChatApp, display_path};
+use crate::assets::{PREVIEW_ICONS, active_icon_pack, pack_icon_path};
+
+const SETTINGS_DROPDOWN_WIDTH: f32 = 280.;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum SettingsTab {
+    #[default]
+    Appearance,
+    Tiling,
+    Composer,
+    Model,
+    Providers,
+    Worktrees,
+    Tools,
+    Terminal,
+    Account,
+}
+
+impl SettingsTab {
+    pub(crate) const ALL: [Self; 9] = [
+        Self::Appearance,
+        Self::Tiling,
+        Self::Composer,
+        Self::Model,
+        Self::Providers,
+        Self::Worktrees,
+        Self::Tools,
+        Self::Terminal,
+        Self::Account,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Appearance => "Appearance",
+            Self::Tiling => "Tiling",
+            Self::Composer => "Composer",
+            Self::Model => "Model",
+            Self::Providers => "Providers",
+            Self::Worktrees => "Worktrees",
+            Self::Tools => "Tools",
+            Self::Terminal => "Terminal",
+            Self::Account => "Account",
+        }
+    }
+}
+
+fn next_settings_tab(current: SettingsTab, next: bool) -> SettingsTab {
+    let index = SettingsTab::ALL.iter().position(|&tab| tab == current).unwrap_or(0);
+    SettingsTab::ALL
+        [(index + if next { 1 } else { SettingsTab::ALL.len() - 1 }) % SettingsTab::ALL.len()]
+}
+
+impl ChatApp {
+    pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::actions::{SettingsDismiss, SettingsSearch};
+        let query = self.settings_search_input.read(cx).value();
+        let searching = !query.trim().is_empty();
+        let matches = if searching { search_settings(&query) } else { Vec::new() };
+        let mut page =
+            SettingsPage::new(if searching { "Search Results" } else { self.settings_tab.label() })
+                .sidebar(self.render_settings_sidebar(&matches, searching, cx))
+                .subtitle(if searching {
+                    format!("{} matches for \"{}\"", matches.len(), query)
+                } else {
+                    self.settings_tab.description().to_string()
+                });
+        if searching {
+            page = page.action(
+                aether_ui::button("clear-settings-search")
+                    .ghost()
+                    .small()
+                    .label("Clear")
+                    .accessibility_label("Clear settings search")
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.clear_settings_search(window, cx)),
+                    ),
+            );
+            if matches.is_empty() {
+                page = page.child(
+                    v_flex()
+                        .id("settings-empty")
+                        .debug_selector(|| "settings-empty".into())
+                        .items_center()
+                        .gap_3()
+                        .py_8()
+                        .child(div().text_lg().font_medium().child("No settings found"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Try another search or clear the filter."),
+                        )
+                        .child(
+                            aether_ui::button("empty-clear-settings-search")
+                                .debug_selector(|| "settings-empty-clear".into())
+                                .small()
+                                .label("Clear search")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.clear_settings_search(window, cx)
+                                })),
+                        ),
+                );
+            } else {
+                for tab in SettingsTab::ALL {
+                    if tab_match_count(tab, &matches) == 0 {
+                        continue;
+                    }
+                    page = page.child(
+                        v_flex()
+                            .gap_4()
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .child(div().text_lg().font_semibold().child(tab.label()))
+                                    .children(self.settings_category_action(tab, cx)),
+                            )
+                            .child(self.render_settings_category(tab, Some(&matches), cx)),
+                    );
+                }
+            }
+        } else {
+            if let Some(action) = self.settings_category_action(self.settings_tab, cx) {
+                page = page.action(action);
+            }
+            page = page.child(self.render_settings_category(self.settings_tab, None, cx));
+        }
+        div()
+            .id("settings-root")
+            .size_full()
+            .key_context("Settings")
+            .on_action(cx.listener(|this, _: &SettingsDismiss, window, cx| {
+                this.dismiss_settings(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SettingsSearch, window, cx| {
+                this.settings_search_input.update(cx, |input, cx| input.focus(window, cx));
+            }))
+            .child(page)
+    }
+
+    fn settings_category_action(
+        &self,
+        tab: SettingsTab,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        match tab {
+            SettingsTab::Providers => Some(
+                (aether_ui::button("refresh-providers")
+                    .accessibility_label("Refresh provider status")
+                    .ghost()
+                    .small()
+                    .icon(IconName::RefreshCw)
+                    .label("Refresh")
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.probe_providers(&CLIS, window, cx)),
+                    ))
+                .into_any_element(),
+            ),
+            SettingsTab::Worktrees => Some(
+                (aether_ui::button("refresh-worktrees")
+                    .accessibility_label("Refresh worktrees")
+                    .ghost()
+                    .small()
+                    .icon(IconName::RefreshCw)
+                    .label("Refresh")
+                    .loading(self.listing_worktrees)
+                    .on_click(cx.listener(|this, _, _, cx| this.load_worktrees(cx))))
+                .into_any_element(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn render_theme_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active = self.settings.appearance;
+        let selected = family_index(active);
+        let cards = THEME_FAMILIES.iter().enumerate().map(|(ix, family)| {
+            let shown = family.shown(active);
+            let (left, right) = thumbnail_sides(family, shown);
+            ChoiceCard::new(format!("theme-card-{}", shown.slug()), shown.label())
+                .selected(ix == selected)
+                .preview(scheme_thumbnail(left, right))
+                .when(family.variants.len() > 1, |card| {
+                    card.label_element(theme_variant_picker(family, shown, ix == selected, cx))
+                })
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.set_appearance(shown, window, cx)),
+                )
+        });
+        div().id("theme").debug_selector(|| "theme".into()).child(
+            SettingsSection::new("Theme")
+                .icon(Icon::new(gpui_kit::assets::IconName::Palette))
+                .child(
+                    div()
+                        .p_4()
+                        .child(CardCarousel::new("theme-carousel", selected).children(cards)),
+                ),
+        )
+    }
+
+    fn render_icon_pack_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active = self.settings.icon_pack;
+        let pending = active != active_icon_pack();
+        let fg = cx.theme().foreground;
+        let cards = IconPack::ALL.map(|pack| {
+            let preview = h_flex()
+                .h(px(56.))
+                .w_full()
+                .flex_wrap()
+                .gap_1()
+                .items_center()
+                .content_center()
+                .justify_center()
+                .corner(px(11.))
+                .bg(cx.theme().muted)
+                .text_color(fg)
+                .children(
+                    PREVIEW_ICONS
+                        .map(|name| Icon::empty().path(pack_icon_path(pack, name)).size_4()),
+                );
+            ChoiceCard::new(format!("icon-pack-card-{}", pack.slug()), pack.label())
+                .selected(pack == active)
+                .preview(preview)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.update_settings(cx, |s| s.icon_pack = pack);
+                }))
+        });
+        div().id("icon-pack").debug_selector(|| "icon-pack".into()).child(
+            SettingsSection::new("Icon pack")
+                .icon(Icon::new(gpui_kit::assets::IconName::Grid2x2))
+                .child(
+                    v_flex()
+                        .p_4()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div().text_xs().text_color(cx.theme().muted_foreground).child(
+                                        if pending {
+                                            "Restart to apply."
+                                        } else {
+                                            "Applies on next launch."
+                                        },
+                                    ),
+                                )
+                                .when(pending, |row| {
+                                    row.child(
+                                        aether_ui::button("icon-pack-restart")
+                                            .debug_selector(|| "icon-pack-restart".into())
+                                            .small()
+                                            .label("Restart now")
+                                            .on_click(|_, _, cx| cx.restart()),
+                                    )
+                                }),
+                        )
+                        .child(CardRow::new(cards)),
+                ),
+        )
+    }
+
+    fn render_corners_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active = self.settings.corner_style;
+        let line = cx.theme().muted_foreground;
+        let cards = CornerStyle::ALL.map(|style| {
+            let preview =
+                div().h(px(76.)).w_full().relative().corner(px(11.)).bg(cx.theme().muted).child(
+                    div()
+                        .absolute()
+                        .top(px(24.))
+                        .left(px(40.))
+                        .right_0()
+                        .bottom_0()
+                        .border_t_2()
+                        .border_l_2()
+                        .border_color(line)
+                        .rounded_tl(px(16. * style.scale())),
+                );
+            ChoiceCard::new(format!("corners-card-{}", style.label().to_lowercase()), style.label())
+                .selected(style == active)
+                .preview(preview)
+                .on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.set_corner_style(style, window, cx)
+                    }),
+                )
+        });
+        div().id("corners").debug_selector(|| "corners".into()).child(
+            SettingsSection::new("Corners")
+                .icon(Icon::new(gpui_kit::assets::IconName::SquareRoundCorner))
+                .child(div().p_4().child(CardRow::new(cards))),
+        )
+    }
+
+    fn render_settings_category(
+        &self,
+        tab: SettingsTab,
+        matches: Option<&[&SettingItem]>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let settings = &self.settings;
+        let muted = cx.theme().muted_foreground;
+        let reasoning = Reasoning::ALL.iter().position(|r| *r == settings.reasoning).unwrap_or(0);
+        let show = |id: &str| {
+            matches.is_none_or(|items| items.iter().any(|item| item.tab == tab && item.id == id))
+        };
+        let mut page = v_flex().gap_8();
+        match tab {
+            SettingsTab::Appearance => {
+                page = page.when(show("theme"), |page| page.child(self.render_theme_section(cx)));
+                page = page
+                    .when(show("icon-pack"), |page| page.child(self.render_icon_pack_section(cx)));
+                page =
+                    page.when(show("corners"), |page| page.child(self.render_corners_section(cx)));
+                page = page.when(show("font") || show("font-size"), |page| {
+                    page.child(
+                        SettingsSection::new("Text")
+                            .icon(Icon::new(gpui_kit::assets::IconName::ALargeSmall))
+                            .when(show("font"), |section| {
+                                section.child(
+                                    div().id("font").debug_selector(|| "font".into()).child(
+                                        SettingsRow::new("Font")
+                                            .description("Default follows the system.")
+                                            .control(
+                                                Select::new(&self.font_select)
+                                                    .w(px(SETTINGS_DROPDOWN_WIDTH))
+                                                    .h(px(40.))
+                                                    .px(px(12.))
+                                                    .corner(px(10.))
+                                                    .bg(aether_ui::field_fill(cx))
+                                                    .border_color(gpui_kit::transparent_black())
+                                                    .menu_width(px(SETTINGS_DROPDOWN_WIDTH))
+                                                    .search_placeholder("Search a font"),
+                                            ),
+                                    ),
+                                )
+                            })
+                            .when(show("font-size"), |section| {
+                                section.child(
+                                    div()
+                                        .id("font-size")
+                                        .debug_selector(|| "font-size".into())
+                                        .child(
+                                            SettingsRow::new("Font size")
+                                                .description("Scales text across the app.")
+                                                .control(settings_dropdown(
+                                                    "font-size",
+                                                    "App font size",
+                                                    settings.font_size_index(),
+                                                    ["Small", "Default", "Large", "Extra large"],
+                                                    cx.listener(|this, ix: &usize, window, cx| {
+                                                        this.set_font_size(
+                                                            Settings::FONT_SIZES[*ix],
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    }),
+                                                    cx,
+                                                )),
+                                        ),
+                                )
+                            }),
+                    )
+                });
+                page = page.when(show("window-opacity") || show("window-blur"), |page| {
+                    page.child(
+                        SettingsSection::new("Window")
+                            .icon(Icon::new(gpui_kit::assets::IconName::AppWindow))
+                            .when(show("window-opacity"), |section| {
+                                section.child(
+                                    div()
+                                        .id("window-opacity")
+                                        .debug_selector(|| "window-opacity".into())
+                                        .child(
+                                            SettingsRow::new("Opacity")
+                                                .description("How see-through the window is.")
+                                                .control(
+                                                    h_flex()
+                                                        .gap_3()
+                                                        .items_center()
+                                                        .child(div().w(px(160.)).child(
+                                                            Slider::new(&self.opacity_slider),
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .w(px(40.))
+                                                                .text_sm()
+                                                                .text_color(muted)
+                                                                .child(format!(
+                                                                    "{}%",
+                                                                    settings
+                                                                        .clamped_window_opacity()
+                                                                )),
+                                                        ),
+                                                ),
+                                        ),
+                                )
+                            })
+                            .when(cfg!(target_os = "macos") && show("window-blur"), |section| {
+                                section.child(
+                                    div()
+                                        .id("window-blur")
+                                        .debug_selector(|| "window-blur".into())
+                                        .child(
+                                            SettingsRow::new("Blur window")
+                                                .description(
+                                                    "Blur what shows through a translucent window.",
+                                                )
+                                                .control(
+                                                    Switch::new("window-blur-setting")
+                                                        .checked(settings.window_blur)
+                                                        .disabled(
+                                                            settings.clamped_window_opacity()
+                                                                >= 100,
+                                                        )
+                                                        .accessibility_label("Blur window")
+                                                        .on_click(cx.listener(
+                                                            |this, checked: &bool, window, cx| {
+                                                                this.set_window_blur(
+                                                                    *checked, window, cx,
+                                                                );
+                                                            },
+                                                        )),
+                                                ),
+                                        ),
+                                )
+                            }),
+                    )
+                });
+                let watch_corner = show("watch-corner") && settings.watch_enabled;
+                page = page.when(show("notifications") || show("watch-enabled") || watch_corner, |page| { page.child(SettingsSection::new("Appearance").icon(Icon::new(gpui_kit::assets::IconName::Settings))
+                        .when(show("notifications"), |section| { section.child(div().id("notifications").debug_selector(|| "notifications".into()).child(SettingsRow::new("Notifications")
+                                .description(
+                                    "Notify when a chat finishes, fails or needs you while you're looking elsewhere.",
+                                )
+                                .control(
+                                    Switch::new("notifications-setting")
+                                        .checked(settings.notifications)
+                                        .accessibility_label("Desktop notifications")
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            let checked = *checked;
+                                            this.update_settings(cx, |s| s.notifications = checked);
+                                        })),
+                                ))) })
+                        .when(show("watch-enabled"), |section| { section.child(div().id("watch-enabled").debug_selector(|| "watch-enabled".into()).child(SettingsRow::new("Watch list")
+                                .description("Shows the corner button, its shortcut, and Watch in session and terminal menus.")
+                                .control(
+                                    Switch::new("watch-enabled-setting")
+                                        .checked(settings.watch_enabled)
+                                        .accessibility_label("Watch list")
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            this.set_watch_enabled(*checked, cx);
+                                        })),
+                                ))) })
+                        .when(watch_corner, |section| { section.child(div().id("watch-corner").debug_selector(|| "watch-corner".into()).child(SettingsRow::new("Watch-list button")
+                                .description("Which window corner holds the watch-list button.")
+                                .control(
+                                    settings_dropdown(
+                                        "watch-corner", "Watch-list button position",
+                                        WatchCorner::ALL.iter().position(|c| *c == settings.watch_corner).unwrap_or(0),
+                                        WatchCorner::ALL.map(|c| c.label()),
+                                        cx.listener(|this, ix: &usize, _, cx| {
+                                            this.set_watch_corner(WatchCorner::ALL[*ix], cx);
+                                        }),
+                                        cx,
+                                    ),
+                                ))) })) });
+                let chat_detail = aether_core::ChatDetail::ALL
+                    .iter()
+                    .position(|d| *d == settings.chat_detail)
+                    .unwrap_or(1);
+                page = page.when(show("show-hooks") || show("show-running-agents") || show("chat-detail"), |page| { page.child(SettingsSection::new("Chat").icon(Icon::new(gpui_kit::assets::IconName::MessageSquare))
+                        .when(show("chat-detail"), |section| section.child(div().id("chat-detail").debug_selector(|| "chat-detail".into()).child(SettingsRow::new("Detail level")
+                                .description("Compact hides thinking. Verbose opens every step, tool output and thought, and keeps finished replies unfolded.")
+                                .control(settings_dropdown(
+                                    "chat-detail",
+                                    "Detail level",
+                                    chat_detail,
+                                    aether_core::ChatDetail::ALL.map(|d| d.label()),
+                                    cx.listener(|this, ix: &usize, _, cx| {
+                                        this.update_settings(cx, |s| {
+                                            s.chat_detail = aether_core::ChatDetail::ALL[*ix]
+                                        });
+                                    }),
+                                    cx,
+                                )),
+                        )))
+                        .when(show("show-running-agents"), |section| { section.child(div().id("show-running-agents").debug_selector(|| "show-running-agents".into()).child(SettingsRow::new("Show running agents")
+                                .description("List running chats in the sidebar's Agents section.")
+                                .control(
+                                    Switch::new("show-running-agents-setting")
+                                        .checked(settings.show_running_agents)
+                                        .accessibility_label("Show running agents")
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            let checked = *checked;
+                                            this.update_settings(cx, |s| s.show_running_agents = checked);
+                                        })),
+                                ))) })
+                        .when(show("show-hooks"), |section| section.child(div().id("show-hooks").debug_selector(|| "show-hooks".into()).child(SettingsRow::new("Show hooks")
+                                .description("List hook runs in a reply's steps. Failed hooks always show.")
+                                .control(
+                                    Switch::new("show-hooks-setting")
+                                        .checked(settings.show_hooks)
+                                        .accessibility_label("Show hooks")
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            let checked = *checked;
+                                            this.update_settings(cx, |s| s.show_hooks = checked);
+                                        })),
+                                ))))) });
+                let sidebar_style = aether_core::SidebarStyle::ALL
+                    .iter()
+                    .position(|s| *s == settings.sidebar_style)
+                    .unwrap_or(0);
+                page = page.when(show("sidebar-style"), |page| {
+                    page.child(SettingsSection::new("Sidebar").icon(Icon::new(gpui_kit::assets::IconName::PanelLeft)).child(
+                        div().id("sidebar-style").debug_selector(|| "sidebar-style".into()).child(
+                            SettingsRow::new("Style")
+                                .description(
+                                    "Default shows project folders. Minimal lists chats by recency or project. Focus groups them by what they need from you.",
+                                )
+                                .control(settings_dropdown(
+                                    "sidebar-style",
+                                    "Sidebar style",
+                                    sidebar_style,
+                                    aether_core::SidebarStyle::ALL.map(|s| s.label()),
+                                    cx.listener(|this, ix: &usize, _, cx| {
+                                        this.update_settings(cx, |s| {
+                                            s.sidebar_style = aether_core::SidebarStyle::ALL[*ix]
+                                        });
+                                    }),
+                                    cx,
+                                )),
+                        ),
+                    ))
+                });
+                let chat_layout =
+                    ChatLayout::ALL.iter().position(|l| *l == settings.chat_layout).unwrap_or(0);
+                let right_panel_share = [0.3_f32, 0.4, 0.5, 0.6, 0.7]
+                    .iter()
+                    .position(|w| *w == settings.right_panel_share)
+                    .unwrap_or(3);
+                page = page.when(show("chat-layout") || show("right-panel-width"), |page| {
+                    page.child(
+                        SettingsSection::new("Chat layout")
+                            .icon(Icon::new(gpui_kit::assets::IconName::PanelLeft))
+                            .when(show("chat-layout"), |section| {
+                                section.child(
+                                    div()
+                                        .id("chat-layout")
+                                        .debug_selector(|| "chat-layout".into())
+                                        .child(
+                                            SettingsRow::new("Chat layout")
+                                                .description("Tabbed uses tabs for tools. Sidebar keeps chat visible with tools in a right panel.")
+                                                .control(settings_dropdown(
+                                                    "chat-layout",
+                                                    "Chat layout",
+                                                    chat_layout,
+                                                    ChatLayout::ALL.map(|l| l.label()),
+                                                    cx.listener(|this, ix: &usize, _, cx| {
+                                                        this.update_settings(cx, |s| s.chat_layout = ChatLayout::ALL[*ix]);
+                                                    }),
+                                                    cx,
+                                                )),
+                                        ),
+                                )
+                            })
+                            .when(show("right-panel-width") && settings.chat_layout != ChatLayout::Tabbed, |section| {
+                                section.child(
+                                    div()
+                                        .id("right-panel-width")
+                                        .debug_selector(|| "right-panel-width".into())
+                                        .child(
+                                            SettingsRow::new("Right panel share")
+                                                .description("Right panel's share of the width in Sidebar and Split layouts. Chat takes the rest. Drag the divider to resize too.")
+                                                .control(settings_dropdown(
+                                                    "right-panel-width",
+                                                    "Right panel share",
+                                                    right_panel_share,
+                                                    ["30%", "40%", "50%", "60%", "70%"],
+                                                    cx.listener(|this, ix: &usize, _, cx| {
+                                                        this.update_settings(cx, |s| s.right_panel_share = [0.3, 0.4, 0.5, 0.6, 0.7][*ix]);
+                                                    }),
+                                                    cx,
+                                                )),
+                                        ),
+                                )
+                            }),
+                    )
+                });
+                let current_time_format_ix = match settings.status_bar_time_format {
+                    TimeFormat::Hour12 => 0,
+                    TimeFormat::Hour24 => 1,
+                };
+                let current_date_format_ix = match settings.status_bar_date_format {
+                    DateFormat::Short => 0,
+                    DateFormat::Numeric => 1,
+                    DateFormat::Full => 2,
+                    DateFormat::Hidden => 3,
+                };
+                page = page.when(
+                    show("status-bar-time-format")
+                        || show("status-bar-date-format")
+                        || show("status-bar-seconds")
+                        || show("status-bar-hn"),
+                    |page| {
+                        page.child(
+                            SettingsSection::new("Status Bar")
+                                .icon(Icon::new(gpui_kit::assets::IconName::PanelBottom))
+                                .when(show("status-bar-time-format"), |section| {
+                                    section.child(
+                                        div()
+                                            .id("status-bar-time-format")
+                                            .debug_selector(|| "status-bar-time-format".into())
+                                            .child(
+                                                SettingsRow::new("Time format")
+                                                    .description("Choose 12-hour (with AM/PM) or 24-hour clock.")
+                                                    .control(
+                                                        settings_dropdown(
+                                                            "status-bar-time-format",
+                                                            "Time format",
+                                                            current_time_format_ix,
+                                                            TimeFormat::ALL.map(|fmt| fmt.label()),
+                                                            cx.listener(|this, ix: &usize, _, cx| {
+                                                                let fmt = TimeFormat::ALL[*ix];
+                                                                this.update_settings(cx, |s| s.status_bar_time_format = fmt);
+                                                            }),
+                                                            cx,
+                                                        ),
+                                                    ),
+                                            ),
+                                    )
+                                })
+                                .when(show("status-bar-date-format"), |section| {
+                                    section.child(
+                                        div()
+                                            .id("status-bar-date-format")
+                                            .debug_selector(|| "status-bar-date-format".into())
+                                            .child(
+                                                SettingsRow::new("Date format")
+                                                    .description("Display style for the globally visible date.")
+                                                    .control(
+                                                        settings_dropdown(
+                                                            "status-bar-date-format",
+                                                            "Date format",
+                                                            current_date_format_ix,
+                                                            DateFormat::ALL.map(|fmt| fmt.label()),
+                                                            cx.listener(|this, ix: &usize, _, cx| {
+                                                                let fmt = DateFormat::ALL[*ix];
+                                                                this.update_settings(cx, |s| s.status_bar_date_format = fmt);
+                                                            }),
+                                                            cx,
+                                                        ),
+                                                    ),
+                                            ),
+                                    )
+                                })
+                                .when(show("status-bar-seconds"), |section| {
+                                    section.child(
+                                        div()
+                                            .id("status-bar-seconds")
+                                            .debug_selector(|| "status-bar-seconds".into())
+                                            .child(
+                                                SettingsRow::new("Display seconds")
+                                                    .description("Include seconds in the status bar clock.")
+                                                    .control(
+                                                        Switch::new("status-bar-seconds-setting")
+                                                            .checked(settings.status_bar_show_seconds)
+                                                            .accessibility_label("Display seconds in status bar")
+                                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                                                let checked = *checked;
+                                                                this.update_settings(cx, |s| s.status_bar_show_seconds = checked);
+                                                            })),
+                                                    ),
+                                            ),
+                                    )
+                                }),
+                        )
+                    },
+                );
+            }
+            SettingsTab::Tiling => {
+                let stack = settings.tile_layout == TileLayout::Stack;
+                let (fg, border) = (cx.theme().foreground, cx.theme().border);
+                let shortcuts: Vec<_> = [
+                    (&crate::actions::CycleTileLayout as &dyn gpui_kit::Action, "Next layout"),
+                    (&crate::actions::FocusSessionLeft, "Focus the pane that way (any arrow)"),
+                    (&crate::actions::SwapSessionLeft, "Swap with the pane that way (any arrow)"),
+                    (&crate::actions::PromoteSession, "Make the focused pane the main pane"),
+                    (&crate::actions::ToggleSessionFloat, "Float or dock the focused pane"),
+                    (&crate::actions::NarrowMainPane, "Narrow the main pane"),
+                    (&crate::actions::WidenMainPane, "Widen the main pane"),
+                ]
+                .into_iter()
+                .filter_map(|(action, what)| Some((crate::actions::key_hint(action, cx)?, what)))
+                .collect();
+                page = page.when(
+                    show("tile-layout") || show("tile-ratio") || show("tile-gap") || show("tile-shortcuts"),
+                    |page| {
+                        page.child(
+                            SettingsSection::new("Tiling")
+                                .when(show("tile-layout"), |section| {
+                                    section.child(div().id("tile-layout").debug_selector(|| "tile-layout".into()).child(
+                                        SettingsRow::new("Layout")
+                                            .description("How docked session panes share the window.")
+                                            .stacked()
+                                            .control(
+                                                v_flex()
+                                                    .gap_2()
+                                                    .child(h_flex().gap_2().children(TileLayout::ALL.into_iter().enumerate().map(|(ix, layout)| {
+                                                        let on = settings.tile_layout == layout;
+                                                        let color = if on { fg } else { muted };
+                                                        aether_ui::button(("tile-layout", ix))
+                                                            .ghost()
+                                                            .selected(on)
+                                                            .flex_1()
+                                                            .h(px(72.))
+                                                            .corner(px(10.))
+                                                            .border_1()
+                                                            .border_color(if on { fg.opacity(0.3) } else { border })
+                                                            .tooltip(layout.hint())
+                                                            .child(
+                                                                v_flex()
+                                                                    .items_center()
+                                                                    .gap_2()
+                                                                    .text_xs()
+                                                                    .text_color(color)
+                                                                    .child(tile_glyph(layout, color))
+                                                                    .child(layout.label()),
+                                                            )
+                                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                                this.update_settings(cx, |s| s.tile_layout = layout);
+                                                            }))
+                                                    })))
+                                                    .child(div().text_xs().text_color(muted).child(settings.tile_layout.hint())),
+                                            ),
+                                    ))
+                                })
+                                .when(show("tile-ratio"), |section| {
+                                    section.child(div().id("tile-ratio").debug_selector(|| "tile-ratio".into()).when(!stack, |d| d.opacity(0.6)).child(
+                                        SettingsRow::new("Main pane width")
+                                            .description(if stack { "Share of the width the first pane takes." } else { "Stack layout only." })
+                                            .control(settings_dropdown(
+                                                "tile-ratio",
+                                                "Main pane width",
+                                                ((settings.tile_ratio.clamp(0.3, 0.8) * 100. - 30.) / 5.).round() as usize,
+                                                (30..=80).step_by(5).map(|p| format!("{p}%")),
+                                                cx.listener(|this, ix: &usize, _, cx| {
+                                                    this.update_settings(cx, |s| s.tile_ratio = (30 + ix * 5) as f32 / 100.);
+                                                }),
+                                                cx,
+                                            )),
+                                    ))
+                                })
+                                .when(show("tile-gap"), |section| {
+                                    section.child(div().id("tile-gap").debug_selector(|| "tile-gap".into()).child(
+                                        SettingsRow::new("Gap")
+                                            .description("Space between docked panes.")
+                                            .control(settings_dropdown(
+                                                "tile-gap",
+                                                "Gap",
+                                                (settings.tile_gap.clamp(0., 24.) / 4.).round() as usize,
+                                                (0..=24).step_by(4).map(|p| format!("{p} px")),
+                                                cx.listener(|this, ix: &usize, _, cx| {
+                                                    this.update_settings(cx, |s| s.tile_gap = (ix * 4) as f32);
+                                                }),
+                                                cx,
+                                            )),
+                                    ))
+                                })
+                                .when(show("tile-shortcuts") && !shortcuts.is_empty(), |section| {
+                                    section.child(div().id("tile-shortcuts").debug_selector(|| "tile-shortcuts".into()).child(
+                                        SettingsRow::new("Shortcuts")
+                                            .description("While a session pane has focus.")
+                                            .stacked()
+                                            .control(v_flex().gap_1p5().children(shortcuts.into_iter().map(|(keys, what)| {
+                                                h_flex()
+                                                    .justify_between()
+                                                    .text_sm()
+                                                    .child(what)
+                                                    .child(
+                                                        div()
+                                                            .px_1p5()
+                                                            .corner(px(4.))
+                                                            .border_1()
+                                                            .border_color(border)
+                                                            .text_xs()
+                                                            .text_color(muted)
+                                                            .child(keys),
+                                                    )
+                                            }))),
+                                    ))
+                                }),
+                        )
+                    },
+                );
+            }
+            SettingsTab::Composer => {
+                page = page.when(show("voice-enabled") || show("voice-model"), |page| {
+                    page.child(
+                        SettingsSection::new("Voice")
+                            .icon(Icon::new(gpui_kit::assets::IconName::Mic))
+                            .when(show("voice-enabled"), |section| {
+                                section.child(
+                                    div()
+                                        .id("voice-enabled")
+                                        .debug_selector(|| "voice-enabled".into())
+                                        .child(
+                                            SettingsRow::new("Dictation")
+                                                .description(
+                                                    "Shows the mic button in the composer and turns on its shortcut.",
+                                                )
+                                                .control(
+                                                    Switch::new("voice-enabled-setting")
+                                                        .checked(settings.voice_enabled)
+                                                        .accessibility_label("Dictation")
+                                                        .on_click(cx.listener(
+                                                            |this, checked: &bool, _, cx| {
+                                                                this.set_voice_enabled(*checked, cx)
+                                                            },
+                                                        )),
+                                                ),
+                                        ),
+                                )
+                            })
+                            .when(show("voice-model"), |section| {
+                                section.child(
+                                    div()
+                                        .id("voice-model")
+                                        .debug_selector(|| "voice-model".into())
+                                        .child(
+                                            SettingsRow::new("Speech model")
+                                                .description(self.voice_model_status())
+                                                .control(self.voice_model_control(cx)),
+                                        ),
+                                )
+                            }),
+                    )
+                });
+            }
+            SettingsTab::Model => {
+                page = page
+                    .when(show("default-model") || show("reasoning") || show("web-search"), |page| { page.child(SettingsSection::new("Model")
+                            .when(show("default-model"), |section| { section.child(div().id("default-model").debug_selector(|| "default-model".into()).child(SettingsRow::new("Default model")
+                                    .description(
+                                        "Used for new OpenRouter chats. Also changeable from the composer.",
+                                    )
+                                    .control(AgentSelector::new(&self.default_model)))) })
+                            .when(show("reasoning"), |section| { section.child(div().id("reasoning").debug_selector(|| "reasoning".into()).child(SettingsRow::new("Reasoning")
+                                    .description(
+                                        "How hard the model thinks before answering. Higher is slower and costs more. \
+                                         Off stops asking, though some models still reason by default.",
+                                    )
+                                    .control(
+                                        Segmented::new("reasoning")
+                                            .option("Off")
+                                            .option("Low")
+                                            .option("Medium")
+                                            .option("High")
+                                            .selected(reasoning)
+                                            .on_change(cx.listener(|this, ix: &usize, _, cx| {
+                                                this.update_settings(cx, |s| {
+                                                    s.reasoning = Reasoning::ALL[*ix]
+                                                });
+                                            })),
+                                    ))) })
+                            .when(show("web-search"), |section| { section.child(div().id("web-search").debug_selector(|| "web-search".into()).child(SettingsRow::new("Web search")
+                                    .description(
+                                        "Let the assistant search DuckDuckGo. Same as the Search chip.",
+                                    )
+                                    .control(
+                                        Switch::new("web-search-setting")
+                                            .checked(settings.web_search)
+                                            .accessibility_label("Web search")
+                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                                let checked = *checked;
+                                                this.update_settings(cx, |s| {
+                                                    s.web_search = checked
+                                                });
+                                            })),
+                                    ))) })) })
+                    .when(show("instructions"), |page| { page.child(SettingsSection::new("Custom instructions").when(show("instructions"), |section| { section.child(div().id("instructions").debug_selector(|| "instructions".into()).child(SettingsRow::new("Instructions")
+                                .description("Added to every conversation.")
+                                .stacked()
+                                .control(field_area(&self.instructions).aria_label("Custom instructions")))) })) });
+            }
+            SettingsTab::Providers => {
+                let root = settings.workspace_root.clone();
+                page = page
+
+                    .when(show("workspace"), |page| { page.child(SettingsSection::new("Workspace").when(show("workspace"), |section| { section.child(div().id("workspace").debug_selector(|| "workspace".into()).child(SettingsRow::new("Folder")
+                                .description(
+                                    "Coding agents run here. Defaults to your home folder.",
+                                )
+                                .control(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .max_w(px(280.))
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .text_ellipsis_start()
+                                                .text_sm()
+                                                .text_color(muted)
+                                                .child(if root.is_empty() {
+                                                    "Home folder".to_string()
+                                                } else {
+                                                    root.clone()
+                                                }),
+                                        )
+                                        .when(!root.is_empty(), |row| {
+                                            row.child(
+                                                aether_ui::button("reset-workspace")
+                                                    .ghost()
+                                                    .small()
+                                                    .label("Reset")
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.update_settings(cx, |s| {
+                                                            s.workspace_root.clear()
+                                                        })
+                                                    })),
+                                            )
+                                        })
+                                        .child(
+                                            aether_ui::button("choose-workspace")
+                                                .small()
+                                                .label("Choose…")
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.choose_workspace(window, cx)
+                                                })),
+                                        ),
+                                ))) })) })
+                    .when(show("claude") || show("codex") || show("pi") || show("opencode") || show("antigravity"), |page| { page.child(CLIS.into_iter().filter(|p| show(p.key())).fold(
+                        SettingsSection::new("Coding agents"),
+                        |section, p| {
+                            let binary = DriverStartOptions::for_provider(settings, p, "").binary;
+                            let access = settings.default_access(p);
+                            let entity = cx.entity();
+                            let access_picker = settings_dropdown_trigger(
+                                SharedString::from(format!("default-access-{}", p.key())),
+                                access.label(), cx,
+                            )
+                            .accessibility_label(format!("{} default access mode", p.label()))
+                            .dropdown_menu_with_anchor(
+                                Anchor::TopRight,
+                                move |mut menu: PopupMenu, _, _| {
+                                    menu = settings_dropdown_menu(menu);
+                                    for &mode in AccessMode::for_provider(p) {
+                                        let entity = entity.clone();
+                                        menu = menu.item(
+                                            PopupMenuItem::new(mode.label())
+                                                .checked(mode == access)
+                                                .on_click(move |_, _, cx| {
+                                                    entity.update(cx, |this, cx| {
+                                                        this.update_settings(cx, |s| {
+                                                            s.provider_access
+                                                                .insert(p.key().into(), mode);
+                                                        });
+                                                    });
+                                                }),
+                                        );
+                                    }
+                                    menu
+                                },
+                            );
+                            section.child(
+                                SettingsRow::new(p.label())
+                                    .icon(aether_ui::provider_icon(p))
+                                    .description(provider_status(self.probes.get(&p), &binary))
+                                    .stacked()
+                                    .control(
+                                        h_flex()
+                                            .gap_3()
+                                            .child(labeled_input(
+                                                "Binary path",
+                                                &self.binary_inputs[&p],
+                                                muted,
+                                            ))
+                                            .child(labeled_input(
+                                                "Default model",
+                                                &self.model_inputs[&p],
+                                                muted,
+                                            ))
+                                            .child(
+                                                v_flex()
+                                                    .gap_1()
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(muted)
+                                                            .child("Default access mode"),
+                                                    )
+                                                    .child(access_picker),
+                                            ),
+                                    ),
+                            )
+                        },
+                    )) });
+            }
+            SettingsTab::Worktrees => {
+                page = page.child(self.worktrees_section(cx));
+            }
+            SettingsTab::Tools => {
+                let notes_ids = [
+                    "notes-directory",
+                    "notes-editor",
+                    "notes-scope",
+                    "notes-nvim",
+                    "notes-tmux",
+                    "notes-session",
+                    "notes-socket",
+                ];
+                let show_note = |id: &str| settings.notes_enabled && show(id);
+                page = page.when(show("notes-enabled") || notes_ids.into_iter().any(show_note), |page| {
+                    let mut section = SettingsSection::new("Notes").when(show("notes-enabled"), |section| section.child(
+                        div().id("notes-enabled").debug_selector(|| "notes-enabled".into()).child(
+                            SettingsRow::new("Enable notes")
+                                .description("Shows Notes in the sidebar and palette, its shortcuts, and Save to note in menus.")
+                                .control(
+                                    Switch::new("notes-enabled-setting")
+                                        .checked(settings.notes_enabled)
+                                        .accessibility_label("Enable notes")
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            let checked = *checked;
+                                            this.update_settings(cx, |s| s.notes_enabled = checked);
+                                        })),
+                                ),
+                        ),
+                    ));
+                    for (id, key, title, description) in [
+                        ("notes-directory", "directory", "Notes directory", "Changing this folder leaves existing files in place. Save or close modified notes first."),
+                        ("notes-nvim", "nvim", "Neovim executable", "Binary path or command resolved using PATH."),
+                        ("notes-tmux", "tmux", "tmux executable", "Binary path or command resolved using PATH."),
+                        ("notes-session", "session", "tmux session", "Dedicated session for the notes terminal."),
+                        ("notes-socket", "socket", "Neovim socket", "Empty uses $XDG_RUNTIME_DIR/notes-nvim.sock, or /tmp/notes-nvim.sock."),
+                    ] {
+                        if show_note(id) {
+                            section = section.child(div().id(id).debug_selector(move || id.into()).child(
+                                SettingsRow::new(title).description(description).stacked()
+                                    .control(field(&self.notes_setting_inputs[key]).aria_label(title)),
+                            ));
+                        }
+                    }
+                    section = section.when(show_note("notes-editor"), |section| section.child(
+                        div().id("notes-editor").debug_selector(|| "notes-editor".into()).child(
+                            SettingsRow::new("Default editor")
+                                .description("Context menus can always open a note using either editor.")
+                                .control(Segmented::new("notes-editor-picker")
+                                    .option("Aether").option("Neovim/tmux")
+                                    .selected(usize::from(settings.notes.editor == NotesEditor::Neovim))
+                                    .on_change(cx.listener(|this, ix: &usize, _, cx| {
+                                        let mut notes = this.settings.notes.clone();
+                                        notes.editor = if *ix == 0 { NotesEditor::Aether } else { NotesEditor::Neovim };
+                                        this.update_notes_settings(notes, cx);
+                                    }))),
+                        ),
+                    ));
+                    section = section.when(show_note("notes-scope"), |section| section.child(
+                        div().id("notes-scope").debug_selector(|| "notes-scope".into()).child(
+                            SettingsRow::new("Default scope")
+                                .description("Choose global notes or notes for the current project.")
+                                .control(Segmented::new("notes-scope-picker")
+                                    .option("Global").option("Current project")
+                                    .selected(usize::from(settings.notes.project_scope))
+                                    .on_change(cx.listener(|this, ix: &usize, _, cx| {
+                                        let mut notes = this.settings.notes.clone();
+                                        notes.project_scope = *ix == 1;
+                                        this.update_notes_settings(notes, cx);
+                                    }))),
+                        ),
+                    ));
+                    page.child(section.when_some(self.notes.error.clone(), |section, error| {
+                        section.child(div().text_sm().text_color(aether_ui::theme::danger_text(cx)).child(error))
+                    }))
+                });
+                page = page.when(show("hackernews-enabled"), |page| page.child(SettingsSection::new("Hacker News").child(
+                    div().id("hackernews-enabled").debug_selector(|| "hackernews-enabled".into()).child(
+                        SettingsRow::new("Enable Hacker News")
+                            .description("Shows Hacker News in the sidebar and palette, and its shortcuts.")
+                            .control(
+                                Switch::new("hackernews-enabled-setting")
+                                    .checked(settings.hackernews_enabled)
+                                    .accessibility_label("Enable Hacker News")
+                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                        let checked = *checked;
+                                        this.update_settings(cx, |s| s.hackernews_enabled = checked);
+                                    })),
+                            ),
+                    ),
+                )));
+                page = page.when(show("web_search") || show("load_skill") || show("plan-first"), |page| { page.child([
+                        ("web_search", "Web search", "Searches DuckDuckGo, so it asks by default."),
+                        ("load_skill", "Load skill", "Reads one of your enabled skills."),
+                    ]
+                    .into_iter()
+                    .filter(|(tool, _, _)| show(tool))
+                    .fold(SettingsSection::new("Tool approvals"), |section, (tool, title, description)| {
+                        let policy = settings.tool_policy(tool);
+                        section.child(
+                            SettingsRow::new(title)
+                                .description(description)
+                                .control(
+                                    Segmented::new(SharedString::from(format!("policy-{tool}")))
+                                        .option("Ask")
+                                        .option("Allow")
+                                        .selected(usize::from(policy == ToolPolicy::Allow))
+                                        .on_change(cx.listener(move |this, ix: &usize, _, cx| {
+                                            let policy =
+                                                if *ix == 0 { ToolPolicy::Ask } else { ToolPolicy::Allow };
+                                            this.update_settings(cx, |s| {
+                                                s.tool_approvals.insert(tool.into(), policy);
+                                            });
+                                        })),
+                                ),
+                        )
+                    })
+                    .when(show("plan-first"), |section| { section.child(div().id("plan-first").debug_selector(|| "plan-first".into()).child(SettingsRow::new("Plan first")
+                            .description(
+                                "The model proposes a plan and waits for your approval before doing the \
+                                 work. Same as the Plan chip.",
+                            )
+                            .control(
+                                Switch::new("plan-mode-setting")
+                                    .checked(settings.plan_mode)
+                                    .accessibility_label("Plan first")
+                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                        let checked = *checked;
+                                        this.update_settings(cx, |s| s.plan_mode = checked);
+                                    })),
+                            ))) })) });
+            }
+            SettingsTab::Terminal => {
+                if cfg!(unix) {
+                    let raw_font = settings.terminal_font_family.trim().to_string();
+                    let font_warning = if raw_font.is_empty() {
+                        None
+                    } else {
+                        let installed = aether_terminal::view::installed_font_names_cached(cx);
+                        let effective = aether_terminal::view::resolve_terminal_family(
+                            &raw_font,
+                            installed,
+                            cx.theme().mono_font_family.as_ref(),
+                        );
+                        (effective.as_ref() != raw_font).then(|| {
+                            let nerds = aether_terminal::view::installed_nerd_fonts(installed);
+                            if nerds.is_empty() {
+                                format!(
+                                    "Font {raw_font:?} isn't installed, so the theme font is used and icons stay tofu. Install one: brew install --cask font-jetbrains-mono-nerd-font, then use JetBrainsMono Nerd Font."
+                                )
+                            } else {
+                                format!(
+                                    "Font {raw_font:?} isn't installed, using {} instead. Installed Nerd fonts: {}.",
+                                    effective,
+                                    nerds.join(", ")
+                                )
+                            }
+                        })
+                    };
+                    let current_theme = settings.terminal_theme;
+                    let entity = cx.entity().clone();
+                    let theme_picker = settings_dropdown_trigger(
+                        "terminal-theme-dropdown",
+                        current_theme.label(),
+                        cx,
+                    )
+                    .accessibility_label("Terminal color theme")
+                    .dropdown_menu_with_anchor(
+                        Anchor::TopRight,
+                        move |mut menu: PopupMenu, _, _| {
+                            menu = settings_dropdown_menu(menu);
+                            for theme in TerminalTheme::ALL {
+                                let entity = entity.clone();
+                                menu = menu.item(
+                                    PopupMenuItem::new(theme.label())
+                                        .checked(theme == current_theme)
+                                        .on_click(move |_, _, cx| {
+                                            entity.update(cx, |this, cx| {
+                                                this.update_settings(cx, |s| {
+                                                    s.terminal_theme = theme
+                                                });
+                                            });
+                                        }),
+                                );
+                            }
+                            menu
+                        },
+                    );
+                    page = page.when(show("terminal-theme") || show("terminal-font-size") || show("terminal-font-family") || show("terminal-cursor") || show("terminal-meta"), |page| { page.child(SettingsSection::new("Terminal").icon(Icon::new(gpui_kit::assets::IconName::Terminal))
+                            .when(show("terminal-theme"), |section| { section.child(div().id("terminal-theme").debug_selector(|| "terminal-theme".into()).child(SettingsRow::new("Color theme")
+                                    .description(
+                                        "Terminal palette. Auto pairs Mocha for dark and Latte for light appearance.",
+                                    )
+                                    .control(theme_picker))) })
+                            .when(show("terminal-font-size"), |section| { section.child(div().id("terminal-font-size").debug_selector(|| "terminal-font-size".into()).child(SettingsRow::new("Font size")
+                                    .description("Terminal text size, independent of the app UI font size.")
+                                    .control(
+                                        settings_dropdown(
+                                            "terminal-font-size", "Terminal font size", settings.terminal_font_size_index(),
+                                            Settings::TERMINAL_FONT_SIZES.map(|size| format!("{size}px")),
+                                            cx.listener(|this, ix: &usize, _, cx| {
+                                                let size = Settings::TERMINAL_FONT_SIZES[*ix];
+                                                this.update_settings(cx, |s| s.terminal_font_size = size);
+                                            }),
+                                            cx,
+                                        ),
+                                    ))) })
+                            .when(show("terminal-font-family"), |section| { section.child(div().id("terminal-font-family").debug_selector(|| "terminal-font-family".into()).child(SettingsRow::new("Font family")
+                                    .description(
+                                        "System monospace for the terminal. Use a Nerd Font (e.g. MesloLGS NF, \
+                                         JetBrainsMono Nerd Font — no space in JetBrainsMono) for prompt icons. \
+                                         Empty uses the theme font; symbol fonts are always tried as fallbacks. \
+                                         Restart the app after installing a font.",
+                                    )
+                                    .control(
+                                        div()
+                                            .w(px(280.))
+                                            .child(aether_ui::field(&self.terminal_font_input).aria_label("Terminal font family")),
+                                    ))) })
+                            .children(font_warning.filter(|_| show("terminal-font-family")).map(|w| {
+                                SettingsRow::new("Font not found").description(w)
+                            }))
+                            .when(show("terminal-cursor"), |section| { section.child(div().id("terminal-cursor").debug_selector(|| "terminal-cursor".into()).child(SettingsRow::new("Cursor style")
+                                    .description("Programs like Neovim can still set their own.")
+                                    .control(
+                                        settings_dropdown(
+                                            "terminal-cursor-setting", "Terminal cursor style",
+                                            TerminalCursor::ALL.iter().position(|c| *c == settings.terminal_cursor).unwrap_or(0),
+                                            TerminalCursor::ALL.map(|c| c.label()),
+                                            cx.listener(|this, ix: &usize, _, cx| {
+                                                this.update_settings(cx, |s| s.terminal_cursor = TerminalCursor::ALL[*ix]);
+                                            }),
+                                            cx,
+                                        ),
+                                    ))) })
+                            .when(show("terminal-meta"), |section| { section.child(div().id("terminal-meta").debug_selector(|| "terminal-meta".into()).child(SettingsRow::new("Use Option as Meta key")
+                                    .description(
+                                        "Option+key sends Esc+key, for word moves and deletes in the shell. \
+                                         Off, Option types its character, like é.",
+                                    )
+                                    .control(
+                                        Switch::new("terminal-option-meta-setting")
+                                            .checked(settings.terminal_option_as_meta)
+                                            .accessibility_label("Use Option as Meta key in terminal")
+                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                                let checked = *checked;
+                                                this.update_settings(cx, |s| s.terminal_option_as_meta = checked);
+                                            })),
+                                    ))) })) });
+                }
+            }
+            SettingsTab::Account => {
+                page = page.when(show("api-key"), |page| { page.child(SettingsSection::new("OpenRouter").when(show("api-key"), |section| { section.child(div().id("api-key").debug_selector(|| "api-key".into()).child(SettingsRow::new("API key")
+                            .description(
+                                "Stored in your system keychain, never in the settings file.",
+                            )
+                            .stacked()
+                            .control(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .child(div().flex_1().child(field(&self.key_input).aria_label("OpenRouter API key")))
+                                            .child(
+                                                aether_ui::button("save-key")
+                                                    .primary()
+                                                    .small()
+                                                    .label("Save")
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.save_key(window, cx)
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(self.key_status.clone()),
+                                    ),
+                            ))) })) });
+            }
+        }
+        page
+    }
+}
+
+impl ChatApp {
+    /// Linked worktrees, with who uses each and a way to remove or prune it.
+    fn worktrees_section(&self, cx: &mut Context<Self>) -> SettingsSection {
+        use gpui_kit::assets::IconName as Lucide;
+        let section = SettingsSection::new("Worktrees");
+        let Some(list) = &self.worktrees else {
+            return section.child(SettingsRow::new("Looking for worktrees…"));
+        };
+        if list.is_empty() {
+            return section.child(
+                SettingsRow::new("No worktrees yet.")
+                    .description("New worktree chats keep their checkouts here."),
+            );
+        }
+        let home = aether_core::home_dir();
+        list.iter().enumerate().fold(section, |section, (k, listed)| {
+            let path = listed.path.display().to_string();
+            let name = listed.branch.clone().unwrap_or_else(|| {
+                listed
+                    .path
+                    .file_name()
+                    .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned())
+            });
+            let repo = listed
+                .repo
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            let shown = aether_ui::middle_truncate(&display_path(&path, &home), 56);
+            let reveal = listed.path.clone();
+            let (label, off) = row_action(listed, self.worktree_running(&listed.path));
+            let (tree, project) = (listed.path.clone(), listed.repo.clone());
+            let remove = aether_ui::button(("worktree-remove", k))
+                .small()
+                .label(label)
+                .accessibility_label(format!("{}: {name}", off.as_deref().unwrap_or(label)))
+                .when_some(off.clone(), |button, why| button.tooltip(why))
+                .disabled(off.is_some())
+                .loading(self.removing.contains(&listed.path))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.start_remove(tree.clone(), project.clone(), window, cx)
+                }));
+            section.child(
+                SettingsRow::new(name.clone())
+                    .icon(gpui_kit::component::Icon::new(Lucide::GitFork))
+                    .description(format!("{} · {repo} · {shown}", self.worktree_status(listed)))
+                    .control(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                aether_ui::button(("worktree-reveal", k))
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::FolderOpen)
+                                    .accessibility_label(format!("Reveal {name}"))
+                                    .tooltip(if listed.missing {
+                                        "Folder missing"
+                                    } else {
+                                        "Reveal in Finder"
+                                    })
+                                    .disabled(listed.missing)
+                                    .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
+                            )
+                            .child(remove),
+                    ),
+            )
+        })
+    }
+}
+
+/// A Worktrees row's Remove or Prune label, and why it's off: the git panel's
+/// rules, and never while an agent works there.
+fn row_action(listed: &Listed, running: bool) -> (&'static str, Option<String>) {
+    match listed.remove_action() {
+        Ok(label) if running => {
+            (label, Some("An agent is working here. Stop it to remove the worktree".into()))
+        }
+        Ok(label) => (label, None),
+        Err(why) => ("Remove worktree…", Some(why)),
+    }
+}
+
+fn tile_glyph(layout: TileLayout, color: gpui_kit::Hsla) -> impl IntoElement {
+    let rects: &[[f32; 4]] = match layout {
+        TileLayout::Manual => &[[1., 1., 11., 20.], [13.5, 1., 17.5, 20.]],
+        TileLayout::Stack => &[[1., 1., 17., 20.], [20., 1., 11., 9.5], [20., 11.5, 11., 9.5]],
+        TileLayout::Columns => &[[1., 1., 9., 20.], [11.5, 1., 9., 20.], [22., 1., 9., 20.]],
+        TileLayout::Grid => &[
+            [1., 1., 14.5, 9.5],
+            [16.5, 1., 14.5, 9.5],
+            [1., 11.5, 14.5, 9.5],
+            [16.5, 11.5, 14.5, 9.5],
+        ],
+        TileLayout::Monocle => &[[1., 1., 30., 3.], [1., 5., 30., 16.]],
+    };
+    div().relative().flex_none().w(px(32.)).h(px(22.)).children(rects.iter().enumerate().map(
+        |(i, [x, y, w, h])| {
+            div()
+                .absolute()
+                .left(px(*x))
+                .top(px(*y))
+                .w(px(*w))
+                .h(px(*h))
+                .corner(px(1.5))
+                .bg(color.opacity(if i == 0 { 0.9 } else { 0.4 }))
+        },
+    ))
+}
+
+fn settings_dropdown_trigger(
+    id: impl Into<gpui_kit::ElementId>,
+    value: impl Into<SharedString>,
+    cx: &gpui_kit::App,
+) -> Button {
+    let fill = field_fill(cx);
+    let hover = overlay_strong(cx);
+    aether_ui::button(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(fill)
+                .foreground(cx.theme().foreground)
+                .hover(hover)
+                .active(hover),
+        )
+        .bg(fill)
+        .cursor_pointer()
+        .w(px(SETTINGS_DROPDOWN_WIDTH))
+        .h(px(40.))
+        .px(px(12.))
+        .corner(px(10.))
+        .label(value)
+        .dropdown_caret(true)
+}
+
+fn settings_dropdown_menu(menu: PopupMenu) -> PopupMenu {
+    menu.min_w(px(SETTINGS_DROPDOWN_WIDTH)).max_w(px(SETTINGS_DROPDOWN_WIDTH))
+}
+
+fn theme_variant_picker(
+    family: &ThemeFamily,
+    shown: Appearance,
+    selected: bool,
+    cx: &mut Context<ChatApp>,
+) -> gpui_kit::AnyElement {
+    let variants = family.variants;
+    let entity = cx.entity().clone();
+    let name = shown.label().rsplit_once(' ').map_or(shown.label(), |(name, _)| name);
+    let color = if selected { cx.theme().foreground } else { cx.theme().muted_foreground };
+    let id = format!("theme-variant-{}", family.default.slug());
+    aether_ui::button(SharedString::from(id.clone()))
+        .debug_selector(|| id)
+        .custom(ButtonCustomVariant::new(cx).foreground(color))
+        .small()
+        .px_0()
+        .max_w(px(CAROUSEL_CARD_WIDTH))
+        .label(shown.label())
+        .dropdown_caret(true)
+        .accessibility_label(format!("Choose {name} variant"))
+        .dropdown_menu_with_anchor(Anchor::TopCenter, move |mut menu: PopupMenu, _, _| {
+            menu = settings_dropdown_menu(menu);
+            for &variant in variants {
+                let entity = entity.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(variant.label()).checked(variant == shown).on_click(
+                        move |_, window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.set_appearance(variant, window, cx);
+                            });
+                        },
+                    ),
+                );
+            }
+            menu
+        })
+        .into_any_element()
+}
+
+/// A compact settings picker with the current value and checked menu options.
+fn settings_dropdown(
+    id: &'static str,
+    label: &'static str,
+    selected: usize,
+    options: impl IntoIterator<Item = impl Into<SharedString>>,
+    on_change: impl Fn(&usize, &mut Window, &mut gpui_kit::App) + 'static,
+    cx: &gpui_kit::App,
+) -> impl IntoElement {
+    let options: Vec<SharedString> = options.into_iter().map(Into::into).collect();
+    let on_change = std::rc::Rc::new(on_change);
+    settings_dropdown_trigger(id, options[selected].clone(), cx)
+        .accessibility_label(label)
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu: PopupMenu, _, _| {
+            menu = settings_dropdown_menu(menu);
+            for (index, option) in options.iter().enumerate() {
+                let on_change = on_change.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(option.clone())
+                        .checked(index == selected)
+                        .on_click(move |_, window, cx| on_change(&index, window, cx)),
+                );
+            }
+            menu
+        })
+}
+
+/// Settings status line for a CLI: where it was found, or why it wasn't.
+fn provider_status(probe: Option<&ProviderProbe>, binary: &str) -> String {
+    match probe {
+        None => "Checking…".into(),
+        Some(ProviderProbe { path: Some(path), models, .. }) => {
+            let noun = if models.len() == 1 { "model" } else { "models" };
+            format!("Found at {} · {} {noun}", path.display(), models.len())
+        }
+        Some(ProviderProbe { installed: true, .. }) => "Running as a background service".into(),
+        Some(_) if !binary.is_empty() => format!("Not found at {binary}"),
+        Some(_) => "Not found on PATH".into(),
+    }
+}
+
+fn labeled_input(
+    label: &'static str,
+    input: &gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    muted: gpui_kit::Hsla,
+) -> impl IntoElement {
+    v_flex()
+        .flex_1()
+        .gap_1()
+        .child(div().text_xs().text_color(muted).child(label))
+        .child(field(input).aria_label(label))
+}
+
+impl ChatApp {
+    /// Asks for a folder and makes it the coding agents' workspace.
+    fn choose_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(mut paths))) = rx.await else {
+                return;
+            };
+            let Some(path) = paths.pop() else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                this.update_settings(cx, |s| s.workspace_root = path.display().to_string())
+            })
+            .ok();
+        })
+        .detach();
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/settings_view.rs"]
+mod tests;
+
+impl SettingsTab {
+    fn description(self) -> &'static str {
+        match self {
+            Self::Appearance => "Customize how the app looks.",
+            Self::Tiling => "Arrange docked session panes in the window.",
+            Self::Composer => "Set up dictation in the message box.",
+            Self::Model => "Choose defaults for new conversations.",
+            Self::Providers => "Configure coding agents and their workspace.",
+            Self::Worktrees => "Manage isolated checkouts used by your chats.",
+            Self::Tools => "Control tool permissions and planning.",
+            Self::Terminal => "Set the terminal's colors, font, cursor and keys.",
+            Self::Account => "Manage your OpenRouter credentials.",
+        }
+    }
+
+    fn icon(self) -> gpui_kit::assets::IconName {
+        use gpui_kit::assets::IconName as Lucide;
+        match self {
+            Self::Appearance => Lucide::Palette,
+            Self::Tiling => Lucide::LayoutDashboard,
+            Self::Composer => Lucide::MessageSquare,
+            Self::Model => Lucide::Cpu,
+            Self::Providers => Lucide::Bot,
+            Self::Worktrees => Lucide::GitFork,
+            Self::Tools => Lucide::Wrench,
+            Self::Terminal => Lucide::SquareTerminal,
+            Self::Account => Lucide::KeyRound,
+        }
+    }
+}
+
+impl ChatApp {
+    pub(crate) fn cycle_settings_tab(&mut self, next: bool, cx: &mut Context<Self>) {
+        self.select_settings_tab(next_settings_tab(self.settings_tab, next), cx);
+    }
+
+    fn select_settings_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
+        self.settings_tab = tab;
+        if tab == SettingsTab::Worktrees {
+            self.load_worktrees(cx);
+        }
+        cx.notify();
+    }
+
+    fn clear_settings_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_search_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn dismiss_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.settings_search_input.read(cx).value().is_empty() {
+            self.clear_settings_search(window, cx);
+        } else {
+            self.open_page(crate::app::Page::Chat, cx);
+            self.composer.update(cx, |input, cx| input.focus(window, cx));
+        }
+    }
+
+    fn render_settings_sidebar(
+        &self,
+        matches: &[&SettingItem],
+        searching: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        use crate::actions::{SettingsNext, SettingsPrevious};
+        let muted = cx.theme().muted_foreground;
+        let ring = cx.theme().ring;
+        let mut categories = v_flex()
+            .id("settings-categories")
+            .role(Role::TabList)
+            .aria_label("Settings categories")
+            .key_context("SettingsSidebar")
+            .track_focus(&self.settings_sidebar_focus)
+            .tab_stop(true)
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
+            .corner(rems(0.5))
+            .focus_visible(move |style| style.border_color(ring))
+            .gap_5()
+            .on_action(
+                cx.listener(|this, _: &SettingsNext, _, cx| this.cycle_settings_tab(true, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SettingsPrevious, _, cx| this.cycle_settings_tab(false, cx)),
+            );
+        for (label, tabs) in [
+            ("General", &SettingsTab::ALL[0..5]),
+            ("Developer", &SettingsTab::ALL[5..8]),
+            ("Account & Security", &SettingsTab::ALL[8..9]),
+        ] {
+            let mut group = v_flex()
+                .gap_1()
+                .child(div().px_2().pb_1().text_xs().font_medium().text_color(muted).child(label));
+            for &tab in tabs {
+                let count = tab_match_count(tab, matches);
+                let label = if searching {
+                    format!("{} · {} matches", tab.label(), count)
+                } else {
+                    tab.label().into()
+                };
+                group = group.child(
+                    h_flex()
+                        .id(tab.label())
+                        .w_full()
+                        .h_9()
+                        .px_3()
+                        .gap_2()
+                        .corner(rems(0.5))
+                        .text_sm()
+                        .cursor_pointer()
+                        .role(Role::Tab)
+                        .aria_label(label)
+                        .aria_selected(tab == self.settings_tab)
+                        .when(tab == self.settings_tab, |item| {
+                            item.bg(cx.theme().accent).text_color(cx.theme().accent_foreground)
+                        })
+                        .hover(|item| item.bg(cx.theme().secondary))
+                        .child(Icon::new(tab.icon()).size_4())
+                        .child(tab.label())
+                        .when(searching, |button| {
+                            button.child(
+                                div()
+                                    .ml_auto()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(count.to_string()),
+                            )
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.select_settings_tab(tab, cx);
+                            // A category selection exits search; search results remain grouped until selection.
+                            this.settings_search_input
+                                .update(cx, |input, cx| input.set_value("", window, cx));
+                            this.settings_sidebar_focus.focus(window, cx);
+                        })),
+                );
+            }
+            categories = categories.child(group);
+        }
+        v_flex()
+            .id("settings-sidebar")
+            .debug_selector(|| "settings-sidebar".into())
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .p_4()
+            .gap_5()
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(
+                aether_ui::button("settings-back")
+                    .ghost()
+                    .w_full()
+                    .h_9()
+                    .px_3()
+                    .justify_start()
+                    .accessibility_label("Back to chat")
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_start()
+                            .gap_2()
+                            .child(Icon::new(IconName::ArrowLeft).size_4().flex_none())
+                            .child(div().min_w_0().text_ellipsis().child("Back to Chat")),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_page(crate::app::Page::Chat, cx);
+                        this.composer.update(cx, |input, cx| input.focus(window, cx));
+                    })),
+            )
+            .child(
+                field(&self.settings_search_input)
+                    .icon(IconName::Search)
+                    .aria_label("Search settings"),
+            )
+            .child(categories)
+    }
+}
