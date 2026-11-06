@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aether · agent chat prototype</title>
+<style>
+:root{
+  --bg:#0d0d0f;--side:#111113;--panel:#151518;--raised:#1b1b1f;--hover:#212126;--line:#25252a;--line2:#33333a;
+  --text:#ececef;--dim:#a3a3aa;--muted:#7c7c84;--faint:#55555c;
+  --green:#3fb950;--green-bg:rgba(63,185,80,.12);--red:#f85149;--red-bg:rgba(248,81,73,.12);
+  --amber:#f5a524;--amber-bg:rgba(245,165,36,.12);--blue:#58a6ff;--blue-bg:rgba(88,166,255,.12);
+  --violet:#b18cff;--violet-bg:rgba(177,140,255,.10);
+  --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;color:var(--text);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i.sm{width:13px;height:13px}.i.rot{transform:rotate(90deg)}
+.mono,code,pre{font-family:var(--mono)}
+.sp{flex:1}.dim{color:var(--muted)}.sep{color:var(--faint);margin:0 2px}
+.green{color:var(--green)}.red{color:var(--red)}.amber{color:var(--amber)}.blue{color:var(--blue)}.violet{color:var(--violet)}
+kbd{font:11px var(--mono);padding:1px 5px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:4px;color:var(--dim)}
+
+/* prototype bar */
+#bar{position:fixed;top:0;left:0;right:0;height:84px;background:#08080a;border-bottom:1px solid var(--line);z-index:10;padding:8px 14px;display:flex;flex-direction:column;gap:6px}
+#bar .row{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none}
+#bar .tag{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:6px;white-space:nowrap}
+.scn{white-space:nowrap;padding:3px 10px;border-radius:99px;border:1px solid var(--line2);color:var(--dim);font-size:12.5px}
+.scn:hover{background:var(--hover);color:var(--text)}
+.scn.on{background:var(--text);color:#000;border-color:var(--text)}
+.scn.play{border-color:var(--green);color:var(--green);display:flex;gap:5px;align-items:center}
+.scn.play.on{background:var(--green);color:#000}
+#note{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#note b{color:var(--text);font-weight:600}
+
+/* app frame */
+#app{position:fixed;top:84px;left:0;right:0;bottom:0;display:grid;grid-template-columns:280px 1fr;background:var(--bg)}
+#side{background:var(--side);border-right:1px solid var(--line);padding:12px 10px;overflow:auto;font-size:13.5px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;padding:2px 6px 12px}
+.brand .lg{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#fb7185,#f59e0b);display:grid;place-items:center;font-size:13px}
+.sh{font-size:12px;color:var(--muted);padding:12px 6px 6px}
+.si{padding:8px 10px;border-radius:8px;margin-bottom:2px;cursor:default}
+.si:hover{background:var(--hover)}
+.si.cur{background:var(--raised)}
+.si .top{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);white-space:nowrap}
+.si .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:2px 0}
+.si .ag{font-size:11px;padding:0 5px;border-radius:4px;background:var(--line);color:var(--dim)}
+.st{display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block;flex:none}
+.dot.amber{background:var(--amber)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}.dot.green{background:var(--green)}
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+
+#main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+#head{height:44px;display:flex;align-items:center;gap:8px;padding:0 18px;border-bottom:1px solid var(--line);font-size:13px;color:var(--dim);flex:none}
+#head b{color:var(--text);font-weight:500}
+#head .vp{font-size:10.5px;font-weight:700;background:#16352a;color:#5fd3a0;border-radius:4px;padding:1px 4px}
+#scroll{flex:1;overflow:auto;min-height:0}
+#chat{max-width:780px;margin:0 auto;padding:24px 20px 40px}
+#dock{flex:none;max-width:780px;width:100%;margin:0 auto;padding:0 20px 12px}
+
+/* messages */
+.user{display:flex;flex-direction:column;align-items:flex-end;margin:10px 0 22px}
+.bubble{background:var(--raised);border:1px solid var(--line);padding:9px 14px;border-radius:14px;max-width:80%}
+.time{font-size:11.5px;color:var(--faint);margin-top:4px}
+.reply{margin-bottom:26px}
+.blk{margin:1px 0}
+.row{display:flex;align-items:center;gap:8px;min-height:30px;padding:3px 8px;margin:0 -8px;border-radius:7px;cursor:pointer;color:var(--dim)}
+.row:hover{background:var(--panel)}
+.row .ttl{color:var(--text);font-weight:500;white-space:nowrap}
+.row .arg{font-family:var(--mono);font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.row .meta{display:flex;align-items:center;gap:8px;margin-left:auto;padding-left:10px;font-size:12px;color:var(--muted);white-space:nowrap}
+.row .chev{color:var(--faint)}
+.row.running .ki{color:var(--blue)}
+.row.failed .ki{color:var(--red)}
+.row.waiting .ki,.row.denied .ki{color:var(--amber)}
+.row.bg .ki{color:var(--blue)}
+.add{color:var(--green);font-family:var(--mono);font-size:12px}.del{color:var(--red);font-family:var(--mono);font-size:12px}
+.pill{font-size:11.5px;padding:1px 7px;border-radius:5px;background:var(--line);color:var(--dim);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.pill.red{background:var(--red-bg);color:var(--red)}.pill.amber{background:var(--amber-bg);color:var(--amber)}
+.pill.green{background:var(--green-bg);color:var(--green)}.pill.blue{background:var(--blue-bg);color:var(--blue)}.pill.violet{background:var(--violet-bg);color:var(--violet)}
+.errline{font-family:var(--mono);font-size:12px;color:var(--red);padding:0 0 4px 31px;margin-top:-2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.body{margin:4px 0 8px 23px}
+.spin{width:13px;height:13px;border-radius:50%;border:1.8px solid rgba(88,166,255,.25);border-top-color:var(--blue);animation:spin .8s linear infinite;display:inline-block;flex:none}
+.spin.sm{width:11px;height:11px}
+.spin.amber{border-color:rgba(245,165,36,.25);border-top-color:var(--amber)}
+.spin.violet{border-color:rgba(177,140,255,.25);border-top-color:var(--violet)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.caret{display:inline-block;width:7px;height:15px;background:var(--text);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.tm{font-variant-numeric:tabular-nums}
+
+/* thought */
+.thought .row .ki{color:var(--muted)}
+.thought .prev{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-size:13px}
+.thought.live .row .ttl{background:linear-gradient(90deg,var(--muted),var(--text),var(--muted));background-size:200% 100%;-webkit-background-clip:text;color:transparent;animation:shimmer 2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.tbody{margin:2px 0 8px 23px;padding:2px 0 2px 14px;border-left:2px solid var(--line2);color:var(--dim);font-size:13.5px}
+.tbody p{margin:4px 0}
+
+/* markdown */
+.md{line-height:1.65;margin:8px 0}
+.md p{margin:8px 0}
+.md h3{font-size:17px;margin:18px 0 6px}.md h4{font-size:15px;margin:14px 0 4px}
+.md ul,.md ol{margin:6px 0;padding-left:22px}.md li{margin:3px 0}
+code.ic{font-size:12.5px;background:var(--raised);border:1px solid var(--line);padding:0 5px;border-radius:5px}
+code.ic.file{color:var(--blue);cursor:pointer}
+.md blockquote{margin:8px 0;padding-left:12px;border-left:3px solid var(--line2);color:var(--dim)}
+.md table{border-collapse:collapse;margin:10px 0;font-size:13px;width:100%}
+.md th,.md td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.md th{background:var(--panel);font-weight:600}
+.cb{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:10px 0;background:#0a0a0c}
+.cb-h{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);background:var(--panel)}
+.cb pre{margin:0;padding:10px 12px;font-size:12.5px;line-height:1.6;overflow:auto;max-height:340px}
+.ghost{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:6px;color:var(--muted);font-size:12px}
+.ghost:hover{background:var(--hover);color:var(--text)}
+/* syntax */
+.hk{color:#ff7b72}.hs{color:#a5d6ff}.hc{color:#6e7681;font-style:italic}.hf{color:#d2a8ff}.hn{color:#79c0ff}.ht{color:#7ee787}.hty{color:#ffa657}.hp{color:#79c0ff}.hv{color:#ffa657}
+
+/* terminal */
+.term{border:1px solid var(--line);border-radius:9px;background:#09090b;overflow:hidden}
+.term-h{display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);font:12px var(--mono);color:var(--dim)}
+.term-h .cwd{margin-left:auto;color:var(--faint)}
+.term pre{margin:0;padding:8px 10px;font-size:12px;line-height:1.55;max-height:220px;overflow:auto;color:#c9c9cf;white-space:pre-wrap}
+.term .ok{color:var(--green)}.term .er{color:var(--red)}.term .wa{color:var(--amber)}.term .ac{color:var(--blue)}
+.term-f{display:flex;gap:10px;padding:5px 10px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+
+/* diff */
+.diff{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#0a0a0c;margin:4px 0}
+.diff-h{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 10px;border-bottom:1px solid var(--line);font-size:12.5px;background:var(--panel)}
+.diff-h .path{font-family:var(--mono);color:var(--dim)}.diff-h .path b{color:var(--text);font-weight:500}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:6px;overflow:hidden}
+.seg span{padding:1px 8px;font-size:11.5px;color:var(--muted)}.seg span.on{background:var(--hover);color:var(--text)}
+.diff-b{font:12px/1.6 var(--mono);overflow:auto;max-height:420px}
+.dl{display:grid;grid-template-columns:38px 38px 16px 1fr;white-space:pre}
+.dl .ln{color:var(--faint);text-align:right;padding-right:8px;user-select:none}
+.dl .sg{color:var(--faint);user-select:none}
+.dl.a{background:rgba(63,185,80,.10)}.dl.a .sg{color:var(--green)}
+.dl.d{background:rgba(248,81,73,.10)}.dl.d .sg{color:var(--red)}
+.dl.a mark{background:rgba(63,185,80,.32);color:inherit;border-radius:2px}
+.dl.d mark{background:rgba(248,81,73,.32);color:inherit;border-radius:2px}
+.dh{display:flex;align-items:center;gap:8px;padding:3px 10px;background:var(--blue-bg);color:var(--blue);font:11.5px var(--sans)}
+.dh .dim{font-family:var(--mono)}
+.dx{padding:2px 10px 2px 46px;color:var(--muted);font:11.5px var(--sans);background:var(--panel);cursor:pointer}
+.dx:hover{color:var(--text)}
+.ds{display:grid;grid-template-columns:1fr 1fr}
+.ds>div{display:grid;grid-template-columns:38px 1fr;white-space:pre;min-height:19px;overflow:hidden}
+.ds>div:nth-child(odd){border-right:1px solid var(--line)}
+.ds .ln{color:var(--faint);text-align:right;padding-right:8px}
+.ds .a{background:rgba(63,185,80,.10)}.ds .d{background:rgba(248,81,73,.10)}.ds .e{background:repeating-linear-gradient(135deg,transparent 0 5px,rgba(255,255,255,.025) 5px 10px)}
+.ds .a mark{background:rgba(63,185,80,.32);color:inherit}.ds .d mark{background:rgba(248,81,73,.32);color:inherit}
+
+/* read preview */
+.peek{border:1px solid var(--line);border-radius:9px;overflow:hidden;font:12px/1.6 var(--mono);background:#0a0a0c}
+.peek .pl{display:grid;grid-template-columns:38px 1fr;white-space:pre}.peek .ln{color:var(--faint);text-align:right;padding-right:8px}
+.peek .more{padding:3px 10px;color:var(--muted);font:11.5px var(--sans);border-top:1px solid var(--line);background:var(--panel)}
+.matches div{font:12px/1.7 var(--mono);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.matches b{color:var(--blue);font-weight:400}
+
+/* subagent */
+.agent{border:1px solid var(--line);border-radius:11px;margin:8px 0;background:var(--panel);overflow:hidden;position:relative}
+.agent::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--violet)}
+.agent.waiting::before{background:var(--amber)}.agent.failed::before{background:var(--red)}.agent.done::before{background:var(--green);opacity:.6}.agent.stopped::before{background:var(--faint)}
+.agent-h{display:flex;align-items:center;gap:8px;padding:9px 12px 9px 14px;cursor:pointer}
+.agent-h:hover{background:var(--raised)}
+.agent-h .nm{font-weight:600}
+.agent-h .desc{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.agent-h .meta{display:flex;gap:8px;align-items:center;margin-left:auto;padding-left:10px;font-size:12px;color:var(--muted);white-space:nowrap}
+.agent-now{display:flex;align-items:center;gap:8px;padding:0 12px 9px 37px;font-size:12.5px;color:var(--dim);margin-top:-3px}
+.agent-now .arg{font-family:var(--mono);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agent-in{border-top:1px solid var(--line);padding:6px 12px 8px 14px;background:var(--bg)}
+.agent-in .prompt{font-size:12.5px;color:var(--muted);padding:4px 0 6px;border-bottom:1px dashed var(--line);margin-bottom:4px}
+.agent-in .row{min-height:26px;font-size:13px}
+.agent-in .more{font-size:12px;color:var(--muted);padding:2px 0 2px 23px;cursor:pointer}
+.agent .res{padding:0 14px 10px 37px;font-size:13.5px;color:var(--dim)}
+.agent .res p{margin:4px 0}
+.agent .aerr{padding:0 14px 10px 37px;font:12px var(--mono);color:var(--red)}
+.agent .card{margin:8px 12px 12px 14px}
+
+/* cards */
+.card{border:1px solid var(--line2);border-radius:12px;background:var(--panel);padding:12px 14px;margin:10px 0}
+.card.perm{border-color:rgba(245,165,36,.45);box-shadow:0 0 0 3px rgba(245,165,36,.06)}
+.card.ask{border-color:rgba(88,166,255,.45);box-shadow:0 0 0 3px rgba(88,166,255,.06)}
+.card.fatal{border-color:rgba(248,81,73,.5);background:linear-gradient(var(--red-bg),var(--red-bg)),var(--panel)}
+.card.stall{border-color:rgba(245,165,36,.4)}
+.card-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.card-h b{font-weight:600}
+.card .src{font-size:12px;color:var(--muted)}
+.card pre.cmd{margin:6px 0;padding:10px 12px;border-radius:8px;background:#09090b;border:1px solid var(--line);font-size:12.5px;line-height:1.6;white-space:pre-wrap;color:#e6e6ea}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:12.5px;margin:6px 0}
+.kv span{color:var(--muted)}
+.acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:7px;border:1px solid var(--line2);font-size:12.5px;background:var(--raised)}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--text);color:#000;border-color:var(--text)}
+.btn.primary kbd{color:#333;border-color:#999}
+.btn.danger{color:var(--red);border-color:rgba(248,81,73,.4)}
+.btn code{font-size:11.5px;background:var(--line);padding:0 4px;border-radius:4px}
+.note-in{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--line2);border-radius:7px;padding:5px 9px;font-size:12.5px;color:var(--muted)}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin:5px 0;cursor:pointer}
+.opt:hover{background:var(--raised)}
+.opt.on{border-color:var(--blue);background:var(--blue-bg)}
+.opt .box{width:15px;height:15px;border:1.5px solid var(--line2);border-radius:50%;margin-top:3px;flex:none}
+.opt.multi .box{border-radius:4px}
+.opt.on .box{border-color:var(--blue);background:var(--blue);box-shadow:inset 0 0 0 3px var(--panel)}
+.opt .d{font-size:12.5px;color:var(--muted)}
+.qstep{font-size:12px;color:var(--muted);margin-left:auto}
+
+/* notices */
+.note{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);padding:5px 0}
+.note b{color:var(--dim);font-weight:500}
+.note.warn{color:var(--amber)}.note.warn b{color:var(--amber)}
+.note.bad{color:var(--red)}.note.bad b{color:var(--red)}
+.note.ok .i{color:var(--green)}
+.note .ghost{padding:1px 6px}
+
+.wake{display:flex;align-items:center;gap:8px;margin:18px 0 10px;font-size:12.5px;color:var(--blue)}
+.wake::after{content:"";flex:1;height:1px;background:var(--line)}
+.steer{display:flex;align-items:center;gap:8px;margin:8px 0;padding:6px 10px;border-radius:9px;background:var(--raised);border:1px dashed var(--line2);font-size:13px}
+.boot div{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);padding:3px 0}
+.boot .mono{font-size:12px;color:var(--faint)}
+
+/* live status line */
+.live{display:flex;align-items:center;gap:7px;margin-top:10px;padding:7px 12px;border-radius:9px;background:var(--panel);border:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+.live b{color:var(--text);font-weight:500}
+.live.amber{border-color:rgba(245,165,36,.4);background:var(--amber-bg)}.live.amber b{color:var(--amber)}
+.live.blue{border-color:rgba(88,166,255,.35)}
+.hb{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+.hb i{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 1.2s infinite}
+.hb.q i{background:var(--muted);animation:none}
+.hb.w{color:var(--amber)}.hb.w i{background:var(--amber)}
+.esc{color:var(--faint);margin-left:8px}
+
+/* group, footer, changes */
+.group{display:flex;align-items:center;gap:8px;padding:6px 10px;margin:0 -10px 6px;border-radius:8px;cursor:pointer;color:var(--dim);font-size:13.5px}
+.group:hover{background:var(--panel)}
+.group b{color:var(--text);font-weight:500}
+.foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
+.foot .ghost{padding:2px 5px}
+.changes{border:1px solid var(--line);border-radius:11px;overflow:hidden;margin:12px 0 4px}
+.ch-h{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);font-size:13px}
+.ch-f{display:flex;align-items:center;gap:8px;padding:5px 12px;border-top:1px solid var(--line);font-size:12.5px;cursor:pointer}
+.ch-f:hover{background:var(--panel)}
+.ch-f .path{font-family:var(--mono);color:var(--muted)}.ch-f .path b{color:var(--text);font-weight:400}
+.fs{font:10.5px var(--mono);width:16px;text-align:center;border-radius:3px}
+.fs.M{color:var(--amber)}.fs.A{color:var(--green)}.fs.D{color:var(--red)}
+
+/* dock */
+.tray{border:1px solid var(--line);border-bottom:0;border-radius:11px 11px 0 0;background:var(--panel);margin:0 10px;font-size:13px}
+.tray+.tray{border-radius:0;border-top:1px solid var(--line)}
+.tray-h{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;color:var(--dim)}
+.tray-h b{color:var(--text);font-weight:500}
+.tray-h .cur{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.prog{width:60px;height:4px;border-radius:2px;background:var(--line2);overflow:hidden;flex:none}
+.prog i{display:block;height:100%;background:var(--green)}
+.tray-b{padding:2px 12px 8px;border-top:1px solid var(--line)}
+.todo{display:flex;align-items:center;gap:9px;padding:3px 0;color:var(--dim)}
+.todo.done{color:var(--faint);text-decoration:line-through}.todo.done .i{color:var(--green)}
+.todo.active{color:var(--text)}
+.circ{width:13px;height:13px;border:1.5px solid var(--line2);border-radius:50%;flex:none}
+.bgi{display:flex;align-items:center;gap:9px;padding:5px 0}
+.bgi .arg{font-family:var(--mono);font-size:12.5px}
+.bgi .ghost{padding:2px 6px}
+.composer{border:1px solid var(--line2);border-radius:14px;background:var(--panel);padding:10px 12px 8px;position:relative}
+.composer.waiting{border-color:rgba(245,165,36,.4)}
+.composer.dead{opacity:.85}
+.ta{min-height:42px;padding:2px 4px;font-size:14px}
+.ta.ph{color:var(--faint)}
+.cbar{display:flex;align-items:center;gap:6px;margin-top:4px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--muted);padding:2px 7px;border-radius:6px}
+.chip:hover{background:var(--hover)}
+.ib{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.send{width:30px;height:30px;border-radius:50%;background:var(--text);color:#000;display:grid;place-items:center}
+.send.off{opacity:.3}
+.stopb{width:30px;height:30px;border-radius:50%;background:var(--text);color:#000;display:grid;place-items:center}
+.stopb .i{fill:#000;stroke:none}
+.queued{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:5px 8px;margin:-2px -4px 6px;border-radius:8px;background:var(--raised);color:var(--dim)}
+.queued b{color:var(--text);font-weight:400}
+.cfoot{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);padding:6px 14px 0}
+.dead-bar{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--red);padding:2px 4px 8px}
+
+/* hero */
+.hero{text-align:center;padding:60px 0 10px}
+.hero .lg{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#fb7185,#f59e0b);display:inline-grid;place-items:center;font-size:24px}
+.hero h2{margin:14px 0 4px;font-weight:600}
+.agents{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-top:26px;text-align:left}
+.ac{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--panel);cursor:pointer}
+.ac:hover{border-color:var(--line2)}
+.ac.on{border-color:var(--text)}
+.ac .n{display:flex;align-items:center;gap:7px;font-weight:600}
+.ac .v{font:11.5px var(--mono);color:var(--faint);margin-left:auto;font-weight:400}
+.ac .s{font-size:12.5px;margin:4px 0 6px;display:flex;gap:6px;align-items:center}
+.caps{display:flex;flex-wrap:wrap;gap:4px}
+.caps span{font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--line);color:var(--muted)}
+.caps span.no{text-decoration:line-through;opacity:.5}
+</style>
+</head>
+<body>
+<div id="bar">
+  <div class="row" id="scns"></div>
+  <div id="note"></div>
+</div>
+<div id="app">
+  <aside id="side"></aside>
+  <section id="main">
+    <div id="head"></div>
+    <div id="scroll"><div id="chat"></div></div>
+    <div id="dock"></div>
+  </section>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const I={
+term:'<path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>',
+file:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
+filePlus:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 12v6M9 15h6"/>',
+files:'<path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M15 2v5h5M4 7v13a2 2 0 0 0 2 2h10"/>',
+pencil:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+bot:'<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13v1M15 13v1"/>',
+bulb:'<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/>',
+check:'<path d="M20 6L9 17l-5-5"/>',
+x:'<path d="M18 6L6 18M6 6l12 12"/>',
+shield:'<path d="M12 3L4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/>',
+shieldx:'<path d="M12 3L4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="M10 10l4 4M14 10l-4 4"/>',
+alert:'<path d="M12 3L2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
+refresh:'<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+stop:'<rect x="6" y="6" width="12" height="12" rx="2"/>',
+zap:'<path d="M13 2L3 14h9l-1 8 10-12h-9z"/>',
+list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+swap:'<path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
+copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+chev:'<path d="M9 6l6 6-6 6"/>',
+up:'<path d="M12 19V5M5 12l7-7 7 7"/>',
+clip:'<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
+folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+branch:'<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
+pulse:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+help:'<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4M12 17h.01"/>',
+book:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/>',
+plug:'<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>',
+retry:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+play:'<path d="M7 4l13 8-13 8z"/>',
+sparkle:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+plus:'<path d="M12 5v14M5 12h14"/>',
+external:'<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
+circle:'<circle cx="12" cy="12" r="8"/>',
+};
+const icon=(n,c='')=>`<svg class="i ${c}" viewBox="0 0 24 24">${I[n]||I.circle}</svg>`;
+const now=()=>Date.now();
+const ago=s=>now()-s*1000;
+function fmt(ms){const s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';const m=Math.floor(s/60);if(m<60)return m+'m '+String(s%60).padStart(2,'0')+'s';return Math.floor(m/60)+'h '+(m%60)+'m'}
+const fsec=s=>s<1?(s*1000|0)+'ms':fmt(s*1000);
+
+/* syntax highlight */
+const KW=/^(import|from|export|default|function|return|const|let|var|if|else|for|while|await|async|type|interface|new|class|extends|true|false|null|undefined)$/;
+const SHC=/^(cd|ls|cat|git|pnpm|npm|npx|find|grep|sed|head|echo|rg|tsc|node|wc|vite|exec|add)$/;
+function hl(code,lang){
+  if(!code)return '';
+  if(lang==='text')return esc(code);
+  const re=lang==='css'?/(\/\*[\s\S]*?\*\/)|("[^"]*"|'[^']*')|(--[\w-]+|#[0-9a-fA-F]{3,8}\b)|(\b\d+(?:\.\d+)?(?:px|rem|em|%|ms|s|vh|vw|fr)?\b)|([a-z-]+)(?=\s*:)/g
+    :lang==='sh'?/(#.*$)|("[^"]*"|'[^']*')|(\s--?[\w-]+)|(\b\d+\b)|([\w.-]+)/gm
+    :/(\/\/.*$|\/\*[\s\S]*?\*\/)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)|(<\/?[A-Za-z][\w.]*)|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_$][\w$]*\b)/gm;
+  let out='',i=0,m;
+  while((m=re.exec(code))){
+    if(m[0]===''){re.lastIndex++;continue}
+    out+=esc(code.slice(i,m.index));i=re.lastIndex;
+    const t=m[0];let c='';
+    if(m[1])c='c';else if(m[2])c='s';else if(m[3])c=lang==='css'?'v':lang==='sh'?'n':'t';else if(m[4])c='n';
+    else if(m[5]){
+      if(lang==='css')c='p';
+      else if(lang==='sh')c=SHC.test(t)?'f':'';
+      else c=KW.test(t)?'k':code[i]==='('?'f':/^[A-Z]/.test(t)?'ty':'';
+    }
+    out+=c?`<span class="h${c}">${esc(t)}</span>`:esc(t);
+  }
+  return out+esc(code.slice(i));
+}
+const LANG={tsx:'js',ts:'js',js:'js',jsx:'js',css:'css',sh:'sh',bash:'sh',shell:'sh'};
+
+/* mini markdown */
+function inl(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g,(m,c)=>`<code class="ic${/\.(tsx?|css|md|json)$/.test(c)?' file':''}">${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+}
+function codeBlock(code,lang,open){
+  return `<div class="cb"><div class="cb-h"><span>${esc(lang)}</span><span class="sp"></span><button class="ghost">${icon('copy','sm')} Copy</button></div><pre><code>${hl(code,LANG[lang]||'text')}${open?'<span class="caret"></span>':''}</code></pre></div>`;
+}
+function md(src,live){
+  const L=src.split('\n');let out='',i=0;
+  const block=/^(```|#{1,3} |\s*[-*] |\d+\. |\||> )/;
+  while(i<L.length){
+    const l=L[i];
+    if(l.startsWith('```')){const lang=l.slice(3).trim()||'text';const buf=[];i++;while(i<L.length&&!L[i].startsWith('```')){buf.push(L[i]);i++}const closed=i<L.length;i++;out+=codeBlock(buf.join('\n'),lang,live&&!closed);continue}
+    if(/^#{1,3} /.test(l)){const n=l.match(/^#+/)[0].length;out+=`<h${n+2}>${inl(l.slice(n+1))}</h${n+2}>`;i++;continue}
+    if(/^\s*[-*] /.test(l)){out+='<ul>';while(i<L.length&&/^\s*[-*] /.test(L[i])){out+=`<li>${inl(L[i].replace(/^\s*[-*] /,''))}</li>`;i++}out+='</ul>';continue}
+    if(/^\d+\. /.test(l)){out+='<ol>';while(i<L.length&&/^\d+\. /.test(L[i])){out+=`<li>${inl(L[i].replace(/^\d+\. /,''))}</li>`;i++}out+='</ol>';continue}
+    if(l.startsWith('|')){const rows=[];while(i<L.length&&L[i].startsWith('|')){rows.push(L[i]);i++}
+      const cells=r=>r.split('|').slice(1,-1).map(c=>c.trim());
+      out+=`<table><thead><tr>${cells(rows[0]).map(c=>`<th>${inl(c)}</th>`).join('')}</tr></thead><tbody>${rows.slice(2).map(r=>`<tr>${cells(r).map(c=>`<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;continue}
+    if(l.startsWith('> ')){out+=`<blockquote>${inl(l.slice(2))}</blockquote>`;i++;continue}
+    if(!l.trim()){i++;continue}
+    const p=[];while(i<L.length&&L[i].trim()&&!block.test(L[i])){p.push(L[i]);i++}
+    out+=`<p>${inl(p.join(' '))}</p>`;
+  }
+  return out;
+}
+
+/* diff */
+function wordMark(a,b){
+  const x=a.c,y=b.c;let p=0;while(p<x.length&&p<y.length&&x[p]===y[p])p++;
+  let s=0;while(s<x.length-p&&s<y.length-p&&x[x.length-1-s]===y[y.length-1-s])s++;
+  if(p+s<4)return;a.w=[p,x.length-s];b.w=[p,y.length-s];
+}
+function codeOf(op,lang){
+  if(!op||op.c===undefined)return '';
+  if(!op.w)return hl(op.c,lang);
+  const[a,b]=op.w;return hl(op.c.slice(0,a),lang)+`<mark>${hl(op.c.slice(a,b),lang)}</mark>`+hl(op.c.slice(b),lang);
+}
+function parseDiff(lines){
+  const ops=[];let o=0,n=0;
+  for(const l of lines){
+    if(l.startsWith('@@')){const m=/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@\s?(.*)/.exec(l);o=+m[1];n=+m[2];ops.push({t:'h',o,n,ctx:m[3]});continue}
+    if(l.startsWith('~')){ops.push({t:'~',c:l.slice(1)});continue}
+    const s=l[0],c=l.slice(1);
+    if(s==='-')ops.push({t:'-',o:o++,c});else if(s==='+')ops.push({t:'+',n:n++,c});else ops.push({t:' ',o:o++,n:n++,c});
+  }
+  for(let i=0;i<ops.length;i++){
+    if(ops[i].t!=='-')continue;let j=i;while(j<ops.length&&ops[j].t==='-')j++;let k=j;while(k<ops.length&&ops[k].t==='+')k++;
+    for(let q=0;q<Math.min(j-i,k-j);q++)wordMark(ops[i+q],ops[j+q]);i=k-1;
+  }
+  return ops;
+}
+function diffView(d,id,live){
+  const split=SPLIT.has(id);const lang=LANG[d.lang]||'text';const ops=parseDiff(d.lines);
+  const add=ops.filter(o=>o.t==='+').length,del=ops.filter(o=>o.t==='-').length;
+  const dir=d.path.includes('/')?d.path.slice(0,d.path.lastIndexOf('/')+1):'',name=d.path.slice(dir.length);
+  let rows='';
+  const hunk=o=>`<div class="dh">${icon('chev','sm')} Line ${o.n}${o.ctx?` <span class="dim">· ${esc(o.ctx)}</span>`:''}</div>`;
+  const gap=o=>`<div class="dx">↕ ${esc(o.c)}</div>`;
+  if(!split){
+    for(const o of ops){
+      if(o.t==='h'){rows+=hunk(o);continue}if(o.t==='~'){rows+=gap(o);continue}
+      const cls=o.t==='+'?'a':o.t==='-'?'d':'';
+      rows+=`<div class="dl ${cls}"><span class="ln">${o.o??''}</span><span class="ln">${o.n??''}</span><span class="sg">${o.t===' '?'':o.t==='-'?'−':'+'}</span><span>${codeOf(o,lang)}</span></div>`;
+    }
+  }else{
+    for(let i=0;i<ops.length;i++){
+      const o=ops[i];
+      if(o.t==='h'){rows+=hunk(o);continue}if(o.t==='~'){rows+=gap(o);continue}
+      if(o.t===' '){rows+=`<div class="ds"><div><span class="ln">${o.o}</span><span>${codeOf(o,lang)}</span></div><div><span class="ln">${o.n}</span><span>${codeOf(o,lang)}</span></div></div>`;continue}
+      let j=i;while(j<ops.length&&ops[j].t==='-')j++;let k=j;while(k<ops.length&&ops[k].t==='+')k++;
+      const L=ops.slice(i,j),R=ops.slice(j,k);
+      for(let q=0;q<Math.max(L.length,R.length);q++){
+        const l=L[q],r=R[q];
+        rows+=`<div class="ds"><div class="${l?'d':'e'}"><span class="ln">${l?l.o:''}</span><span>${codeOf(l,lang)}</span></div><div class="${r?'a':'e'}"><span class="ln">${r?r.n:''}</span><span>${codeOf(r,lang)}</span></div></div>`;
+      }
+      i=k-1;
+    }
+  }
+  if(live)rows+=`<div class="dl a"><span class="ln"></span><span class="ln"></span><span class="sg"></span><span><span class="caret"></span></span></div>`;
+  return `<div class="diff"><div class="diff-h">${icon('file','sm')}<span class="path">${esc(dir)}<b>${esc(name)}</b></span>${d.isNew?'<span class="pill green">new</span>':''}<span class="add">+${add}</span><span class="del">−${del}</span><span class="sp"></span><span class="seg" data-split="${id}"><span class="${split?'':'on'}">Unified</span><span class="${split?'on':''}">Split</span></span><button class="ghost">${icon('external','sm')} Open</button></div><div class="diff-b">${rows}</div></div>`;
+}
+
+/* state */
+let S,SEQ=0,PLAY=0,ANSWER=null;
+const OPEN=new Set(),SPLIT=new Set(),CLOSED=new Set();
+const nid=p=>p+(++SEQ);
+const U=(text,time='8:13 AM')=>({role:'user',text,time});
+const TH=(text,secs,live)=>({type:'thought',id:nid('th'),text,secs,live,since:live?ago(secs):0});
+const TX=(text,live)=>({type:'text',id:nid('tx'),text,live});
+const TL=(kind,title,arg,o={})=>({type:'tool',id:nid('t'),kind,title,arg,status:'done',secs:0.4,...o});
+const AG=o=>({type:'agent',id:nid('a'),...o});
+const NT=(kind,ic,html,o={})=>({type:'note',id:nid('n'),kind,ic,html,...o});
+
+/* render */
+const KI={cmd:'term',read:'file',edit:'pencil',write:'filePlus',search:'search',web:'globe',mcp:'plug',skill:'book',task:'bot'};
+function statusMeta(t){
+  switch(t.status){
+    case 'running':return `<span class="spin sm"></span><span class="tm" data-since="${t.since}"></span>`;
+    case 'bg':return `<span class="pill blue"><span class="dot blue pulse"></span>Background</span><span class="tm" data-since="${t.since}"></span>`;
+    case 'waiting':return `<span class="pill amber">${icon('shield','sm')}Needs approval</span><span class="tm amber" data-since="${t.since}"></span>`;
+    case 'failed':return `<span class="pill red">${t.exit!=null?'Exit '+t.exit:'Failed'}</span><span>${fsec(t.secs)}</span>`;
+    case 'denied':return `<span class="pill amber">${icon('shieldx','sm')}Denied</span>`;
+    case 'stopped':return `<span class="pill">${icon('stop','sm')}Stopped</span>`;
+    default:return `${t.add?`<span class="add">+${t.add}</span>`:''}${t.del?`<span class="del">−${t.del}</span>`:''}${t.matches!=null?`<span>${t.matches} matches</span>`:''}${t.secs>=1?`<span>${fsec(t.secs)}</span>`:''}`;
+  }
+}
+function toolBody(t,live){
+  const b=t.body;if(!b)return '';
+  if(b.out!==undefined){
+    const exit=b.exit!=null?`<span class="${b.exit?'red':'green'}">exit ${b.exit}</span>`:t.status==='running'||t.status==='bg'?'<span class="blue">running</span>':'';
+    return `<div class="term"><div class="term-h">${icon('term','sm')}<span>${hl(b.cmd,'sh')}</span><span class="cwd">${esc(b.cwd||'~/vite-project')}</span></div><pre>${b.out}${live?'<span class="caret"></span>':''}</pre><div class="term-f">${exit}${t.secs>=1&&t.status!=='running'?`<span>${fsec(t.secs)}</span>`:''}<span class="sp"></span>${b.lines?`<span>${b.lines}</span>`:''}<button class="ghost">${icon('copy','sm')} Copy</button>${t.status==='bg'?`<button class="ghost red">${icon('stop','sm')} Stop</button>`:''}</div></div>`;
+  }
+  if(b.diff)return diffView(b.diff,t.id,live);
+  if(b.peek)return `<div class="peek">${b.peek.map((l,i)=>`<div class="pl"><span class="ln">${i+1}</span><span>${hl(l,'js')}</span></div>`).join('')}<div class="more">Lines 1–${b.peek.length} of ${b.total} · ${icon('external','sm')} open in editor</div></div>`;
+  if(b.matches)return `<div class="matches">${b.matches.map(m=>`<div><b>${esc(m[0])}</b> ${esc(m[1])}</div>`).join('')}</div>`;
+  if(b.html)return b.html;
+  return '';
+}
+function toolRow(t,nested){
+  const ki=KI[t.kind]||'circle';
+  const open=OPEN.has(t.id)||(t.autoOpen&&(t.status==='running'||t.status==='waiting')&&!CLOSED.has(t.id));
+  const has=!!t.body;
+  return `<div class="row ${t.status}" data-toggle="${has?t.id:''}">${icon(ki,'ki')}<span class="ttl">${esc(t.title)}</span><span class="arg">${esc(t.arg||'')}</span><span class="meta">${statusMeta(t)}${has?icon('chev',open?'rot chev':'chev'):''}</span></div>`
+    +(t.status==='failed'&&t.err?`<div class="errline">${esc(t.err)}</div>`:'')
+    +(open&&has?`<div class="body">${toolBody(t,t.status==='running'&&t.streaming)}</div>`:'');
+}
+function readGroup(rs){
+  const id='rg'+rs[0].id;const open=OPEN.has(id);
+  const names=rs.map(r=>r.arg.split('/').pop());
+  return `<div class="row" data-toggle="${id}">${icon('files','ki')}<span class="ttl">Read ${rs.length} files</span><span class="arg">${esc(names.join(', '))}</span><span class="meta">${icon('chev',open?'rot chev':'chev')}</span></div>`
+    +(open?`<div class="body" style="margin-top:0">${rs.map(r=>toolRow(r)).join('')}</div>`:'');
+}
+function thought(b){
+  const open=b.live?!CLOSED.has(b.id):OPEN.has(b.id);
+  const first=b.text.replace(/\*\*/g,'').split(/(?<=\.)\s/)[0];
+  const head=b.live
+    ?`<div class="row" data-closed="${b.id}">${icon('bulb','ki')}<span class="ttl">Thinking</span><span class="tm dim" data-since="${b.since}"></span><span class="meta">${icon('chev',open?'rot chev':'chev')}</span></div>`
+    :`<div class="row" data-toggle="${b.id}">${icon('bulb','ki')}<span class="ttl" style="font-weight:400;color:var(--dim)">Thought for ${fsec(b.secs)}</span>${open?'':`<span class="prev">${esc(first)}</span>`}<span class="meta">${icon('chev',open?'rot chev':'chev')}</span></div>`;
+  return `<div class="thought ${b.live?'live':''}">${head}${open?`<div class="tbody">${md(b.text)}${b.live?'<span class="caret"></span>':''}</div>`:''}</div>`;
+}
+function agentCard(a){
+  const open=OPEN.has(a.id)||(a.status==='waiting'&&!CLOSED.has(a.id));
+  const pill={running:`<span class="pill violet"><span class="spin sm violet"></span>Running</span>`,waiting:`<span class="pill amber">${icon('shield','sm')}Needs approval</span>`,failed:`<span class="pill red">${icon('x','sm')}Failed</span>`,done:`<span class="pill green">${icon('check','sm')}Done</span>`,stopped:`<span class="pill">${icon('stop','sm')}Stopped</span>`,bg:`<span class="pill blue"><span class="dot blue pulse"></span>Background</span>`,queued:`<span class="pill">Starting</span>`}[a.status];
+  const time=a.status==='running'||a.status==='waiting'||a.status==='bg'?`<span class="tm" data-since="${a.since}"></span>`:`<span>${fsec(a.secs)}</span>`;
+  let h=`<div class="agent ${a.status}" id="ag-${a.id}"><div class="agent-h" data-toggle="${a.id}">${icon('bot','violet')}<span class="nm">${esc(a.name)}</span><span class="pill">${esc(a.sub||'general')}</span><span class="desc">${esc(a.desc)}</span><span class="meta">${pill}${time}<span>${a.tools} tools</span><span>${a.tok} tok</span>${icon('chev',open?'rot chev':'chev')}</span></div>`;
+  if((a.status==='running'||a.status==='bg')&&a.now)h+=`<div class="agent-now"><span class="spin sm violet"></span><span>${esc(a.now[0])}</span><span class="arg">${esc(a.now[1]||'')}</span>${a.quiet?`<span class="sp"></span><span class="hb" data-idle="${a.quiet}"></span>`:''}</div>`;
+  if(a.status==='waiting'&&!open)h+=`<div class="agent-now amber">${icon('shield','sm')}<span>Wants to ${esc(a.approval.verb)}</span><span class="arg">${esc(a.approval.cmd.split('\n')[0])}</span></div>`;
+  if(a.status==='failed'&&a.err)h+=`<div class="aerr">${esc(a.err)}</div>`;
+  if(a.status==='done'&&a.result&&!open)h+=`<div class="res">${md(a.result)}</div>`;
+  if(open){
+    const steps=a.steps||[];const hidden=Math.max(0,a.tools-steps.length);
+    h+=`<div class="agent-in"><div class="prompt"><b style="color:var(--dim);font-weight:500">Prompt</b> · ${esc(a.prompt||a.desc)}</div>${hidden?`<div class="more">+ ${hidden} earlier tool calls</div>`:''}${steps.map(s=>toolRow(s,true)).join('')}${a.status==='done'&&a.result?`<div class="res" style="padding:6px 0 2px 0">${md(a.result)}</div>`:''}</div>`;
+    if(a.status==='waiting')h+=permCard(a.approval,a.name);
+  }
+  return h+'</div>';
+}
+function permCard(p,from){
+  const body=p.diff?diffView(p.diff,'pd'+(p.id||''),false):`<pre class="cmd">${hl(p.cmd,'sh')}</pre>`;
+  return `<div class="card perm"><div class="card-h">${icon('shield','amber')}<b>${esc(p.title||('Allow '+(from?from:S.agent)+' to '+p.verb+'?'))}</b>${from?`<span class="src">· subagent ${esc(from)}</span>`:''}<span class="sp"></span><span class="src">waiting <span class="tm" data-since="${p.since||ago(41)}"></span></span></div>
+  ${body}
+  <div class="kv">${p.cwd?`<span>Directory</span><b>${esc(p.cwd)}</b>`:''}${p.reason?`<span>Reason</span><b style="font-weight:400">${esc(p.reason)}</b>`:''}${p.risk?`<span>Note</span><b class="amber" style="font-weight:400">${esc(p.risk)}</b>`:''}</div>
+  <div class="acts"><button class="btn primary" data-answer="allow">Allow once <kbd>⏎</kbd></button><button class="btn" data-answer="always">Always allow <code>${esc(p.always)}</code></button><button class="btn" data-answer="deny">Deny <kbd>esc</kbd></button><span class="note-in">Deny and tell the agent what to do instead…</span></div>
+  ${p.queue?`<div class="src" style="margin-top:8px">${p.queue}</div>`:''}</div>`;
+}
+function askCard(q){
+  return `<div class="card ask"><div class="card-h">${icon('help','blue')}<b>${esc(S.agent)} has a question</b><span class="qstep">Question ${q.step} of ${q.of}</span></div>
+  <div style="margin:2px 0 8px;font-size:14.5px">${esc(q.q)}</div>
+  ${q.opts.map((o,i)=>`<div class="opt ${q.multi?'multi':''} ${o.on?'on':''}" data-opt><span class="box"></span><div><div>${esc(o.l)}</div>${o.d?`<div class="d">${esc(o.d)}</div>`:''}</div></div>`).join('')}
+  <div class="opt" data-opt><span class="box"></span><div class="dim">Something else…</div></div>
+  <div class="acts"><button class="btn primary" data-answer="submit">Submit <kbd>⏎</kbd></button><button class="btn" data-answer="skip">Let the agent decide</button><span class="sp"></span><span class="src">${q.multi?'Pick any':'Pick one'}</span></div></div>`;
+}
+function block(b){
+  let h='';
+  switch(b.type){
+    case 'thought':h=thought(b);break;
+    case 'text':h=`<div class="md">${md(b.text,b.live)}${b.live&&!/```[^`]*$/.test(b.text)?'<span class="caret"></span>':''}</div>`;break;
+    case 'tool':h=toolRow(b);break;
+    case 'agent':h=agentCard(b);break;
+    case 'perm':h=permCard(b);break;
+    case 'ask':h=askCard(b);break;
+    case 'note':h=`<div class="note ${b.kind}">${b.spin?'<span class="spin sm"></span>':icon(b.ic,'sm')}<span>${b.html}</span></div>`;break;
+    case 'steer':h=`<div class="steer">${icon('up','sm')}<span class="dim">You, while it worked:</span><span>${esc(b.text)}</span><span class="sp"></span><span class="pill ${b.state==='delivered'?'green':''}">${b.state==='delivered'?'Delivered':'Queued'}</span></div>`;break;
+    case 'boot':h=`<div class="boot">${b.steps.map(s=>`<div>${s[0]==='ok'?icon('check','sm green'):s[0]==='run'?'<span class="spin sm"></span>':icon('x','sm red')}<span>${esc(s[1])}</span><span class="mono">${esc(s[2])}</span></div>`).join('')}</div>`;break;
+    case 'stall':h=`<div class="card stall"><div class="card-h">${icon('alert','amber')}<b>No output for <span class="tm" data-since="${b.since}"></span></b><span class="sp"></span><span class="src">checked 3s ago</span></div>
+      <div class="kv"><span>Process</span><b class="green" style="font-weight:500">alive · pid 51505 · CPU 0.4%</b><span>Last event</span><b style="font-weight:400">Run command <code>pnpm install</code> started</b><span>Waiting on</span><b style="font-weight:400">nothing from you, no open approvals or questions</b></div>
+      <div class="dim" style="font-size:12.5px">Installs and builds can be quiet. This card shows up after 60 s without events, so you never have to guess whether it is alive.</div>
+      <div class="acts"><button class="btn">Keep waiting</button><button class="btn">Ask for a status update</button><button class="btn">${icon('external','sm')} Open in OpenCode TUI</button><button class="btn danger">${icon('stop','sm')} Stop</button></div></div>`;break;
+    case 'fatal':h=`<div class="card fatal"><div class="card-h">${icon('x','red')}<b>${esc(b.title)}</b><span class="sp"></span><span class="src">${esc(b.when)}</span></div>
+      <div style="font-size:13.5px;color:var(--dim)">${b.text}</div>
+      ${OPEN.has(b.id)?`<pre class="cmd" style="color:var(--dim)">${esc(b.stderr)}</pre>`:''}
+      <div class="acts"><button class="btn primary">${icon('refresh','sm')} Restart agent</button><button class="btn">${icon('retry','sm')} Retry last message</button><button class="btn" data-toggle="${b.id}">${OPEN.has(b.id)?'Hide':'Show'} details</button><button class="btn">${icon('copy','sm')} Copy</button></div></div>`;break;
+    case 'stopped':h=`<div class="note">${icon('stop','sm')}<span><b>Stopped by you</b> after ${b.dur} · ${b.what}</span></div>`;break;
+    case 'changes':h=changes(b);break;
+  }
+  return `<div class="blk" id="b-${b.id}">${h}</div>`;
+}
+function changes(c){
+  const a=c.files.reduce((s,f)=>s+f.a,0),d=c.files.reduce((s,f)=>s+f.d,0);
+  return `<div class="changes"><div class="ch-h">${icon('pencil','sm')}<b>${c.files.length} files changed</b><span class="add">+${a}</span><span class="del">−${d}</span><span class="sp"></span><button class="ghost">Review all</button><button class="ghost">Undo</button></div>${c.files.map(f=>{const i=f.p.lastIndexOf('/')+1;return `<div class="ch-f"><span class="fs ${f.s}">${f.s}</span><span class="path">${esc(f.p.slice(0,i))}<b>${esc(f.p.slice(i))}</b></span><span class="sp"></span><span class="add">+${f.a}</span><span class="del">−${f.d}</span></div>`}).join('')}</div>`;
+}
+function blocks(bs){
+  let out='';
+  for(let i=0;i<bs.length;i++){
+    const b=bs[i];
+    if(b.type==='tool'&&b.kind==='read'&&b.status==='done'){
+      let j=i;while(j<bs.length&&bs[j].type==='tool'&&bs[j].kind==='read'&&bs[j].status==='done')j++;
+      if(j-i>1){out+=readGroup(bs.slice(i,j));i=j-1;continue}
+    }
+    out+=block(b);
+  }
+  return out;
+}
+function liveLine(m){
+  const L=m.live;if(!L)return '';
+  const cls={wait:'amber',stall:'amber',retry:'blue'}[L.k]||'';
+  const lead=L.k==='wait'?'<span class="dot amber pulse"></span>':L.k==='stall'?icon('alert','amber'):L.k==='retry'?icon('refresh','blue'):'<span class="spin"></span>';
+  return `<div class="live ${cls}" id="live-${m.id}">${lead}<b>${L.label}</b>${L.detail?`<span>${L.detail}</span>`:''}<span class="sep">·</span><span class="tm" data-since="${L.since}"></span>${L.tokens?`<span class="sep">·</span><span>↓ ${L.tokens} tokens</span>`:''}${L.until?`<span class="sep">·</span><span>retry in <span class="tm" data-until="${L.until}"></span></span>`:''}<span class="sp"></span>${L.k!=='wait'&&L.k!=='stall'&&L.last?`<span class="hb" data-idle="${L.last}"></span>`:''}<span class="esc"><kbd>esc</kbd> to stop</span></div>`;
+}
+function foot(f){
+  const lead=f.failed?`<span class="red" style="display:flex;gap:5px;align-items:center">${icon('x','sm')}Failed after ${f.dur}</span>`:f.stopped?`<span style="display:flex;gap:5px;align-items:center">${icon('stop','sm')}Stopped after ${f.dur}</span>`:`<span style="display:flex;gap:5px;align-items:center">${icon('check','sm green')}Worked ${f.dur}</span>`;
+  return `<div class="foot">${lead}<span class="sep">·</span><span>${f.tools} tool calls</span>${f.agents?`<span class="sep">·</span><span>${f.agents} subagents</span>`:''}<span class="sep">·</span><span>${esc(f.model)}</span><span class="sep">·</span><span title="input · output · cache hits">${f.tin} in · ${f.tout} out · ${f.cache} cached</span>${f.cost?`<span class="sep">·</span><span>${f.cost}</span>`:''}<span class="sp"></span><button class="ghost" title="Copy reply">${icon('copy','sm')}</button><button class="ghost" title="Retry">${icon('retry','sm')}</button><span>${f.at}</span></div>`;
+}
+function reply(m){
+  let h=`<div class="reply" id="m-${m.id}">`;
+  if(m.group){
+    const gid=m.id+'g',open=OPEN.has(gid);
+    h+=`<div class="group" data-toggle="${gid}">${icon('chev',open?'rot':'')}<b>Worked for ${m.group.dur}</b><span class="dim">${m.group.sum}</span></div>`;
+    h+=open?blocks(m.blocks):blocks(m.blocks.filter(b=>b.keep));
+  }else h+=blocks(m.blocks);
+  h+=liveLine(m);
+  if(m.foot)h+=foot(m.foot);
+  return h+'</div>';
+}
+function hero(){
+  const ag=[
+    ['Claude Code','2.1.304','ok','Ready · signed in','Subagents,Background,MCP,Images,Plan mode,Hooks'],
+    ['Codex','0.163.0','ok','Ready · ChatGPT Pro','Subagents,Background,MCP,Images,Plan mode,Review'],
+    ['OpenCode','2.0.32','ok','Service running on :4096','Subagents,Background,MCP,Images,Forms'],
+    ['Pi','1.3.0','ok','Ready · 4 extensions','Extensions,MCP,Images,~Subagents'],
+    ['Antigravity','1.4.2','warn','Auto mode unavailable on this plan; runs in Default','Subagents,Browser,~Images,~Plan mode'],
+    ['OpenRouter','built-in','ok','Key set · 312 models','Web search,Skills,Images'],
+  ];
+  return `<div class="hero"><div class="lg">嵐</div><h2>What should we build?</h2><div class="dim">vite-project · Local · pick an agent</div>
+  <div class="agents">${ag.map((a,i)=>`<div class="ac ${i===2?'on':''}"><div class="n">${icon('bot','sm')}${a[0]}<span class="v">${a[1]}</span></div><div class="s ${a[2]==='ok'?'green':'amber'}">${a[2]==='ok'?icon('check','sm'):icon('alert','sm')}<span>${a[3]}</span></div><div class="caps">${a[4].split(',').map(c=>c.startsWith('~')?`<span class="no">${c.slice(1)}</span>`:`<span>${c}</span>`).join('')}</div></div>`).join('')}</div></div>`;
+}
+function chat(){
+  if(S.hero)return hero();
+  return S.msgs.map(m=>m.role==='user'?`<div class="user"><div class="bubble">${esc(m.text)}</div><div class="time">${m.time}</div></div>`:m.role==='wake'?`<div class="wake">${icon('refresh','sm')}<span>${m.html}</span></div>`:reply(m)).join('');
+}
+function sideStatus(st){
+  return {
+    working:`<span class="st"><span class="spin sm"></span>Working · <span class="tm" data-since="${S.since||ago(22*60)}"></span></span>`,
+    starting:`<span class="st"><span class="spin sm"></span>Starting</span>`,
+    waiting:`<span class="st amber"><span class="dot amber pulse"></span>Needs you</span>`,
+    failed:`<span class="st red"><span class="dot red"></span>Failed</span>`,
+    done:`<span class="st blue"><span class="dot blue"></span>Done</span>`,
+    bg:`<span class="st blue"><span class="dot blue pulse"></span>2 in background</span>`,
+    stalled:`<span class="st amber">${icon('alert','sm')}Quiet 2m</span>`,
+    retry:`<span class="st blue">${icon('refresh','sm')}Retrying</span>`,
+    idle:`<span class="st dim">now</span>`,
+  }[st]||'';
+}
+function sidebar(){
+  const it=(ag,title,st,cur,ch)=>`<div class="si ${cur?'cur':''}"><div class="top"><span class="si ag" style="padding:0 5px;margin:0">${ag}</span><span>vite-project</span><span class="sp"></span>${st}</div><div class="t">${esc(title)}</div>${ch?`<div class="top">${ch}</div>`:''}</div>`;
+  return `<div class="brand"><span class="lg">嵐</span>Aether<span class="sp"></span>${icon('plus','dim')}</div>
+  <div class="sh">Projects · vite-project</div>
+  ${it(S.agent,S.title,sideStatus(S.side),true,S.side==='done'||S.side==='bg'?'<span class="add">+214</span><span class="del">−37</span><span>· 6 files</span>':'')}
+  ${it('Claude','Fix flaky auth tests',sideStatus('waiting'))}
+  ${it('Codex','Migrate build to Vite 7',sideStatus('failed'))}
+  ${it('Claude','Refactor store layer',sideStatus('done'))}
+  ${it('Pi','Resume site: about page',`<span class="st dim">19h</span>`)}
+  <div class="sh">Outside Aether</div>
+  <div class="si"><div class="top"><span class="si ag" style="padding:0 5px;margin:0">Claude</span><span>aether</span><span class="sp"></span><span class="st"><span class="spin sm"></span>Working</span></div><div class="t">Terminal session · pid 48211</div></div>`;
+}
+function head(){
+  return `<span class="vp">VP</span><span>vite-project</span><span>/</span><b>${esc(S.title)}</b><span class="sp"></span><span class="chip">${icon('bot','sm')}${esc(S.agent)} ${esc(S.ver)}</span><span class="chip">${icon('pencil','sm')}Changes</span>`;
+}
+function todos(){
+  if(!S.todos)return '';
+  const it=S.todos,done=it.filter(x=>x.s==='done').length,open=!CLOSED.has('todos');
+  const cur=it.find(x=>x.s==='active');
+  return `<div class="tray"><div class="tray-h" data-closed="todos">${icon('list','sm')}<b>Plan</b><span>${done} of ${it.length}</span><span class="prog"><i style="width:${done/it.length*100}%"></i></span>${cur?`<span class="cur">· ${esc(cur.a||cur.t)}</span>`:''}<span class="sp"></span>${icon('chev',open?'rot sm':'sm')}</div>${open?`<div class="tray-b">${it.map(x=>`<div class="todo ${x.s}">${x.s==='done'?icon('check','sm'):x.s==='active'?'<span class="spin sm"></span>':'<span class="circ"></span>'}<span>${esc(x.s==='active'&&x.a?x.a:x.t)}</span></div>`).join('')}</div>`:''}</div>`;
+}
+function bgTray(){
+  if(!S.bg.length)return '';
+  const run=S.bg.filter(b=>b.st==='run').length,open=!CLOSED.has('bg');
+  return `<div class="tray"><div class="tray-h" data-closed="bg"><span class="dot blue ${run?'pulse':''}"></span><b>Background</b><span>${run} running${S.bg.length>run?` · ${S.bg.length-run} finished`:''}</span><span class="sp"></span>${icon('chev',open?'rot sm':'sm')}</div>${open?`<div class="tray-b">${S.bg.map(b=>`<div class="bgi">${b.st==='run'?(b.kind==='agent'?'<span class="spin sm violet"></span>':'<span class="spin sm"></span>'):b.st==='ok'?icon('check','sm green'):icon('x','sm red')}${icon(b.kind==='agent'?'bot':'term','sm dim')}<span class="arg">${esc(b.name)}</span><span class="dim">${b.info}</span><span class="sp"></span>${b.st==='run'?`<span class="tm dim" data-since="${b.since}"></span>`:`<span class="dim">${b.when}</span>`}<button class="ghost">${b.kind==='agent'?'Open':'Output'}</button>${b.st==='run'?`<button class="ghost red">Stop</button>`:''}</div>`).join('')}</div>`:''}</div>`;
+}
+function composer(){
+  const c=S.composer,busy=c.state==='running'||c.state==='waiting';
+  const ph={idle:`Ask ${S.agent} anything, @tag files, / for commands`,running:`Type to steer ${S.agent} while it works`,waiting:`Answer above, or type to tell ${S.agent} what to do instead`,dead:''}[c.state];
+  const q=(c.queued||[]).map(t=>`<div class="queued">${icon('clock','sm')}<span>Queued</span><b>${esc(t)}</b><span class="sp"></span><span class="dim">sends when the current step ends</span><button class="ghost">Send now</button><button class="ghost">${icon('x','sm')}</button></div>`).join('');
+  const dead=c.state==='dead'?`<div class="dead-bar">${icon('x','sm')}<span>${esc(S.agent)} stopped. Your message will restart it.</span><span class="sp"></span><button class="btn">${icon('refresh','sm')} Restart now</button></div>`:'';
+  const send=busy?`${c.draft?`<button class="send" title="Send as steer">${icon('up')}</button>`:''}<button class="stopb" title="Stop (esc)">${icon('stop')}</button>`:`<button class="send ${c.draft?'':'off'}">${icon('up')}</button>`;
+  return `${todos()}${bgTray()}<div class="composer ${c.state}">${dead}${q}<div class="ta ${c.draft?'':'ph'}">${c.draft?esc(c.draft)+'<span class="caret"></span>':esc(ph)}</div><div class="cbar"><span class="chip">${icon('sparkle','sm')}${esc(S.model)}</span><span class="chip">${icon('shield','sm')}${esc(S.mode)}</span><span class="sp"></span><button class="ib">${icon('clip')}</button>${send}</div></div><div class="cfoot">${icon('folder','sm')}vite-project<span>${icon('branch','sm')} Local</span><span class="sp"></span><span>${S.ctx||'22%'} context</span></div>`;
+}
+function render(){
+  const sc=$('#scroll');const stick=sc.scrollHeight-sc.scrollTop-sc.clientHeight<120;
+  $('#side').innerHTML=sidebar();$('#head').innerHTML=head();$('#chat').innerHTML=chat();$('#dock').innerHTML=composer();
+  tick();if(stick)sc.scrollTop=sc.scrollHeight;
+}
+function patch(b){
+  const el=document.getElementById('b-'+b.id);
+  if(!el){render();return}
+  const sc=$('#scroll');const stick=sc.scrollHeight-sc.scrollTop-sc.clientHeight<120;
+  el.outerHTML=block(b);tick();if(stick)sc.scrollTop=sc.scrollHeight;
+}
+function tick(){
+  const t=now();
+  document.querySelectorAll('[data-since]').forEach(e=>e.textContent=fmt(t-+e.dataset.since));
+  document.querySelectorAll('[data-until]').forEach(e=>e.textContent=fmt(Math.max(0,+e.dataset.until-t)));
+  document.querySelectorAll('[data-idle]').forEach(e=>{const d=t-+e.dataset.idle;
+    e.className='hb'+(d<4000?'':d<30000?' q':' w');
+    e.innerHTML=d<4000?'<i></i>live':d<30000?`<i></i>quiet ${fmt(d)}`:`<i></i>no output ${fmt(d)}`;});
+}
+setInterval(tick,250);
+
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-scn]');if(g){load(g.dataset.scn);return}
+  const sp=e.target.closest('[data-split]');if(sp){const id=sp.dataset.split;SPLIT.has(id)?SPLIT.delete(id):SPLIT.add(id);render();return}
+  const a=e.target.closest('[data-answer]');if(a){answer(a.dataset.answer);return}
+  const o=e.target.closest('[data-opt]');if(o){const card=o.closest('.card');if(!o.classList.contains('multi'))card.querySelectorAll('.opt').forEach(x=>x!==o&&x.classList.remove('on'));o.classList.toggle('on');return}
+  const c=e.target.closest('[data-closed]');if(c){const id=c.dataset.closed;CLOSED.has(id)?CLOSED.delete(id):CLOSED.add(id);render();return}
+  const t=e.target.closest('[data-toggle]');if(t&&t.dataset.toggle){const id=t.dataset.toggle;
+    if(OPEN.has(id))OPEN.delete(id);else{OPEN.add(id);CLOSED.delete(id)}
+    if(!OPEN.has(id))CLOSED.add(id);
+    render()}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&ANSWER)answer('allow')});
+
+/* sample content */
+const ASKTXT='spawn 2 subagents and change the homepage design. you have creative freedom';
+const HERO_DIFF={path:'src/components/Hero.tsx',lang:'tsx',lines:[
+'@@ -1,14 +1,18 @@ export function Hero',
+' import { Link } from "@tanstack/react-router";',
+'+import { motion } from "motion/react";',
+' import "./Hero.css";',
+' ',
+' export function Hero() {',
+'   return (',
+'-    <section className="hero">',
+'-      <h1>Welcome to my site</h1>',
+'-      <p>I build things for the web.</p>',
+'+    <section className="hero hero--split">',
+'+      <motion.h1 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>',
+'+        Designing calm software',
+'+      </motion.h1>',
+'+      <p className="hero__lede">I build quiet, fast interfaces for the web.</p>',
+'       <Link to="/work" className="btn">',
+'-        See work',
+'+        See selected work',
+'       </Link>',
+'     </section>',
+'~ 24 unchanged lines',
+'@@ -40,6 +44,7 @@ function Stats',
+'   const items = useStats();',
+'-  return <ul className="stats">{items.map(render)}</ul>;',
+'+  return <ul className="stats stats--grid">{items.map(render)}</ul>;',
+' }',
+]};
+const TOKENS_LINES=[
+'@@ -0,0 +1,14 @@',
+'+:root {',
+'+  --ink: #101014;',
+'+  --paper: #f6f3ee;',
+'+  --accent: #e4572e;',
+'+  --radius: 14px;',
+'+  --space: clamp(16px, 2vw, 28px);',
+'+}',
+'+[data-theme="dark"] {',
+'+  --ink: #f2efe9;',
+'+  --paper: #0f0f12;',
+'+}',
+'+.hero--split {',
+'+  display: grid;',
+'+  grid-template-columns: 1.2fr 1fr;',
+'+}'];
+const BUILD_OUT=[
+'<span class="ac">vite v7.1.4</span> building for production...',
+'transforming (12) src/main.tsx',
+'transforming (148) node_modules/motion/dist/es/index.mjs',
+'<span class="ok">✓</span> 412 modules transformed.',
+'rendering chunks (3)...',
+'computing gzip size...',
+'dist/index.html                  0.46 kB │ gzip:  0.30 kB',
+'dist/assets/index-Bq2k1.css     18.92 kB │ gzip:  4.41 kB',
+'dist/assets/index-C9xQ0.js     214.37 kB │ gzip: 68.12 kB',
+'<span class="ok">✓ built in 2.41s</span>'];
+function early(){return[
+  TH('**Scoping the redesign.** Looking at the project layout and routes first. Then I will split the work: one subagent audits the current components, the other drafts a new visual direction.',3),
+  TL('skill','Load skill','frontend-design',{secs:0.2}),
+  TL('cmd','Run command','ls -la; cat package.json; git log --oneline -5',{status:'failed',exit:128,secs:5,err:'fatal: not a git repository (or any of the parent directories): .git',body:{cmd:'ls -la; cat package.json 2>/dev/null; git log --oneline -5 2>/dev/null',out:'total 48\ndrwxr-xr-x  14 iris  staff   448 Oct 20 08:13 .\n-rw-r--r--   1 iris  staff   812 Oct 19 22:10 package.json\n-rw-r--r--   1 iris  staff  1203 Oct 19 22:10 vite.config.ts\ndrwxr-xr-x   9 iris  staff   288 Oct 19 22:10 src\n<span class="er">fatal: not a git repository (or any of the parent directories): .git</span>',exit:128}}),
+  TH('No git repo, so I cannot lean on history. Mapping `src` directly.',1.4),
+  TL('cmd','Run command','find src -type f | head -100; ls src/routes',{secs:2,body:{cmd:'find src -type f | head -100; echo "---"; ls src/routes',out:'src/main.tsx\nsrc/routes/index.tsx\nsrc/routes/about.tsx\nsrc/components/Header.tsx\nsrc/components/Footer.tsx\nsrc/components/Hero.tsx\nsrc/components/CatSection.tsx\nsrc/styles.css\n---\n__root.tsx  about.tsx  index.tsx  work.tsx',exit:0,lines:'14 lines'}}),
+  TL('read','Read','src/routes/index.tsx',{body:{peek:['import { createFileRoute } from "@tanstack/react-router";','import { Hero } from "../components/Hero";','import { CatSection } from "../components/CatSection";','','export const Route = createFileRoute("/")({ component: Home });'],total:64}}),
+  TL('read','Read','src/components/Header.tsx',{body:{peek:['export function Header() {','  return <header className="page-wrap">…</header>;','}'],total:41}}),
+  TL('read','Read','src/components/Footer.tsx',{body:{peek:['export function Footer() {','  return <footer>…</footer>;','}'],total:22}}),
+  TH('Header and footer are fine. The hero and the global stylesheet carry most of the look; that is where the redesign goes.',2),
+  TL('search','Search','"page-wrap|nav-link|chip-line" in src',{matches:23,secs:0.3,body:{matches:[['src/styles.css:12','.page-wrap { max-width: 1080px; margin: 0 auto; }'],['src/components/Header.tsx:8','<nav className="nav-link">'],['src/components/CatSection.tsx:31','<span className="chip-line">']]}}),
+];}
+const TODOS=s=>[
+  {t:'Audit current homepage',a:'Auditing current homepage',s:s>0?'done':'active'},
+  {t:'Draft visual direction and tokens',a:'Drafting visual direction',s:s>1?'done':s===1?'active':'todo'},
+  {t:'Rewrite Hero with new layout',a:'Rewriting Hero',s:s>2?'done':s===2?'active':'todo'},
+  {t:'Restyle CatSection cards',a:'Restyling CatSection',s:s>3?'done':s===3?'active':'todo'},
+  {t:'Check dark mode and mobile',a:'Checking dark mode and mobile',s:s>4?'done':s===4?'active':'todo'},
+  {t:'Build and verify',a:'Building',s:s>5?'done':s===5?'active':'todo'},
+];
+function agentsDemo(){return[
+  AG({name:'Explore',sub:'explore',desc:'Audit current homepage components',status:'running',since:ago(72),tools:14,tok:'18.4k',now:['Reading','src/styles.css'],quiet:now()-1200,prompt:'List every component on the homepage, their class names, and which styles in styles.css they depend on.',steps:[TL('read','Read','src/components/CatSection.tsx'),TL('search','Search','"className=" in src/components',{matches:41}),TL('read','Read','src/styles.css',{status:'running',since:ago(2)})]}),
+  AG({name:'Designer',sub:'general',desc:'Draft a new visual direction and tokens',status:'waiting',since:ago(95),tools:6,tok:'9.2k',prompt:'Propose a calm editorial direction: tokens, type scale, hero layout. Install anything you need.',steps:[TL('read','Read','src/styles.css'),TL('write','Write','notes/direction.md',{add:38})],approval:{verb:'run a command',cmd:'pnpm add motion@^12 \\\n  && pnpm exec tsc --noEmit',cwd:'~/vite-project',reason:'Add motion for the hero entrance, then type-check',always:'pnpm add *',since:ago(41)}}),
+];}
+
+/* scenarios */
+function base(o={}){
+  SEQ=0;OPEN.clear();CLOSED.clear();SPLIT.clear();ANSWER=null;CLOSED.add('todos');
+  return Object.assign({title:'Homepage redesign with creative freedom',agent:'OpenCode',ver:'2.0.32',model:'DeepSeek V4.1 Flash',mode:'Supervised',msgs:[],todos:null,bg:[],composer:{state:'running',draft:'',queued:[]},side:'working',since:ago(22*60)},o);
+}
+const R=(blocks,o={})=>({role:'agent',id:nid('r'),blocks,...o});
+const SC={
+  new:{label:'New chat',note:'<b>New chat.</b> Every agent shows version, health and what it supports before you pick it. Problems such as missing binaries or downgraded modes appear here, not halfway through a turn.',
+    make(){S=base({hero:true,title:'New chat',side:'idle',composer:{state:'idle',draft:''}})}},
+  starting:{label:'Starting',note:'<b>Starting.</b> The connection steps are listed with a live timer. A slow start and a stuck start look different.',
+    make(){S=base({side:'starting',since:ago(2)});S.msgs=[U(ASKTXT),R([{type:'boot',id:'boot',steps:[['ok','Found opencode 2.0.32','~/.opencode/bin/opencode'],['ok','Service ready','127.0.0.1:4096 · 180 ms'],['run','Creating session','']]}],{live:{k:'start',label:'Starting OpenCode',since:ago(2),last:now()}})]}},
+  thinking:{label:'Thinking',note:'<b>Thinking.</b> Reasoning streams open with its own timer and collapses when done. Collapsed thoughts keep a one-line preview instead of a bare "Thought".',
+    make(){S=base();const th=TH('',6,true);S.msgs=[U(ASKTXT),R([...early(),th],{live:{k:'think',label:'Thinking',since:ago(48),tokens:'1.2k',last:now()}})];return async tok=>{await stream(th,'text','**Choosing a direction.** The current site is a generic centered hero with system fonts. A calm editorial look fits a personal site better: big serif display type, warm paper background, one accent colour. I will hand the token work to a subagent so the audit and the design run in parallel, and keep the Hero rewrite for myself once both report back.',tok,45)}}},
+  writing:{label:'Writing',note:'<b>Writing.</b> Markdown renders as it streams: code blocks get highlighting and a header while still open. The status line shows elapsed time, tokens and a live heartbeat.',
+    make(){S=base();const tx=TX('',true);S.msgs=[U(ASKTXT),R([...early(),tx],{live:{k:'write',label:'Writing',since:ago(14),tokens:'640',last:now()}})];return async tok=>{await stream(tx,'text','Here is the plan before I touch anything:\n\n1. **Explore** subagent audits `src/components` and `src/styles.css`\n2. **Designer** subagent drafts tokens in `src/styles/tokens.css`\n3. I rewrite `Hero.tsx` once both report back\n\nThe new tokens will look roughly like this:\n\n```css\n:root {\n  --ink: #101014;\n  --paper: #f6f3ee;\n  --accent: #e4572e;\n}\n```\n\nStarting both subagents now.',tok,40)}}},
+  tools:{label:'Running tools',note:'<b>Running tools.</b> Each running row has a live timer. Command output streams in place. A file being written shows its diff as it grows. Several reads in a row fold into one line.',
+    make(){S=base({todos:TODOS(2)});
+      const cmd=TL('cmd','Run command','pnpm build',{status:'running',since:ago(3),autoOpen:true,streaming:true,body:{cmd:'pnpm build',out:''}});
+      const wr=TL('write','Write','src/styles/tokens.css',{status:'running',since:ago(2),autoOpen:true,streaming:true,body:{diff:{path:'src/styles/tokens.css',lang:'css',isNew:true,lines:['@@ -0,0 +1,14 @@']}}});
+      S.msgs=[U(ASKTXT),R([...early(),wr,cmd],{live:{k:'tools',label:'Running 2 tools',since:ago(64),tokens:'3.4k',last:now()}})];
+      return async tok=>{for(let i=1;i<TOKENS_LINES.length;i++){wr.body.diff.lines.push(TOKENS_LINES[i]);patch(wr);await W(170,tok)}wr.status='done';wr.secs=3.1;wr.add=14;wr.streaming=false;patch(wr);
+        for(const l of BUILD_OUT){cmd.body.out+=(cmd.body.out?'\n':'')+l;patch(cmd);bump();await W(450,tok)}cmd.status='done';cmd.secs=4.2;cmd.body.exit=0;cmd.streaming=false;patch(cmd)}}},
+  agents:{label:'Subagents',note:'<b>Subagents, every state.</b> Each subagent card shows its live status, elapsed time, tool count, tokens and what it is doing right now. A subagent asking for approval opens its own card, so nothing hangs out of sight. Click a card to see its nested activity.',
+    make(){S=base({todos:TODOS(1),since:ago(130)});
+      const list=[...agentsDemo(),
+        AG({name:'Researcher',sub:'general',desc:'Collect reference homepages',status:'failed',secs:41,tools:6,tok:'7.9k',err:'webfetch failed: 403 Forbidden (dribbble.com) · gave up after 3 attempts',steps:[TL('web','Fetch','https://dribbble.com/tags/portfolio',{status:'failed',secs:1.2,err:'403 Forbidden'})]}),
+        AG({name:'Explore',sub:'explore',desc:'Map routes and layout',status:'done',secs:38,tools:9,tok:'12.1k',result:'Homepage is `src/routes/index.tsx` with `Hero`, `CatSection`, `Footer`. All styles live in one global `styles.css` (612 lines, no tokens). Dark mode uses `ThemeToggle` and `data-theme`.',steps:[TL('read','Read','src/routes/index.tsx'),TL('read','Read','src/routes/__root.tsx'),TL('search','Search','"data-theme" in src',{matches:4})]}),
+      ];
+      const sp=TH('Spawning two subagents in parallel: one audits, one designs.',1);
+      S.msgs=[U(ASKTXT),R([...early(),sp,...list],{live:{k:'wait',label:'Waiting for you',detail:'· Designer needs approval · 2 subagents still running',since:ago(130),tokens:'31.6k'}})];
+      S.side='waiting';S.composer.state='waiting';ANSWER=k=>{const d=list[1];d.status='running';d.now=['Running','pnpm add motion@^12'];d.quiet=now();S.msgs[1].live={k:'tools',label:'Running 2 subagents',since:ago(131),tokens:'31.9k',last:now()};S.side='working';S.composer.state='running';render()};
+      return async tok=>{const ex=list[0];const seq=[['Searching','"--color" in src/styles.css'],['Reading','src/components/ThemeToggle.tsx'],['Reading','src/components/ResumeAssistantButton.tsx']];let i=0;while(true){await W(2600,tok);ex.tools++;ex.now=seq[i++%seq.length];ex.quiet=now();patch(ex)}}}},
+  approval:{label:'Needs approval',note:'<b>Needs approval.</b> The card shows the full multi-line command or the real diff, where it runs, why, and a scoped "always" rule rather than a blanket grant. The status line, sidebar and composer all say the agent is waiting on you.',
+    make(){S=base({todos:TODOS(2),side:'waiting'});S.composer.state='waiting';
+      const ed=TL('edit','Edit','src/components/Hero.tsx',{status:'waiting',since:ago(18)});
+      S.msgs=[U(ASKTXT),R([...early(),TX('Both subagents reported back. Rewriting the hero now.'),ed,{type:'perm',id:'p1',title:'Allow OpenCode to edit Hero.tsx?',verb:'edit a file',diff:HERO_DIFF,cwd:'~/vite-project',reason:'Apply the new split hero layout from the Designer brief',always:'edits in src/components/**',since:ago(18),queue:'1 more request queued: run <code>pnpm build</code>'}],{live:{k:'wait',label:'Waiting for your approval',since:ago(18),tokens:'34.2k'}})];
+      ANSWER=k=>{const r=S.msgs[1];r.blocks=r.blocks.filter(b=>b.type!=='perm');ed.status=k==='deny'?'denied':'done';ed.add=9;ed.del=5;ed.secs=0.3;ed.body={diff:HERO_DIFF};if(k!=='deny')r.blocks.push(NT('ok','check',k==='always'?'<b>Always allow</b> edits in <code>src/components/**</code> for this chat':'<b>Allowed once</b>'));r.live={k:'think',label:'Thinking',since:ago(19),tokens:'34.4k',last:now()};S.side='working';S.composer.state='running';ANSWER=null;render()};}},
+  question:{label:'Question',note:'<b>Question.</b> Native question tools from Claude, Codex, OpenCode and Pi render as one card. It supports multi-select, descriptions, several questions in a row and free text, and it shows which question you are on.',
+    make(){S=base({side:'waiting'});S.composer.state='waiting';
+      S.msgs=[U(ASKTXT),R([...early(),{type:'ask',id:'q1',step:1,of:2,q:'Which direction should the homepage take?',opts:[{l:'Calm editorial',d:'Serif display type, warm paper background, one accent colour',on:true},{l:'Bold and playful',d:'Big colour blocks, rounded shapes, motion everywhere'},{l:'Minimal portfolio',d:'Mostly whitespace, project grid first'}]}],{live:{k:'wait',label:'Waiting for your answer',since:ago(9),tokens:'14.0k'}})];
+      ANSWER=k=>{const r=S.msgs[1];r.blocks=r.blocks.filter(b=>b.type!=='ask');r.blocks.push(NT('ok','check','<b>You answered</b> Calm editorial'));r.live={k:'think',label:'Thinking',since:ago(10),tokens:'14.1k',last:now()};S.side='working';S.composer.state='running';ANSWER=null;render()};}},
+  background:{label:'Background',note:'<b>Background work.</b> The turn has ended but work is still running, and the sidebar says so. The tray keeps live timers and output. When a task finishes and the agent wakes up, a marker says why a new reply started.',
+    make(){S=base({side:'bg',composer:{state:'idle',draft:''},todos:null});
+      const dev=TL('cmd','Run command','pnpm dev',{status:'bg',since:ago(252),body:{cmd:'pnpm dev',out:'<span class="ac">VITE v7.1.4</span>  ready in 412 ms\n\n  ➜  Local:   <span class="ac">http://localhost:5173/</span>\n  ➜  Network: use --host to expose\n<span class="dim">12:41:07 [vite] hmr update /src/components/Hero.tsx</span>'}});
+      const ex=AG({name:'Explore',sub:'explore',desc:'Check every route for broken styles',status:'bg',since:ago(63),tools:14,tok:'21.0k',now:['Reading','src/routes/work.tsx'],quiet:now()});
+      const test=TL('cmd','Run command','pnpm test',{status:'failed',exit:1,secs:118,err:'1 failed · Header.test.tsx › renders nav links',body:{cmd:'pnpm test',out:' <span class="ok">✓</span> src/components/Hero.test.tsx (3)\n <span class="er">✗</span> src/components/Header.test.tsx (1)\n   <span class="er">→ expected "nav-link" class, got "nav__link"</span>\n\n Test Files  <span class="er">1 failed</span> | 4 passed (5)',exit:1}});
+      S.msgs=[U(ASKTXT),R([TH('Starting the dev server and a background route check while I keep working.',2),dev,ex,TL('cmd','Run command','pnpm test',{status:'done',secs:0.2,arg:'pnpm test  → moved to background'}),TX('Dev server is up at `http://localhost:5173`. Tests and the route check run in the background; I will pick them up when they finish.')],{foot:{dur:'2m 10s',tools:12,agents:1,model:'DeepSeek V4.1 Flash',tin:'88k',tout:'4.1k',cache:'71%',cost:'$0.03',at:'8:41 AM'}}),
+        {role:'wake',html:'<b>Agent resumed on its own</b> · background task <code>pnpm test</code> finished with exit 1'},
+        R([test,TX('The test run caught one regression: I renamed `nav-link` to `nav__link` in the header styles. I will either revert the class name or update `Header.test.tsx`. Which do you prefer?')],{foot:{dur:'18s',tools:1,model:'DeepSeek V4.1 Flash',tin:'91k',tout:'0.4k',cache:'88%',cost:'$0.01',at:'8:43 AM'}})];
+      S.bg=[{kind:'cmd',name:'pnpm dev',info:'localhost:5173',st:'run',since:ago(252)},{kind:'agent',name:'Explore',info:'route check · 14 tools',st:'run',since:ago(63)},{kind:'cmd',name:'pnpm test',info:'exit 1 · 1 failed',st:'fail',when:'2m ago'}];
+      return async tok=>{const seq=[['Reading','src/routes/about.tsx'],['Searching','"className" in src/routes'],['Reading','src/routes/work.tsx']];let i=0;while(true){await W(2200,tok);ex.tools++;ex.now=seq[i++%3];ex.quiet=now();patch(ex)}}}},
+  notices:{label:'Retries & notices',note:'<b>Retries and notices.</b> Events that used to be dropped now show as quiet one-line markers: hooks, mode changes, compaction, model fallback, MCP sign-in. A rate-limit retry gets a live countdown instead of looking frozen.',
+    make(){S=base({side:'retry',todos:TODOS(3),ctx:'31%'});
+      S.msgs=[U(ASKTXT),R([...early().slice(0,5),
+        NT('','zap','<b>Hook</b> PreToolUse · lint-guard passed · 120 ms'),
+        NT('','shield','<b>Permission mode</b> changed to Accept edits, because you chose “Always allow edits”'),
+        NT('ok','layers','<b>Context compacted</b> 182k → 34k tokens · <button class="ghost">View summary</button>'),
+        NT('warn','swap','<b>Model fallback</b> deepseek-v4.1 overloaded, now on deepseek-v4.1-flash for this turn'),
+        NT('warn','plug','<b>MCP server “figma” needs sign-in</b> <button class="ghost">Sign in</button>'),
+        NT('bad','zap','<b>Hook blocked</b> Write to <code>dist/index.html</code>: “generated files are read-only”'),
+        TL('web','Fetch','https://fonts.google.com/specimen/Fraunces',{secs:1.1}),
+        NT('','refresh','<b>Rate limited</b> by DeepSeek (429) · attempt 2 of 10',{spin:true}),
+      ],{live:{k:'retry',label:'Retrying',detail:'· rate limited (429) · attempt 2 of 10',since:ago(21),until:now()+9000,tokens:'5.1k',last:now()-21000}})];
+      return async tok=>{let n=2;while(true){await W(9000,tok);n++;const r=S.msgs[1];r.live.until=now()+9000;r.live.detail=`· rate limited (429) · attempt ${n} of 10`;r.blocks[r.blocks.length-1].html=`<b>Rate limited</b> by DeepSeek (429) · attempt ${n} of 10`;render()}}}},
+  stalled:{label:'Stalled',note:'<b>Stalled, not hidden.</b> After 60 s with no events Aether says so plainly, checks that the process is still alive, and shows the last thing it saw and whether anything is waiting on you. You decide whether to wait, nudge or stop.',
+    make(){S=base({side:'stalled'});
+      S.msgs=[U(ASKTXT),R([...early(),TL('cmd','Run command','pnpm install',{status:'running',since:ago(134),autoOpen:true,body:{cmd:'pnpm install',out:'Lockfile is up to date, resolution step is skipped\nProgress: resolved 1, reused 0, downloaded 0, added 0'}}),{type:'stall',id:'st',since:ago(134)}],{live:{k:'stall',label:'No output',detail:'· process alive · last event 2m ago',since:ago(410),tokens:'22.8k'}})]}},
+  errors:{label:'Errors',note:'<b>Errors with weight.</b> A failed tool shows its error line without expanding and the run continues. A stream that recovered is a quiet note and does not mark the reply failed. Only a fatal error gets a red card, with the reason, the stderr tail and next steps.',
+    make(){S=base({side:'failed',composer:{state:'dead',draft:''}});
+      S.msgs=[U(ASKTXT),R([...early().slice(0,5),
+        NT('ok','refresh','<b>Stream dropped</b>, reconnected after 2 s · nothing lost'),
+        TL('cmd','Run command','pnpm exec tsc --noEmit',{status:'failed',exit:2,secs:6,err:'src/components/Hero.tsx(14,9): error TS2322: Type \'string\' is not assignable to type \'number\'.',body:{cmd:'pnpm exec tsc --noEmit',out:'<span class="er">src/components/Hero.tsx(14,9): error TS2322</span>: Type \'string\' is not assignable to type \'number\'.\n\nFound 1 error in src/components/Hero.tsx:14',exit:2}}),
+        AG({name:'Designer',sub:'general',desc:'Draft a new visual direction and tokens',status:'failed',secs:52,tools:7,tok:'10.3k',err:'Child session error: provider returned 500 (deepseek) after 3 retries'}),
+        {type:'fatal',id:'fx',title:'OpenCode service stopped responding',when:'8:16 AM',text:'Lost the connection to <code>127.0.0.1:4096</code>, and the service did not come back after 3 attempts over 20 s. Aether stopped the turn. Files keep the last finished edit.',stderr:'[service] panic: database is locked (SQLITE_BUSY)\n    at session.v2.append (storage.ts:211)\n[service] exiting with code 1'},
+      ],{foot:{failed:true,dur:'2m 03s',tools:9,agents:1,model:'DeepSeek V4.1 Flash',tin:'61k',tout:'2.2k',cache:'64%',cost:'$0.02',at:'8:16 AM'}})]}},
+  stopped:{label:'Stopped',note:'<b>Stopped.</b> Interrupted rows say Stopped, not Done or a spinner forever. A marker says what was cut off, and queued messages go back to the composer.',
+    make(){S=base({side:'idle',composer:{state:'idle',draft:'also keep the footer exactly as it is'}});
+      S.msgs=[U(ASKTXT),R([...early(),TL('cmd','Run command','pnpm build',{status:'stopped',secs:3}),
+        AG({name:'Explore',sub:'explore',desc:'Audit current homepage components',status:'stopped',secs:72,tools:14,tok:'18.4k'}),
+        AG({name:'Designer',sub:'general',desc:'Draft a new visual direction and tokens',status:'stopped',secs:95,tools:6,tok:'9.2k'}),
+        {type:'stopped',id:'s1',dur:'1m 12s',what:'1 command and 2 subagents were interrupted · your queued message is back in the composer'}],{foot:{stopped:true,dur:'1m 12s',tools:11,agents:2,model:'DeepSeek V4.1 Flash',tin:'52k',tout:'1.9k',cache:'60%',cost:'$0.02',at:'8:15 AM'}})]}},
+  steering:{label:'Steering',note:'<b>Steering.</b> A message sent mid-turn shows inline where the agent picked it up, in the same reply. Messages that cannot be delivered yet sit in a queue you can send now, edit or drop.',
+    make(){S=base({todos:TODOS(2)});S.composer={state:'running',draft:'and make sure the hero works on mobile',queued:['keep the footer exactly as it is']};
+      S.msgs=[U(ASKTXT),R([...early(),{type:'steer',id:'sv',text:'also keep dark mode working',state:'delivered'},TH('The user wants dark mode preserved. The new tokens need a `[data-theme="dark"]` block.',2),TL('edit','Edit','src/styles/tokens.css',{status:'running',since:ago(2)})],{live:{k:'tools',label:'Editing',since:ago(88),tokens:'26.1k',last:now()}})]}},
+  done:{label:'Done',note:'<b>Done.</b> The finished turn folds into a single “Worked for …” line with counts, and the full timeline is one click away. The answer, a highlighted diff (unified or split) and the changed files stay visible. The footer shows time, tokens, cache and cost.',
+    make(){S=base({side:'done',composer:{state:'idle',draft:''},todos:TODOS(6)});CLOSED.add('todos');
+      const ed=TL('edit','Edit','src/components/Hero.tsx',{add:9,del:5,keep:true,body:{diff:HERO_DIFF}});OPEN.add(ed.id);
+      const list=[AG({name:'Explore',sub:'explore',desc:'Audit current homepage components',status:'done',secs:84,tools:17,tok:'22.0k',result:'Found 3 sections and 612 lines of global CSS with no tokens.'}),AG({name:'Designer',sub:'general',desc:'Draft a new visual direction and tokens',status:'done',secs:131,tools:9,tok:'14.6k',result:'Calm editorial direction: Fraunces display, warm paper, one accent.'})];
+      S.msgs=[U(ASKTXT),R([...early(),...list,TL('write','Write','src/styles/tokens.css',{add:14,secs:0.2}),TL('cmd','Run command','pnpm build',{secs:4.2,body:{cmd:'pnpm build',out:BUILD_OUT.join('\n'),exit:0}}),ed,
+        {...TX('### New homepage: calm editorial\n\nTwo subagents ran in parallel. One audited the existing components, the other drafted the direction. Then I rewrote the hero and the global tokens.\n\n| Area | Before | After |\n|---|---|---|\n| Type | system-ui | Fraunces display + Inter |\n| Hero | centered, one column | split grid, entrance motion |\n| Colour | hard-coded greys | 6 tokens, dark mode aware |\n\n- `src/styles/tokens.css` holds every colour and spacing value\n- `Hero.tsx` uses `motion` for a 300 ms fade-up\n- The build passes; no type errors\n\n```tsx\n<motion.h1 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>\n  Designing calm software\n</motion.h1>\n```\n\nRun `pnpm dev` and open the home page to see it.'),keep:true},
+        {type:'changes',id:'ch',keep:true,files:[{p:'src/components/Hero.tsx',s:'M',a:9,d:5},{p:'src/styles/tokens.css',s:'A',a:14,d:0},{p:'src/styles.css',s:'M',a:121,d:28},{p:'src/components/CatSection.tsx',s:'M',a:44,d:4},{p:'src/components/Hero.css',s:'M',a:26,d:0},{p:'package.json',s:'M',a:0,d:0}]}],
+        {group:{dur:'6m 41s',sum:'· 2 subagents · read 9 files · ran 4 commands · edited 6 files'},foot:{dur:'6m 41s',tools:31,agents:2,model:'DeepSeek V4.1 Flash',tin:'182k',tout:'12.4k',cache:'91%',cost:'$0.08',at:'8:20 AM'}})]}},
+};
+/* live play */
+const W=(ms,tok)=>new Promise((res,rej)=>setTimeout(()=>tok===PLAY?res():rej('abort'),ms));
+async function stream(b,key,text,tok,ms=30){const parts=text.split(/(\s+)/);b[key]='';for(const p of parts){b[key]+=p;patch(b);bump();if(p.trim())await W(ms,tok)}}
+function bump(){const r=S&&S.msgs&&S.msgs.find(m=>m.live);if(r&&r.live&&r.live.last){r.live.last=now();const el=document.querySelector(`#live-${r.id} .hb`);if(el)el.dataset.idle=r.live.last}}
+function answer(k){if(ANSWER){const f=ANSWER;ANSWER=null;f(k)}}
+async function play(tok){
+  S=base({todos:null,since:now()});const t0=now();
+  const r=R([],{live:{k:'start',label:'Starting OpenCode',since:t0,last:now()}});S.msgs=[U(ASKTXT),r];S.side='starting';render();
+  const boot={type:'boot',id:'boot',steps:[['run','Finding opencode','']]};r.blocks.push(boot);render();
+  await W(600,tok);boot.steps=[['ok','Found opencode 2.0.32','~/.opencode/bin/opencode'],['run','Connecting to service','']];patch(boot);
+  await W(700,tok);boot.steps[1]=['ok','Service ready','127.0.0.1:4096 · 180 ms'];boot.steps.push(['run','Creating session',''] );patch(boot);
+  await W(600,tok);r.blocks=r.blocks.filter(b=>b!==boot);S.side='working';
+  r.live={k:'think',label:'Thinking',since:t0,tokens:'0.2k',last:now()};
+  const th=TH('',0,true);th.since=now();r.blocks.push(th);render();
+  await stream(th,'text','**Scoping the redesign.** Looking at routes and components first, then splitting work between two subagents.',tok,55);
+  th.live=false;th.secs=(now()-th.since)/1000;patch(th);
+  S.todos=TODOS(0);r.live={k:'tools',label:'Running tools',since:t0,tokens:'0.9k',last:now()};
+  const steps=early().slice(4);
+  for(const s of steps){
+    if(s.type==='tool'){const fin={status:s.status,secs:s.secs};s.status='running';s.since=now();r.blocks.push(s);render();await W(s.kind==='cmd'?1300:450,tok);Object.assign(s,fin);patch(s);bump()}
+    else{r.blocks.push(s);render();await W(500,tok)}
+  }
+  render();
+  r.live={k:'tools',label:'Running 2 subagents',since:t0,tokens:'4.0k',last:now()};S.todos=TODOS(1);
+  const [ex,ds]=agentsDemo();ex.since=now();ex.tools=0;ex.steps=[];ds.since=now();ds.tools=0;ds.status='running';ds.now=['Reading','src/styles.css'];ds.quiet=now();ds.steps=[];
+  r.blocks.push(ex,ds);render();
+  const exSeq=[['read','Read','src/components/Hero.tsx'],['read','Read','src/components/CatSection.tsx'],['search','Search','"className=" in src/components'],['read','Read','src/styles.css'],['read','Read','src/components/ThemeToggle.tsx']];
+  for(let i=0;i<3;i++){await W(1100,tok);const s=exSeq[i];ex.tools++;ex.now=[s[1]==='Read'?'Reading':'Searching',s[2]];ex.quiet=now();ex.steps.push(TL(s[0],s[1],s[2]));patch(ex);bump();
+    ds.tools++;ds.quiet=now();ds.now=i===1?['Writing','notes/direction.md']:['Reading','src/styles.css'];patch(ds)}
+  ds.status='waiting';ds.approval.since=now();r.live={k:'wait',label:'Waiting for you',detail:'· Designer needs approval',since:now(),tokens:'9.8k'};S.side='waiting';S.composer.state='waiting';render();
+  setNote('<b>▶ Live run is paused on you.</b> The Designer subagent wants to run a command. Click <b>Allow once</b> on its card (or press Enter) to continue.');
+  await new Promise(res=>{ANSWER=res});if(tok!==PLAY)return;
+  setNote(SC_PLAY_NOTE);
+  ds.status='running';ds.now=['Running','pnpm add motion@^12'];ds.quiet=now();ds.steps.push(TL('cmd','Run command','pnpm add motion@^12 && pnpm exec tsc --noEmit',{secs:3.4}));OPEN.delete(ds.id);
+  r.live={k:'tools',label:'Running 2 subagents',since:t0,tokens:'10.4k',last:now()};S.side='working';S.composer.state='running';render();
+  for(let i=3;i<5;i++){await W(1000,tok);const s=exSeq[i];ex.tools++;ex.now=['Reading',s[2]];ex.quiet=now();ex.steps.push(TL(s[0],s[1],s[2]));patch(ex);bump()}
+  ex.status='done';ex.secs=(now()-ex.since)/1000;ex.result='Homepage is `Hero`, `CatSection`, `Footer`. One global `styles.css`, no tokens.';patch(ex);S.todos=TODOS(1);render();
+  const rl=NT('','refresh','<b>Rate limited</b> by DeepSeek (429) · attempt 1 of 10',{spin:true});r.blocks.push(rl);r.live={k:'retry',label:'Retrying',detail:'· rate limited (429)',since:t0,until:now()+4000,tokens:'12.0k',last:now()};render();
+  await W(4000,tok);rl.spin=false;rl.kind='ok';rl.ic='check';rl.html='<b>Recovered</b> after 1 retry (4 s)';
+  ds.status='done';ds.secs=(now()-ds.since)/1000;ds.result='Calm editorial: Fraunces display, warm paper, one accent. Tokens drafted.';
+  S.todos=TODOS(2);r.live={k:'tools',label:'Writing tokens.css',since:t0,tokens:'14.2k',last:now()};render();
+  const wr=TL('write','Write','src/styles/tokens.css',{status:'running',since:now(),autoOpen:true,streaming:true,body:{diff:{path:'src/styles/tokens.css',lang:'css',isNew:true,lines:['@@ -0,0 +1,14 @@']}}});r.blocks.push(wr);render();
+  for(let i=1;i<TOKENS_LINES.length;i++){wr.body.diff.lines.push(TOKENS_LINES[i]);patch(wr);bump();await W(140,tok)}
+  wr.status='done';wr.secs=2.1;wr.add=14;wr.streaming=false;patch(wr);
+  S.todos=TODOS(5);
+  const cmd=TL('cmd','Run command','pnpm build',{status:'running',since:now(),autoOpen:true,streaming:true,body:{cmd:'pnpm build',out:''}});r.blocks.push(cmd);r.live={k:'tools',label:'Building',since:t0,tokens:'15.0k',last:now()};render();
+  for(const l of BUILD_OUT){cmd.body.out+=(cmd.body.out?'\n':'')+l;patch(cmd);bump();await W(300,tok)}
+  cmd.status='done';cmd.secs=3;cmd.body.exit=0;cmd.streaming=false;CLOSED.add(cmd.id);patch(cmd);
+  S.todos=TODOS(6);r.live={k:'write',label:'Writing',since:t0,tokens:'15.6k',last:now()};render();
+  const tx=TX('',true);r.blocks.push(tx);render();
+  await stream(tx,'text','Done. The homepage now uses a **calm editorial** look:\n\n- `src/styles/tokens.css` holds the palette and spacing\n- the hero is a split grid with a 300 ms fade-up\n- the build passes\n\nOpen `http://localhost:5173` to see it.',tok,35);
+  tx.live=false;r.live=null;S.side='done';S.composer.state='idle';
+  r.foot={dur:fmt(now()-t0),tools:14,agents:2,model:'DeepSeek V4.1 Flash',tin:'96k',tout:'6.1k',cache:'84%',cost:'$0.04',at:'now'};
+  r.blocks.push({type:'changes',id:'chp',files:[{p:'src/styles/tokens.css',s:'A',a:14,d:0},{p:'src/components/Hero.tsx',s:'M',a:9,d:5}]});
+  render();setNote('<b>Live run finished.</b> Scroll up to expand any row or subagent, or pick another scenario above.');
+}
+const SC_PLAY_NOTE='<b>▶ Live run.</b> One full OpenCode turn, start to finish: startup, thinking, tools, two parallel subagents, an approval that waits on you, a rate-limit retry, a streaming file write, a build and the final answer. Timers are real.';
+function setNote(h){$('#note').innerHTML=h}
+let CUR='play';
+function load(k){
+  CUR=k;PLAY++;const tok=PLAY;
+  document.querySelectorAll('.scn').forEach(b=>b.classList.toggle('on',b.dataset.scn===k));
+  if(k==='play'){setNote(SC_PLAY_NOTE);play(tok).catch(()=>{});return}
+  const sc=SC[k];const anim=sc.make();setNote(sc.note);render();$('#scroll').scrollTop=1e9;
+  if(anim)anim(tok).catch(()=>{});
+  const hbLoop=async()=>{while(true){await W(1500,tok);if(!['stalled','notices'].includes(k))bump()}};hbLoop().catch(()=>{});
+}
+$('#scns').innerHTML=`<span class="tag">Aether chat prototype</span><button class="scn play" data-scn="play">${icon('play','sm')} Live run</button>`+Object.entries(SC).map(([k,v])=>`<button class="scn" data-scn="${k}">${v.label}</button>`).join('');
+load('play');
+</script>
+</body>
+</html>
