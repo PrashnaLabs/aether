@@ -2893,3 +2893,100 @@ fn permissions_unknown_pick_sends_exact_empty_turn_grant() {
         Some(json!({"id": 12, "result": {"permissions": {}, "scope": "turn"}}))
     );
 }
+
+fn fork_state() -> State {
+    State {
+        active: true,
+        turn: 1,
+        thread: "main".into(),
+        model: "gpt-6.1-sol".into(),
+        ..State::default()
+    }
+}
+
+#[test]
+fn fork_requests_pin_model_read_only_and_boundary() {
+    let p = fork_params("main", "gpt-6.1-sol");
+    assert_eq!(p["threadId"], "main");
+    assert_eq!((p["ephemeral"].as_bool(), p["excludeTurns"].as_bool()), (Some(true), Some(true)));
+    assert_eq!(
+        (p["model"].as_str(), p["sandbox"].as_str()),
+        (Some("gpt-6.1-sol"), Some("read-only"))
+    );
+    assert_eq!(p["approvalPolicy"], "never");
+    assert!(p["developerInstructions"].as_str().unwrap().contains("boundary"));
+    let turn = fork_turn_params("side", "why?");
+    assert_eq!(turn["threadId"], "side");
+    assert_eq!(turn["input"][0]["text"], "why?");
+}
+
+#[test]
+fn side_question_needs_a_prior_turn_and_a_model() {
+    let (tx, _rx) = futures::channel::mpsc::unbounded();
+    let mut s = State { turn: 0, ..fork_state() };
+    assert!(fork_line(&mut s, false, "q", tx.clone()).is_none());
+    assert!(fork_line(&mut s, true, "q", tx.clone()).is_some());
+    let mut s = State { model: String::new(), ..fork_state() };
+    assert!(fork_line(&mut s, false, "q", tx.clone()).is_none());
+    s.resolved = "gpt-6.1-sol".into();
+    assert!(fork_line(&mut s, false, "q", tx.clone()).is_some());
+    let mut s = State { dead: Some("gone".into()), ..fork_state() };
+    assert!(fork_line(&mut s, false, "q", tx).is_none());
+}
+
+#[test]
+fn fork_answer_goes_to_the_reply_and_never_the_main_stream() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = fork_state();
+    let line = fork_line(&mut s, false, "why?", tx).unwrap();
+    assert_eq!(line["method"], "thread/fork");
+    let forked = json!({"id": line["id"], "result": {"thread": {"id": "fork"}}});
+    assert_eq!(map_event(&mut s, &forked), []);
+    let [turn] = &std::mem::take(&mut s.outbox)[..] else { panic!("{:?}", s.outbox) };
+    assert_eq!(
+        (turn["method"].as_str(), turn["params"]["threadId"].as_str()),
+        (Some("turn/start"), Some("fork"))
+    );
+    let approval = json!({"method": "item/commandExecution/requestApproval", "id": 9, "params": {"threadId": "fork", "command": "ls"}});
+    assert_eq!(map_event(&mut s, &approval), []);
+    assert_eq!(std::mem::take(&mut s.outbox)[0]["result"]["decision"], "decline");
+    let say = |text: &str| json!({"method": "item/completed", "params": {"threadId": "fork", "item": {"type": "agentMessage", "id": "m", "text": text}}});
+    for v in [say("because"), say("really")] {
+        assert_eq!(map_event(&mut s, &v), []);
+    }
+    for line in [COMMENTARY_DELTA, USAGE_1, MODEL_ERROR] {
+        let mut v: Value = serde_json::from_str(line).unwrap();
+        v["params"]["threadId"] = "fork".into();
+        assert_eq!(map_event(&mut s, &v), []);
+    }
+    assert!(rx.try_recv().is_err());
+    let done = json!({"method": "turn/completed", "params": {"threadId": "fork", "turn": {"id": "t", "status": "completed"}}});
+    assert_eq!(map_event(&mut s, &done), []);
+    assert_eq!(rx.try_recv().unwrap(), Update::Final("because\n\nreally".into()));
+    let [unsub] = &std::mem::take(&mut s.outbox)[..] else { panic!("{:?}", s.outbox) };
+    assert_eq!(unsub["method"], "thread/unsubscribe");
+    assert!(s.sides.is_empty() && s.active && s.turn == 1);
+}
+
+#[test]
+fn fork_failures_are_errors_on_the_reply() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = fork_state();
+    let line = fork_line(&mut s, false, "q", tx).unwrap();
+    let bad = json!({"id": line["id"], "error": {"message": "no fork"}});
+    assert_eq!(map_event(&mut s, &bad), []);
+    assert_eq!(rx.try_recv().unwrap(), Update::Error("no fork".into()));
+
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let line = fork_line(&mut s, false, "q", tx).unwrap();
+    map_event(&mut s, &json!({"id": line["id"], "result": {"thread": {"id": "fork"}}}));
+    let failed = json!({"method": "turn/completed", "params": {"threadId": "fork", "turn": {"id": "t", "status": "failed", "error": {"message": "boom"}}}});
+    assert_eq!(map_event(&mut s, &failed), []);
+    assert_eq!(rx.try_recv().unwrap(), Update::Error("boom".into()));
+
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let line = fork_line(&mut s, false, "q", tx).unwrap();
+    map_event(&mut s, &json!({"id": line["id"], "result": {"thread": {"id": "fork"}}}));
+    on_death(&mut s, "gone".into());
+    assert_eq!(rx.try_recv().unwrap(), Update::Error("gone".into()));
+}

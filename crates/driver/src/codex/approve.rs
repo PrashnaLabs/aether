@@ -165,7 +165,8 @@ pub(crate) fn reply(s: &mut State, id: u64, answer: &Answer) -> Option<Value> {
 
 pub(crate) fn server_request(s: &mut State, method: &str, v: &Value) -> Vec<Update> {
     let (id, p) = (v["id"].clone(), &v["params"]);
-    let side = matches!(&s.naming, Naming::Side(side) if p["threadId"] == *side);
+    let side = matches!(&s.naming, Naming::Side(side) if p["threadId"] == *side)
+        || p["threadId"].as_str().is_some_and(|t| s.sides.contains_key(t));
     let (ask, kind) = match method {
         "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" if side => {
             s.outbox.push(json!({"id": id, "result": {"decision": "decline"}}));

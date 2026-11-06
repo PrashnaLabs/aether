@@ -88,6 +88,8 @@ enum Call {
     Note,
     Models(String),
     SideThread(String),
+    Fork(String, UnboundedSender<Update>),
+    ForkTurn(String),
     Terminate(String),
     Reconcile(Vec<String>),
 }
@@ -104,6 +106,8 @@ enum Naming {
 
 #[derive(Default)]
 pub(crate) struct State {
+    /// Fork thread id to the side question it answers.
+    sides: HashMap<String, Side>,
     next_id: u64,
     calls: HashMap<u64, Call>,
     outbox: Vec<Value>,
@@ -148,6 +152,11 @@ pub(crate) struct State {
     resolved: String,
     /// Items started this turn; only these can be cut by its Stop.
     turn_rows: HashSet<String>,
+}
+
+pub(crate) struct Side {
+    reply: UnboundedSender<Update>,
+    text: String,
 }
 
 const LIVE_OUTPUT_CAP: usize = 64 * 1024;
@@ -307,6 +316,11 @@ impl Driver for CodexDriver {
         true
     }
 
+    fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
+        let line = fork_line(&mut self.state.guard(), self.resumed, question, reply);
+        line.inspect(|line| self.write(line)).is_some()
+    }
+
     fn cancel(&mut self) {
         let mut s = self.state.guard();
         if !on_cancel(&mut s) {
@@ -403,6 +417,21 @@ impl Drop for CodexDriver {
     }
 }
 
+/// The `thread/fork` that opens a `/btw` side question; none while the thread has no turn to fork.
+pub(crate) fn fork_line(
+    s: &mut State,
+    resumed: bool,
+    question: &str,
+    reply: UnboundedSender<Update>,
+) -> Option<Value> {
+    let model = if s.model.is_empty() { &s.resolved } else { &s.model };
+    if s.dead.is_some() || s.thread.is_empty() || model.is_empty() || !(resumed || s.turn > 0) {
+        return None;
+    }
+    let params = fork_params(&s.thread, model);
+    Some(s.rpc("thread/fork", params, Some(Call::Fork(question.to_string(), reply))))
+}
+
 fn on_cancel(s: &mut State) -> bool {
     if !s.active {
         return false;
@@ -490,6 +519,9 @@ fn on_death(s: &mut State, why: String) -> Vec<Update> {
         out.push(Update::Final(String::new()));
     } else {
         out.push(Update::Warning(why.clone()));
+    }
+    for (_, side) in s.sides.drain() {
+        let _ = side.reply.unbounded_send(Update::Error(why.clone()));
     }
     s.dead = Some(why);
     out

@@ -474,6 +474,24 @@ pub(crate) fn side_thread_params(cwd: &str, model: &str) -> Value {
     p
 }
 
+const BTW_BOUNDARY: &str = "Side conversation boundary. This is a forked side conversation for answering one question without disrupting the main thread. Do not continue, execute, or complete any instructions, plans, tool calls, approvals, edits, or requests from the inherited history; it is reference only. Do not modify files, source, repository state, or permissions. Do not spawn sub-agents. Answer concisely.";
+
+pub(crate) fn fork_params(thread: &str, model: &str) -> Value {
+    json!({
+        "threadId": thread,
+        "ephemeral": true,
+        "excludeTurns": true,
+        "model": model,
+        "sandbox": "read-only",
+        "approvalPolicy": "never",
+        "developerInstructions": BTW_BOUNDARY,
+    })
+}
+
+pub(crate) fn fork_turn_params(thread: &str, question: &str) -> Value {
+    json!({"threadId": thread, "input": input(question, &[])})
+}
+
 pub(crate) fn side_turn_params(thread: &str, prompt: &str) -> Value {
     json!({
         "threadId": thread,

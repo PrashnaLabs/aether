@@ -175,6 +175,23 @@ fn side_turn_end(s: &State) -> Option<Update> {
     (!s.active && s.asks.is_empty()).then(|| Update::Final(String::new()))
 }
 
+fn side_request(session: &str, question: &str) -> (String, Value) {
+    let prompt = format!(
+        "Answer this side question briefly from the conversation so far. Do not use tools.\n\n{question}"
+    );
+    (format!("/api/session/{session}/generate"), json!({"prompt": prompt}))
+}
+
+fn side_reply(res: Result<Value, String>) -> Update {
+    match res {
+        Ok(v) => match v["data"]["text"].as_str() {
+            Some(t) => Update::Final(t.to_string()),
+            None => Update::Error("opencode side question returned no text".into()),
+        },
+        Err(e) => Update::Error(e),
+    }
+}
+
 fn on_cancel(s: &mut State) -> bool {
     if !s.active {
         return false;
@@ -271,6 +288,21 @@ impl Driver for OpencodeDriver {
                 }
             }
         }
+        true
+    }
+
+    fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
+        let Some(c) = self.conn.as_ref().filter(|c| !c.session.is_empty()) else {
+            return false;
+        };
+        if !self.state.guard().usable() {
+            return false;
+        }
+        let api = c.api.clone();
+        let (path, body) = side_request(&c.session, question);
+        std::thread::spawn(move || {
+            let _ = reply.unbounded_send(side_reply(api.call(Method::POST, &path, Some(body))));
+        });
         true
     }
 
