@@ -1,0 +1,972 @@
+{
+ "a-large-small": {
+  "iconoir": "text-size",
+  "remix": null,
+  "solar": null
+ },
+ "app-window": {
+  "iconoir": "app-window",
+  "remix": "window-line",
+  "solar": "window-frame-linear"
+ },
+ "archive": {
+  "iconoir": "archive",
+  "remix": "archive-line",
+  "solar": "archive-linear"
+ },
+ "archive-restore": {
+  "iconoir": null,
+  "remix": "inbox-unarchive-line",
+  "solar": "archive-up-linear"
+ },
+ "arrow-down": {
+  "iconoir": "arrow-down",
+  "remix": "arrow-down-line",
+  "solar": "arrow-down-linear"
+ },
+ "arrow-down-to-line": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "arrow-down-to-line-linear"
+ },
+ "arrow-down-up": {
+  "iconoir": null,
+  "remix": "arrow-up-down-line",
+  "solar": "sort-vertical-linear"
+ },
+ "arrow-left": {
+  "iconoir": "arrow-left",
+  "remix": "arrow-left-line",
+  "solar": "arrow-left-linear"
+ },
+ "arrow-left-right": {
+  "iconoir": "data-transfer-both",
+  "remix": "arrow-left-right-line",
+  "solar": "transfer-horizontal-linear"
+ },
+ "arrow-right": {
+  "iconoir": "arrow-right",
+  "remix": "arrow-right-line",
+  "solar": "arrow-right-linear"
+ },
+ "arrow-up": {
+  "iconoir": "arrow-up",
+  "remix": "arrow-up-line",
+  "solar": "arrow-up-linear"
+ },
+ "arrow-up-from-line": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "arrow-up-from-line-linear"
+ },
+ "asterisk": {
+  "iconoir": "asterisk",
+  "remix": null,
+  "solar": null
+ },
+ "ban": {
+  "iconoir": "prohibition",
+  "remix": "forbid-line",
+  "solar": "forbidden-circle-linear"
+ },
+ "battery": {
+  "iconoir": "battery-empty",
+  "remix": "battery-line",
+  "solar": null
+ },
+ "battery-charging": {
+  "iconoir": "battery-charging",
+  "remix": "battery-charge-line",
+  "solar": "battery-charge-linear"
+ },
+ "battery-full": {
+  "iconoir": "battery-full",
+  "remix": null,
+  "solar": "battery-full-linear"
+ },
+ "battery-low": {
+  "iconoir": "battery-25",
+  "remix": "battery-low-line",
+  "solar": "battery-low-linear"
+ },
+ "battery-medium": {
+  "iconoir": "battery-50",
+  "remix": null,
+  "solar": "battery-half-linear"
+ },
+ "battery-warning": {
+  "iconoir": "battery-warning",
+  "remix": null,
+  "solar": null
+ },
+ "bell": {
+  "iconoir": "bell",
+  "remix": "bell-line",
+  "solar": "bell-linear"
+ },
+ "book-open": {
+  "iconoir": "open-book",
+  "remix": "book-open-line",
+  "solar": null
+ },
+ "bot": {
+  "iconoir": null,
+  "remix": "robot-2-line",
+  "solar": "bot-linear"
+ },
+ "bot-message-square": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "braces": {
+  "iconoir": "code-brackets",
+  "remix": "braces-line",
+  "solar": "braces-linear"
+ },
+ "building-2": {
+  "iconoir": "building",
+  "remix": "building-2-line",
+  "solar": "buildings-2-linear"
+ },
+ "calendar": {
+  "iconoir": "calendar",
+  "remix": "calendar-line",
+  "solar": "calendar-linear"
+ },
+ "case-sensitive": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "chart-column": {
+  "iconoir": null,
+  "remix": "bar-chart-line",
+  "solar": "chart-2-linear"
+ },
+ "chart-pie": {
+  "iconoir": null,
+  "remix": "pie-chart-line",
+  "solar": "pie-chart-linear"
+ },
+ "check": {
+  "iconoir": "check",
+  "remix": "check-line",
+  "solar": "check-linear"
+ },
+ "chevron-down": {
+  "iconoir": "nav-arrow-down",
+  "remix": "arrow-down-s-line",
+  "solar": "alt-arrow-down-linear"
+ },
+ "chevron-left": {
+  "iconoir": "nav-arrow-left",
+  "remix": "arrow-left-s-line",
+  "solar": "alt-arrow-left-linear"
+ },
+ "chevron-right": {
+  "iconoir": "nav-arrow-right",
+  "remix": "arrow-right-s-line",
+  "solar": "alt-arrow-right-linear"
+ },
+ "chevron-up": {
+  "iconoir": "nav-arrow-up",
+  "remix": "arrow-up-s-line",
+  "solar": "alt-arrow-up-linear"
+ },
+ "chevrons-down-up": {
+  "iconoir": null,
+  "remix": "collapse-vertical-line",
+  "solar": "chevrons-down-up-linear"
+ },
+ "chevrons-up-down": {
+  "iconoir": null,
+  "remix": "expand-vertical-line",
+  "solar": "chevrons-up-down-linear"
+ },
+ "circle": {
+  "iconoir": "circle",
+  "remix": "circle-line",
+  "solar": null
+ },
+ "circle-alert": {
+  "iconoir": "warning-circle",
+  "remix": "error-warning-line",
+  "solar": "danger-circle-linear"
+ },
+ "circle-check": {
+  "iconoir": "check-circle",
+  "remix": "checkbox-circle-line",
+  "solar": "check-circle-linear"
+ },
+ "circle-dot": {
+  "iconoir": null,
+  "remix": "radio-button-line",
+  "solar": "circle-dot-linear"
+ },
+ "circle-question-mark": {
+  "iconoir": "help-circle",
+  "remix": null,
+  "solar": "question-circle-linear"
+ },
+ "circle-slash": {
+  "iconoir": "prohibition",
+  "remix": "forbid-line",
+  "solar": "forbidden-circle-linear"
+ },
+ "circle-user": {
+  "iconoir": "user-circle",
+  "remix": "account-circle-line",
+  "solar": "user-circle-linear"
+ },
+ "circle-x": {
+  "iconoir": "xmark-circle",
+  "remix": "close-circle-line",
+  "solar": "close-circle-linear"
+ },
+ "clock": {
+  "iconoir": "clock",
+  "remix": "time-line",
+  "solar": "clock-circle-linear"
+ },
+ "close": {
+  "iconoir": "xmark",
+  "remix": "close-line",
+  "solar": "close-linear"
+ },
+ "cloud": {
+  "iconoir": "cloud",
+  "remix": "cloud-line",
+  "solar": "cloud-linear"
+ },
+ "cloud-download": {
+  "iconoir": "cloud-download",
+  "remix": "download-cloud-line",
+  "solar": "cloud-download-linear"
+ },
+ "cloud-upload": {
+  "iconoir": "cloud-upload",
+  "remix": "upload-cloud-line",
+  "solar": "cloud-upload-linear"
+ },
+ "columns-2": {
+  "iconoir": "view-columns-2",
+  "remix": "layout-column-line",
+  "solar": "columns-2-linear"
+ },
+ "copy": {
+  "iconoir": "copy",
+  "remix": "file-copy-line",
+  "solar": "copy-linear"
+ },
+ "corner-down-right": {
+  "iconoir": null,
+  "remix": "corner-down-right-line",
+  "solar": null
+ },
+ "cpu": {
+  "iconoir": "cpu",
+  "remix": "cpu-line",
+  "solar": "cpu-linear"
+ },
+ "dash": {
+  "iconoir": "minus",
+  "remix": "subtract-line",
+  "solar": "minus-linear"
+ },
+ "delete": {
+  "iconoir": null,
+  "remix": "delete-back-2-line",
+  "solar": "backspace-linear"
+ },
+ "ellipsis": {
+  "iconoir": "more-horiz",
+  "remix": "more-line",
+  "solar": "menu-dots-linear"
+ },
+ "ellipsis-vertical": {
+  "iconoir": "more-vert",
+  "remix": "more-2-line",
+  "solar": "menu-dots-vertical-linear"
+ },
+ "eraser": {
+  "iconoir": "erase",
+  "remix": "eraser-line",
+  "solar": "eraser-linear"
+ },
+ "external-link": {
+  "iconoir": "open-new-window",
+  "remix": "external-link-line",
+  "solar": "square-arrow-right-up-linear"
+ },
+ "eye": {
+  "iconoir": "eye",
+  "remix": "eye-line",
+  "solar": "eye-linear"
+ },
+ "eye-off": {
+  "iconoir": "eye-closed",
+  "remix": "eye-off-line",
+  "solar": "eye-closed-linear"
+ },
+ "file": {
+  "iconoir": "empty-page",
+  "remix": "file-line",
+  "solar": "file-linear"
+ },
+ "file-archive": {
+  "iconoir": null,
+  "remix": "file-zip-line",
+  "solar": "file-zip-linear"
+ },
+ "file-code": {
+  "iconoir": null,
+  "remix": "file-code-line",
+  "solar": "file-code-linear"
+ },
+ "file-diff": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "file-image": {
+  "iconoir": null,
+  "remix": "file-image-line",
+  "solar": "file-image-linear"
+ },
+ "file-output": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "file-pen": {
+  "iconoir": "page-edit",
+  "remix": "file-edit-line",
+  "solar": "file-pen-linear"
+ },
+ "file-plus": {
+  "iconoir": "page-plus",
+  "remix": "file-add-line",
+  "solar": "file-add-linear"
+ },
+ "file-search": {
+  "iconoir": "page-search",
+  "remix": "file-search-line",
+  "solar": "file-search-linear"
+ },
+ "file-spreadsheet": {
+  "iconoir": null,
+  "remix": "file-excel-line",
+  "solar": "file-spreadsheet-linear"
+ },
+ "file-text": {
+  "iconoir": "page",
+  "remix": "file-text-line",
+  "solar": "file-text-linear"
+ },
+ "files": {
+  "iconoir": "multiple-pages",
+  "remix": "file-copy-2-line",
+  "solar": "documents-linear"
+ },
+ "flame": {
+  "iconoir": "fire-flame",
+  "remix": "fire-line",
+  "solar": "fire-linear"
+ },
+ "folder": {
+  "iconoir": "folder",
+  "remix": "folder-line",
+  "solar": "folder-linear"
+ },
+ "folder-closed": {
+  "iconoir": "folder",
+  "remix": "folder-line",
+  "solar": "folder-linear"
+ },
+ "folder-open": {
+  "iconoir": null,
+  "remix": "folder-open-line",
+  "solar": "folder-open-linear"
+ },
+ "folder-plus": {
+  "iconoir": "folder-plus",
+  "remix": "folder-add-line",
+  "solar": "add-folder-linear"
+ },
+ "folder-x": {
+  "iconoir": null,
+  "remix": "folder-close-line",
+  "solar": null
+ },
+ "frame": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "gallery-vertical-end": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "gauge": {
+  "iconoir": "dashboard-speed",
+  "remix": "speed-line",
+  "solar": "speedometer-middle-linear"
+ },
+ "git-branch": {
+  "iconoir": "git-branch",
+  "remix": "git-branch-line",
+  "solar": "git-branch-linear"
+ },
+ "git-branch-plus": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "git-commit-horizontal": {
+  "iconoir": "git-commit",
+  "remix": "git-commit-line",
+  "solar": "git-commit-linear"
+ },
+ "git-commit-vertical": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "git-compare-arrows": {
+  "iconoir": "git-compare",
+  "remix": null,
+  "solar": null
+ },
+ "git-fork": {
+  "iconoir": "git-fork",
+  "remix": "git-fork-line",
+  "solar": "git-fork-linear"
+ },
+ "git-pull-request": {
+  "iconoir": "git-pull-request",
+  "remix": "git-pull-request-line",
+  "solar": "git-pull-request-linear"
+ },
+ "github": {
+  "iconoir": "github",
+  "remix": "github-line",
+  "solar": null
+ },
+ "globe": {
+  "iconoir": "globe",
+  "remix": "globe-line",
+  "solar": "globe-linear"
+ },
+ "hard-drive": {
+  "iconoir": "hard-drive",
+  "remix": "hard-drive-line",
+  "solar": null
+ },
+ "heart": {
+  "iconoir": "heart",
+  "remix": "heart-line",
+  "solar": "heart-linear"
+ },
+ "heart-off": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "house": {
+  "iconoir": "home",
+  "remix": "home-line",
+  "solar": "home-linear"
+ },
+ "image": {
+  "iconoir": "media-image",
+  "remix": "image-line",
+  "solar": "gallery-linear"
+ },
+ "inbox": {
+  "iconoir": null,
+  "remix": "inbox-line",
+  "solar": "inbox-linear"
+ },
+ "info": {
+  "iconoir": "info-circle",
+  "remix": "information-line",
+  "solar": "info-circle-linear"
+ },
+ "inspector": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "key-round": {
+  "iconoir": "key",
+  "remix": "key-2-line",
+  "solar": "key-linear"
+ },
+ "laptop": {
+  "iconoir": "laptop",
+  "remix": "macbook-line",
+  "solar": "laptop-linear"
+ },
+ "layers": {
+  "iconoir": null,
+  "remix": "stack-line",
+  "solar": "layers-linear"
+ },
+ "layout-dashboard": {
+  "iconoir": "dashboard",
+  "remix": "dashboard-line",
+  "solar": "widget-linear"
+ },
+ "layout-list": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "lightbulb": {
+  "iconoir": "light-bulb",
+  "remix": "lightbulb-line",
+  "solar": "lightbulb-linear"
+ },
+ "list": {
+  "iconoir": "list",
+  "remix": null,
+  "solar": "list-linear"
+ },
+ "list-checks": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "list-check-linear"
+ },
+ "list-filter": {
+  "iconoir": "filter-list",
+  "remix": "filter-line",
+  "solar": "filter-linear"
+ },
+ "list-tree": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "loader": {
+  "iconoir": null,
+  "remix": "loader-line",
+  "solar": "loader-linear"
+ },
+ "loader-circle": {
+  "iconoir": null,
+  "remix": "loader-4-line",
+  "solar": null
+ },
+ "lock": {
+  "iconoir": "lock",
+  "remix": "lock-line",
+  "solar": "lock-linear"
+ },
+ "lock-keyhole": {
+  "iconoir": null,
+  "remix": "lock-password-line",
+  "solar": "lock-keyhole-linear"
+ },
+ "lock-open": {
+  "iconoir": null,
+  "remix": "lock-unlock-line",
+  "solar": "lock-unlocked-linear"
+ },
+ "log-in": {
+  "iconoir": "log-in",
+  "remix": "login-box-line",
+  "solar": "login-linear"
+ },
+ "map": {
+  "iconoir": "map",
+  "remix": "map-line",
+  "solar": "map-linear"
+ },
+ "maximize": {
+  "iconoir": "maximize",
+  "remix": "fullscreen-line",
+  "solar": "maximize-linear"
+ },
+ "memory-stick": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "menu": {
+  "iconoir": "menu",
+  "remix": "menu-line",
+  "solar": "hamburger-menu-linear"
+ },
+ "message-circle": {
+  "iconoir": "chat-bubble",
+  "remix": "chat-1-line",
+  "solar": "chat-round-linear"
+ },
+ "message-square": {
+  "iconoir": "message",
+  "remix": "message-line",
+  "solar": "chat-square-linear"
+ },
+ "message-square-plus": {
+  "iconoir": null,
+  "remix": "chat-new-line",
+  "solar": "chat-square-add-linear"
+ },
+ "mic": {
+  "iconoir": "microphone",
+  "remix": "mic-line",
+  "solar": "microphone-linear"
+ },
+ "minimize": {
+  "iconoir": null,
+  "remix": "fullscreen-exit-line",
+  "solar": "minimize-linear"
+ },
+ "minimize-2": {
+  "iconoir": null,
+  "remix": "fullscreen-exit-line",
+  "solar": "minimize-linear"
+ },
+ "minus": {
+  "iconoir": "minus",
+  "remix": "subtract-line",
+  "solar": "minus-linear"
+ },
+ "moon": {
+  "iconoir": "half-moon",
+  "remix": "moon-line",
+  "solar": "moon-linear"
+ },
+ "network": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "newspaper": {
+  "iconoir": null,
+  "remix": "newspaper-line",
+  "solar": null
+ },
+ "package-open": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "palette": {
+  "iconoir": "palette",
+  "remix": "palette-line",
+  "solar": "palette-linear"
+ },
+ "panel-bottom": {
+  "iconoir": null,
+  "remix": "layout-bottom-line",
+  "solar": "panel-bottom-linear"
+ },
+ "panel-bottom-open": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "panel-bottom-open-linear"
+ },
+ "panel-left": {
+  "iconoir": "layout-left",
+  "remix": "layout-left-line",
+  "solar": "panel-left-linear"
+ },
+ "panel-left-close": {
+  "iconoir": "sidebar-collapse",
+  "remix": "sidebar-fold-line",
+  "solar": "panel-left-close-linear"
+ },
+ "panel-left-open": {
+  "iconoir": "sidebar-expand",
+  "remix": "sidebar-unfold-line",
+  "solar": "panel-left-open-linear"
+ },
+ "panel-right": {
+  "iconoir": "layout-right",
+  "remix": "layout-right-line",
+  "solar": "panel-right-linear"
+ },
+ "panel-right-close": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "panel-right-close-linear"
+ },
+ "panel-right-open": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "panel-right-open-linear"
+ },
+ "paperclip": {
+  "iconoir": "attachment",
+  "remix": "attachment-line",
+  "solar": "paperclip-linear"
+ },
+ "pause": {
+  "iconoir": "pause",
+  "remix": "pause-line",
+  "solar": "pause-linear"
+ },
+ "pencil": {
+  "iconoir": "edit-pencil",
+  "remix": "pencil-line",
+  "solar": "pen-linear"
+ },
+ "picture-in-picture-2": {
+  "iconoir": null,
+  "remix": "picture-in-picture-2-line",
+  "solar": "pip-linear"
+ },
+ "pin": {
+  "iconoir": "pin",
+  "remix": "pushpin-line",
+  "solar": "pin-linear"
+ },
+ "pin-off": {
+  "iconoir": "pin-slash",
+  "remix": null,
+  "solar": null
+ },
+ "play": {
+  "iconoir": "play",
+  "remix": "play-line",
+  "solar": "play-linear"
+ },
+ "plug": {
+  "iconoir": null,
+  "remix": "plug-line",
+  "solar": "plug-circle-linear"
+ },
+ "plus": {
+  "iconoir": "plus",
+  "remix": "add-line",
+  "solar": "add-linear"
+ },
+ "redo": {
+  "iconoir": "redo",
+  "remix": "arrow-go-forward-line",
+  "solar": "undo-right-linear"
+ },
+ "redo-2": {
+  "iconoir": "redo",
+  "remix": "arrow-go-forward-line",
+  "solar": "undo-right-linear"
+ },
+ "refresh-cw": {
+  "iconoir": "refresh",
+  "remix": null,
+  "solar": "refresh-linear"
+ },
+ "regex": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "replace": {
+  "iconoir": null,
+  "remix": "find-replace-line",
+  "solar": null
+ },
+ "resize-corner": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "rotate-ccw": {
+  "iconoir": null,
+  "remix": "anticlockwise-line",
+  "solar": null
+ },
+ "rotate-cw": {
+  "iconoir": "restart",
+  "remix": "clockwise-line",
+  "solar": "restart-linear"
+ },
+ "rows-2": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "rows-2-linear"
+ },
+ "save": {
+  "iconoir": "floppy-disk",
+  "remix": "save-line",
+  "solar": "diskette-linear"
+ },
+ "search": {
+  "iconoir": "search",
+  "remix": "search-line",
+  "solar": "magnifier-linear"
+ },
+ "settings": {
+  "iconoir": "settings",
+  "remix": "settings-line",
+  "solar": "settings-linear"
+ },
+ "settings-2": {
+  "iconoir": null,
+  "remix": null,
+  "solar": "tuning-2-linear"
+ },
+ "shield": {
+  "iconoir": "shield",
+  "remix": "shield-line",
+  "solar": "shield-linear"
+ },
+ "shield-x": {
+  "iconoir": null,
+  "remix": "shield-cross-line",
+  "solar": "shield-cross-linear"
+ },
+ "sort-ascending": {
+  "iconoir": "sort-up",
+  "remix": null,
+  "solar": "sort-from-bottom-to-top-linear"
+ },
+ "sort-descending": {
+  "iconoir": "sort-down",
+  "remix": null,
+  "solar": "sort-from-top-to-bottom-linear"
+ },
+ "square": {
+  "iconoir": "square",
+  "remix": "square-line",
+  "solar": "stop-linear"
+ },
+ "square-pen": {
+  "iconoir": "edit",
+  "remix": "edit-box-line",
+  "solar": "pen-new-square-linear"
+ },
+ "square-round-corner": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "square-terminal": {
+  "iconoir": null,
+  "remix": "terminal-box-line",
+  "solar": "programming-linear"
+ },
+ "star": {
+  "iconoir": "star",
+  "remix": "star-line",
+  "solar": "star-linear"
+ },
+ "star-fill": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "star-off": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "sun": {
+  "iconoir": "sun-light",
+  "remix": "sun-line",
+  "solar": "sun-linear"
+ },
+ "terminal": {
+  "iconoir": "terminal",
+  "remix": "terminal-line",
+  "solar": "programming-linear"
+ },
+ "text-quote": {
+  "iconoir": "quote",
+  "remix": null,
+  "solar": "quote-linear"
+ },
+ "thumbs-down": {
+  "iconoir": "thumbs-down",
+  "remix": "thumb-down-line",
+  "solar": "dislike-linear"
+ },
+ "thumbs-up": {
+  "iconoir": "thumbs-up",
+  "remix": "thumb-up-line",
+  "solar": "like-linear"
+ },
+ "trash": {
+  "iconoir": "trash",
+  "remix": "delete-bin-line",
+  "solar": "trash-bin-trash-linear"
+ },
+ "trending-down": {
+  "iconoir": "graph-down",
+  "remix": null,
+  "solar": "course-down-linear"
+ },
+ "trending-up": {
+  "iconoir": "graph-up",
+  "remix": null,
+  "solar": "course-up-linear"
+ },
+ "triangle-alert": {
+  "iconoir": "warning-triangle",
+  "remix": "alert-line",
+  "solar": "danger-triangle-linear"
+ },
+ "undo": {
+  "iconoir": "undo",
+  "remix": "arrow-go-back-line",
+  "solar": "undo-left-linear"
+ },
+ "undo-2": {
+  "iconoir": "undo",
+  "remix": "arrow-go-back-line",
+  "solar": "undo-left-linear"
+ },
+ "unfold-vertical": {
+  "iconoir": null,
+  "remix": "expand-vertical-s-line",
+  "solar": null
+ },
+ "user": {
+  "iconoir": "user",
+  "remix": "user-line",
+  "solar": "user-linear"
+ },
+ "whole-word": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "window-close": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "window-maximize": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "window-minimize": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "window-restore": {
+  "iconoir": null,
+  "remix": null,
+  "solar": null
+ },
+ "wrench": {
+  "iconoir": "wrench",
+  "remix": "wrench-line",
+  "solar": null
+ },
+ "x": {
+  "iconoir": "xmark",
+  "remix": "close-line",
+  "solar": "close-linear"
+ },
+ "zap": {
+  "iconoir": "flash",
+  "remix": null,
+  "solar": "bolt-linear"
+ }
+}
