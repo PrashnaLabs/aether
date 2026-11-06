@@ -5,7 +5,8 @@ use crate::settings::{self, KeySource};
 use aether_agent::ModelInfo;
 use aether_agent::usage::{
     PlanUsage, fetch_antigravity_plan_usage, fetch_claude_plan_usage, fetch_codex_plan_usage,
-    fetch_openrouter_plan_usage, read_claude_credentials, read_codex_token, read_openrouter_key,
+    fetch_opencode_plan_usage, fetch_openrouter_plan_usage, read_claude_credentials,
+    read_codex_token, read_openrouter_key,
 };
 use aether_core::{Appearance, CornerStyle, Provider, Role, Settings, Skill, effort_levels};
 use aether_driver::{CliModel, catalog::provider_label};
@@ -85,6 +86,18 @@ impl ChatApp {
                     .detach();
                 }
             }
+            Provider::OpenCode => {
+                cx.spawn(async move |this, cx| {
+                    let usage = bg.spawn(async move { fetch_opencode_plan_usage() }).await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.store_plan_usage(Provider::OpenCode, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
+            }
             _ => {}
         }
     }
@@ -97,7 +110,7 @@ impl ChatApp {
     pub(super) fn refresh_stale_usage(&mut self, cx: &mut Context<Self>) {
         let newest = self.plan_usage_at.values().max().copied();
         let configured = self.api_key.is_some()
-            || [Provider::Claude, Provider::Codex, Provider::Antigravity]
+            || [Provider::Claude, Provider::Codex, Provider::Antigravity, Provider::OpenCode]
                 .iter()
                 .any(|p| self.probes.get(p).is_some_and(|probe| probe.installed));
         if usage_due(newest, self.usage_attempt_at, configured, now_ms()) {
@@ -107,7 +120,13 @@ impl ChatApp {
 
     pub(super) fn refresh_all_provider_usages(&mut self, cx: &mut Context<Self>) {
         self.usage_attempt_at = now_ms();
-        for p in [Provider::Claude, Provider::Codex, Provider::Antigravity, Provider::OpenRouter] {
+        for p in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Antigravity,
+            Provider::OpenRouter,
+            Provider::OpenCode,
+        ] {
             self.refresh_provider_usage(p, cx);
         }
     }

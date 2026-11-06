@@ -318,6 +318,17 @@ fn openrouter_shows_balance_not_percent() {
     assert_eq!(usage::gauge(Provider::Claude, &plan(&[])), None);
 }
 
+#[test]
+fn opencode_without_limits_is_pay_as_you_go() {
+    let zen = aether_agent::usage::PlanUsage::parse_opencode(
+        r#"{"data":{"workspace":{"id":"w","usageURL":"u"},"budgets":[]}}"#,
+    )
+    .unwrap();
+    assert_eq!(usage::gauge(Provider::OpenCode, &zen), Some((None, "Pay-as-you-go".into(), None)));
+    let go = plan(&[("Session", 70., "resets in 2h 0m")]);
+    assert_eq!(usage::gauge(Provider::OpenCode, &go), Some((Some(30.), "2h 0m".into(), None)));
+}
+
 #[gpui_kit::test]
 fn rows_sort_by_used_and_openrouter_card_has_no_bars(cx: &mut TestAppContext) {
     let (window, app) = open(cx, None);
@@ -592,8 +603,8 @@ fn usage_strip_and_rows_work_from_the_keyboard(cx: &mut TestAppContext) {
             app.read(cx).usage_pop.rows.iter().position(|row| row.is_focused(window))
         })
     };
-    // rows: claude 0, antigravity 2, details 4; sorted claude (66%) then agy (1%)
-    for (key, want) in [("down", 0), ("down", 2), ("down", 4), ("down", 4), ("up", 2)]
+    // rows: claude 0, antigravity 2, details 5; sorted claude (66%) then agy (1%)
+    for (key, want) in [("down", 0), ("down", 2), ("down", 5), ("down", 5), ("up", 2)]
     {
         visual.simulate_keystrokes(key);
         draw(&mut visual, &app, seed);
