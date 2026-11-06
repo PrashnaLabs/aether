@@ -1,0 +1,58 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+aether-core = { path = "crates/core" }
+aether-agent = { path = "crates/agent" }
+aether-driver = { path = "crates/driver" }
+aether-explorer = { path = "crates/explorer" }
+aether-git = { path = "crates/git" }
+aether-terminal = { path = "crates/terminal" }
+aether-ui = { path = "crates/ui" }
+aether-voice = { path = "crates/voice" }
+adk-rust = { version = "2.3.0", default-features = false, features = ["agents", "runner", "sessions", "openrouter", "tools", "skills"] }
+alacritty_terminal = { version = "0.26", default-features = false }
+base64 = "0.22"
+cpal = "0.18"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+dotenvy = "0.15.7"
+futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp"] }
+gpui-kit = { version = "0.7.3", features = ["tree-sitter-rust", "tree-sitter-typescript", "tree-sitter-tsx", "tree-sitter-javascript", "tree-sitter-bash", "tree-sitter-css", "tree-sitter-html", "tree-sitter-python", "tree-sitter-go", "tree-sitter-toml", "tree-sitter-yaml", "tree-sitter-markdown", "tree-sitter-diff", "tree-sitter-sql", "tree-sitter-swift", "tree-sitter-java", "tree-sitter-c", "tree-sitter-cpp", "tree-sitter-ruby"] }
+keyring = "4.2"
+markdown = "1.0.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "form", "http2"] }
+schemars = "1"
+scraper = "0.27"
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled"] }
+regex = "1.13.1"
+tokio = { version = "1.53.2", features = ["rt-multi-thread"] }
+whisper-rs = "0.16"
+wry = "0.56"
+objc2 = "0.6"
+gtk = "0.18"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+# gpui renders far too slowly unoptimized; keep our crates debuggable but
+# optimize dependencies in dev builds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

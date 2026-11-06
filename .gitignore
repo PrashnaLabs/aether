@@ -1,0 +1,13 @@
+/target
+.env
+
+reference
+.superpowers/
+.worktrees
+.worktrees/
+.DS_Store
+/dist
+__pycache__/
+*.pkg.tar.zst
+/pkg/
+/src/
