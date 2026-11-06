@@ -123,6 +123,29 @@ impl PlanUsage {
             );
         }
 
+        let scoped = val.get("limits").and_then(|v| v.as_array()).into_iter().flatten();
+        for limit in scoped.filter(|l| l["kind"] == "weekly_scoped") {
+            let scope = &limit["scope"];
+            let Some(name) = ["model", "surface"]
+                .iter()
+                .find_map(|k| scope[k]["display_name"].as_str())
+            else {
+                continue;
+            };
+            let Some(used) = limit["percent"].as_f64() else { continue };
+            let left = (100.0 - used as f32).clamp(0.0, 100.0);
+            let reset = limit["resets_at"]
+                .as_str()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|at| format!("resets {}", format_reset_countdown(at.with_timezone(&Utc), now)))
+                .unwrap_or_else(|| "resets in 7d".to_string());
+            limits.push(
+                PlanLimit::new(format!("Weekly ({name})"), left, reset)
+                    .threshold(Some(50.0))
+                    .trend_down(false),
+            );
+        }
+
         let footer_text = if weekly_depleted && !weekly_reset_str.is_empty() {
             Some(format!("Weekly limit reached · Resets {weekly_reset_str}"))
         } else {

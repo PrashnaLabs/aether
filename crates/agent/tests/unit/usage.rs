@@ -24,6 +24,26 @@ fn parses_anthropic_usage_json() {
 }
 
 #[test]
+fn anthropic_model_scoped_weekly_limits_are_listed() {
+    let payload = r#"{
+            "five_hour": {"utilization": 20.0, "resets_at": "2026-10-17T15:00:00Z"},
+            "seven_day": {"utilization": 86.0, "resets_at": "2026-10-24T00:00:00Z"},
+            "limits": [
+                {"kind": "session", "percent": 20, "resets_at": "2026-10-17T15:00:00Z", "scope": null},
+                {"kind": "weekly_all", "percent": 86, "resets_at": "2026-10-24T00:00:00Z", "scope": null},
+                {"kind": "weekly_scoped", "percent": 30, "resets_at": "2026-10-24T00:00:00Z",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}}
+            ]
+        }"#;
+
+    let usage = PlanUsage::parse_anthropic(payload, Some("max")).expect("parses");
+    let labels: Vec<&str> = usage.limits.iter().map(|l| l.label.as_str()).collect();
+    assert_eq!(labels, ["Session", "Weekly", "Weekly (Fable)"]);
+    assert!((usage.limits[2].percent_left - 70.0).abs() < 1e-3);
+    assert!(usage.limits[2].reset_label.starts_with("resets"));
+}
+
+#[test]
 fn parses_codex_usage_json() {
     let payload = r#"{
             "plan_type": "plus",
