@@ -738,9 +738,21 @@ impl ChatApp {
 
     /// Header and resizable edge shared by every sidebar view.
     fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
-        let (resize, resize_end, watch) = (cx.entity(), cx.entity(), cx.entity());
+        let (resize, resize_end, watch, handoff) =
+            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)
             .now(now_ms())
+            .handoff(
+                self.handoff_targets(None),
+                self.chats.iter().filter(|c| !c.messages.is_empty()).map(|c| c.id).collect(),
+                move |id, target, window, cx| {
+                    handoff.update(cx, |this, cx| {
+                        if let Some(ix) = this.chats.iter().position(|c| c.id == id) {
+                            this.handoff_to(ix, target, window, cx);
+                        }
+                    })
+                },
+            )
             .lead_agents(self.chats.iter().filter(|c| c.lead).map(|c| c.id).collect())
             .when(self.settings.watch_enabled, |sidebar| {
                 sidebar.watching(

@@ -961,11 +961,8 @@ impl Agent {
     /// Drops the in-memory conversation behind `key` (OpenRouter only).
     pub fn delete_session(&self, key: &str) {
         let sessions = self.sessions.clone();
-        let req = DeleteRequest {
-            app_name: APP.into(),
-            user_id: USER.into(),
-            session_id: key.into(),
-        };
+        let req =
+            DeleteRequest { app_name: APP.into(), user_id: USER.into(), session_id: key.into() };
         self.rt.spawn(async move {
             let _ = sessions.delete(req).await;
         });
@@ -1052,20 +1049,49 @@ fn answer_allows(answer: &Answer) -> bool {
     }
 }
 
+pub const HISTORY_BUDGET: usize = 64_000;
+
+/// The first user message plus the newest whole messages that fit `limit`
+/// characters, and how many were left out.
+pub fn budget_history(history: &[(Role, String)], limit: usize) -> (Vec<(Role, String)>, usize) {
+    if history.is_empty() {
+        return (Vec::new(), 0);
+    }
+    let first_ix = history.iter().position(|(r, _)| *r == Role::User).unwrap_or(0);
+    let first = &history[first_ix];
+    let mut used = first.1.chars().count();
+    let mut from = history.len();
+    for (i, (_, text)) in history.iter().enumerate().skip(first_ix + 1).rev() {
+        used += text.chars().count();
+        if used > limit {
+            break;
+        }
+        from = i;
+    }
+    let mut kept = vec![first.clone()];
+    kept.extend_from_slice(&history[from.max(first_ix + 1)..]);
+    let omitted = history.len() - kept.len();
+    (kept, omitted)
+}
+
 /// The visible transcript joined with the new message, so a stateless
 /// CLI prompt still sees the conversation.
 fn context_prompt(history: &[(Role, String)], text: &str) -> String {
     if history.is_empty() {
         return text.to_string();
     }
+    let (history, omitted) = budget_history(history, HISTORY_BUDGET);
     let mut out = String::from("Conversation so far:\n");
-    for (role, line) in history {
+    for (i, (role, line)) in history.iter().enumerate() {
         out.push_str(match role {
             Role::User => "User: ",
             Role::Assistant => "Assistant: ",
         });
         out.push_str(line);
         out.push('\n');
+        if i == 0 && omitted > 0 {
+            out.push_str(&format!("({omitted} earlier messages omitted)\n"));
+        }
     }
     out.push_str("New message:\n");
     out.push_str(text);

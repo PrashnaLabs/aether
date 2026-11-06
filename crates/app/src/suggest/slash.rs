@@ -161,6 +161,16 @@ impl ChatApp {
             }
         }
 
+        for target in
+            self.handoff_targets(Some(provider)).into_iter().filter(|_| !chat.messages.is_empty())
+        {
+            all.push((
+                format!("handoff {}", target.key()),
+                format!("Continue in {}", target.label()),
+                SlashCommand::Handoff(target),
+            ));
+        }
+
         // Shared appearance & page navigation
         for appearance in Appearance::ALL {
             let current = on(self.settings.appearance == appearance);

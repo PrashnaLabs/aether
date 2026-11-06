@@ -204,3 +204,89 @@ fn switching_chats_always_lands_on_the_chat_tab(cx: &mut gpui_kit::TestAppContex
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn handoff_copies_the_transcript_to_a_fresh_chat_on_the_target(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut source = chat_with("Fix bug", &["hi", "done"]);
+            source.provider = Provider::Claude;
+            source.access = aether_core::AccessMode::Full;
+            source.effort = "high".into();
+            source.cli_session = "claude-ses".into();
+            source.cwd = "/w/a".into();
+            source.project = "/w/a".into();
+            source.worktree_path = "/w/a-wt".into();
+            source.worktree_branch = "fix".into();
+            app.chats = vec![source];
+            app.active = 0;
+            app.handoff_chat(0, Provider::Codex, "gpt-x".into(), window, cx);
+            assert_eq!(app.chats.len(), 2);
+            let (source, new) = (&app.chats[0], &app.chats[1]);
+            assert_eq!(
+                (source.provider, source.cli_session.as_str()),
+                (Provider::Claude, "claude-ses")
+            );
+            assert_eq!(source.title, "Fix bug");
+            assert_eq!(new.provider, Provider::Codex);
+            assert_eq!(new.provider_model, "gpt-x");
+            assert!(new.cli_session.is_empty() && new.effort.is_empty());
+            assert_eq!(new.title, "Fix bug \u{2192} Codex");
+            assert_eq!(new.messages.len(), 2);
+            assert_eq!(new.messages[0].text, "hi");
+            assert_eq!(
+                (&new.cwd, &new.project, &new.worktree_path, &new.worktree_branch),
+                (&source.cwd, &source.project, &source.worktree_path, &source.worktree_branch)
+            );
+            assert!(aether_core::AccessMode::for_provider(Provider::Codex).contains(&new.access));
+            assert_ne!(new.id, source.id);
+            assert_eq!(app.active, 1);
+            assert!(new.draft.starts_with("Continue where the previous agent left off."));
+            assert_eq!(app.composer.read(cx).value().as_ref(), new.draft);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn handoff_finishes_a_running_reply_and_expires_its_requests(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut source = chat_with("Busy", &["hi"]);
+            source.cwd = "/w/a".into();
+            let mut running = aether_core::Message::assistant();
+            running.apply(aether_core::Update::Ask { id: 1, ask: aether_core::Ask::Unknown });
+            source.messages.push(running);
+            app.chats = vec![source];
+            app.active = 0;
+            app.handoff_chat(0, Provider::Codex, "gpt-x".into(), window, cx);
+            let last = app.chats[1].messages.last().unwrap();
+            assert!(last.ended_at_ms.is_some());
+            assert!(last.pending_request().is_none());
+            assert!(app.chats[0].messages.last().unwrap().pending_request().is_some());
+        })
+        .unwrap();
+}

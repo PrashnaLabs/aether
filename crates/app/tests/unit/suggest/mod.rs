@@ -80,3 +80,41 @@ fn slash_commands_offer_btw_in_direct_chats(cx: &mut gpui_kit::TestAppContext) {
         assert!(app.slash_commands("btw").iter().any(|(label, _, _)| label.as_ref() == "/btw"));
     });
 }
+
+#[gpui_kit::test]
+fn handoff_suggests_installed_providers_except_the_current(cx: &mut gpui_kit::TestAppContext) {
+    use aether_core::Provider;
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, _, _| {
+            let ready = aether_driver::ProviderProbe { installed: true, ..Default::default() };
+            for p in [Provider::Claude, Provider::Codex, Provider::Pi] {
+                app.probes.insert(p, ready.clone());
+            }
+            app.chats[app.active].provider = Provider::Claude;
+            app.chats[app.active].messages.push(aether_core::Message::user("hi"));
+            let found: Vec<_> = app
+                .slash_commands("handoff")
+                .into_iter()
+                .map(|(label, desc, _)| (label.to_string(), desc.to_string()))
+                .collect();
+            assert!(found.contains(&("/handoff codex".into(), "Continue in Codex".into())));
+            assert!(found.iter().any(|(l, _)| l == "/handoff pi"));
+            assert!(!found.iter().any(|(l, _)| l.contains("claude") || l.contains("opencode")));
+            app.chats[app.active].messages.clear();
+            assert!(app.slash_commands("handoff").is_empty());
+        })
+        .unwrap();
+}

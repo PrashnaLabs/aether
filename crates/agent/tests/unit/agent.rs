@@ -634,6 +634,54 @@ fn cli_prompt_carries_the_transcript_as_context() {
     assert_eq!(context_prompt(&[], "bare"), "bare");
 }
 
+#[test]
+fn history_budget_keeps_first_and_newest_whole_messages() {
+    let m = |role, text: &str| (role, text.to_string());
+    assert_eq!(budget_history(&[], 10), (vec![], 0));
+    let all = vec![
+        m(Role::User, "first"),
+        m(Role::Assistant, "aaaaaaaaaa"),
+        m(Role::User, "bbbb"),
+        m(Role::Assistant, "cccc"),
+    ];
+    assert_eq!(budget_history(&all, 100), (all.clone(), 0));
+    let (kept, omitted) = budget_history(&all, 5 + 8);
+    assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()]);
+    assert_eq!(omitted, 1);
+    let (kept, omitted) = budget_history(&all, 0);
+    assert_eq!(kept, vec![all[0].clone()]);
+    assert_eq!(omitted, 3);
+    let (kept, _) = budget_history(&all, 5 + 4 + 9);
+    assert_eq!(kept.len(), 3, "a message that does not fit is dropped whole");
+}
+
+#[test]
+fn cli_prompt_says_how_many_messages_were_dropped() {
+    let history: Vec<_> = (0..4).map(|i| (Role::User, format!("{i}").repeat(30_000))).collect();
+    let prompt = context_prompt(&history, "again");
+    assert!(prompt.contains("(2 earlier messages omitted)"));
+    let note = prompt.find("(2 earlier").unwrap();
+    assert!(prompt.find("0000").unwrap() < note && note < prompt.find("3333").unwrap());
+    assert!(prompt.ends_with("again"));
+    assert!(!context_prompt(&history[..1], "again").contains("omitted"));
+}
+
+#[test]
+fn history_budget_keeps_the_first_user_message_not_a_leading_reply() {
+    let m = |role, text: &str| (role, text.to_string());
+    let all = vec![
+        m(Role::Assistant, "greeting"),
+        m(Role::User, "ask"),
+        m(Role::Assistant, "aaaa"),
+        m(Role::User, "bbbb"),
+    ];
+    let (kept, omitted) = budget_history(&all, 3 + 4);
+    assert_eq!(kept, vec![all[1].clone(), all[3].clone()]);
+    assert_eq!(omitted, 2);
+    let replies = vec![m(Role::Assistant, "x"), m(Role::Assistant, "y")];
+    assert_eq!(budget_history(&replies, 100).0, replies);
+}
+
 fn png(path: &str) -> Attachment {
     Attachment { name: "a.png".into(), path: path.into(), mime: "image/png".into(), size: 1 }
 }

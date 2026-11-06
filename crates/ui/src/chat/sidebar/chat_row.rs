@@ -2,8 +2,8 @@ use crate::theme::Corners;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Sizable, StyledExt,
-    checkbox::Checkbox,
     button::ButtonVariants,
+    checkbox::Checkbox,
     h_flex,
     hover_card::HoverCard,
     input::InputState,
@@ -18,9 +18,9 @@ use gpui_kit::{
 use super::chrome::{reveal_on_hover, row_style, swallow_click, tabular, tooltip};
 use super::menu::chat_menu;
 use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowPlace};
-use aether_core::SidebarStyle;
 use crate::arrow_count;
 use crate::components::provider_icon;
+use aether_core::SidebarStyle;
 
 /// Keeps both ends of a long name, which is where branch names differ.
 pub fn middle_truncate(text: &str, max: usize) -> String {
@@ -262,11 +262,15 @@ pub(super) fn render_chat(
     let removed = chat.line.as_ref().is_some_and(|line| line.removed);
     let menu = {
         let chat = chat.clone();
-        move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| chat_menu(menu, &chat)
+        move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| {
+            chat_menu(menu, &chat, window, cx)
+        }
     };
     let context = {
         let chat = chat.clone();
-        move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| chat_menu(menu, &chat)
+        move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| {
+            chat_menu(menu, &chat, window, cx)
+        }
     };
     let actions = reveal_on_hover(div().flex_none().size(rems(1.25)), group.clone(), show_menu)
         .child(swallow_click(
@@ -367,15 +371,13 @@ pub(super) fn render_chat(
             .w_full()
             .gap_2()
             .items_center()
-            .child(
-                slot(
-                    Icon::new(Lucide::MessageCircle)
-                        .size(rems(0.875))
-                        .text_color(muted)
-                        .flex_none()
-                        .into_any_element(),
-                ),
-            )
+            .child(slot(
+                Icon::new(Lucide::MessageCircle)
+                    .size(rems(0.875))
+                    .text_color(muted)
+                    .flex_none()
+                    .into_any_element(),
+            ))
             .child(title_cell(title.clone()))
             .when(status != ChatStatus::Idle, |row| {
                 row.child(status.badge(("chat-status", ix), None, cx)).child(

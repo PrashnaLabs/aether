@@ -4,7 +4,9 @@ use gpui_kit::component::{
     menu::{PopupMenu, PopupMenuItem},
     v_flex,
 };
-use gpui_kit::{App, ClipboardItem, Entity, SharedString, Window, div, prelude::*};
+use gpui_kit::{App, ClipboardItem, Context, Entity, SharedString, Window, div, prelude::*};
+
+use aether_core::Provider;
 
 use super::state::SidebarState;
 use super::{ChatItem, ChatLine, RowHandler};
@@ -119,7 +121,12 @@ pub(super) fn project_menu(
 }
 
 /// Row menu, shared by right-click and the row's `…` button.
-pub(super) fn chat_menu(menu: PopupMenu, chat: &ChatItem) -> PopupMenu {
+pub(super) fn chat_menu(
+    menu: PopupMenu,
+    chat: &ChatItem,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
     let (rename, duplicate, pin, archive, delete) = (
         chat.on_rename.clone(),
         chat.on_duplicate.clone(),
@@ -143,6 +150,23 @@ pub(super) fn chat_menu(menu: PopupMenu, chat: &ChatItem) -> PopupMenu {
                 .icon(IconName::Star)
                 .on_click(move |ev, window, cx| pin(ev, window, cx)),
         );
+    let current = chat.line.as_ref().map_or(Provider::OpenRouter, |line| line.provider);
+    let menu = match chat.handoff.clone() {
+        Some((targets, on_pick)) if targets.iter().any(|&p| p != current) => {
+            let id = chat.id;
+            menu.submenu("Hand off to", window, cx, move |mut menu, _, _| {
+                for &target in targets.iter().filter(|&&p| p != current) {
+                    let on_pick = on_pick.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(target.label())
+                            .on_click(move |_, window, cx| on_pick(id, target, window, cx)),
+                    );
+                }
+                menu
+            })
+        }
+        _ => menu,
+    };
     let menu = match chat.on_watch.clone().filter(|_| !chat.archived) {
         Some(on_watch) => {
             let id = chat.id;

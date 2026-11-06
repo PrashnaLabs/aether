@@ -650,7 +650,7 @@ impl ChatApp {
             return div().into_any_element();
         };
         let chat = &self.chats[self.active];
-        let (restart, retry) = (view.clone(), view.clone());
+        let (restart, retry, handoff) = (view.clone(), view.clone(), view.clone());
         let copy = error.clone();
         FatalCard::new(format!("{}-{msg}-fatal", chat.session), error)
             .time(m.ended_at_ms.and_then(format_time))
@@ -668,6 +668,12 @@ impl ChatApp {
             .on_copy(Some(Rc::new(move |_, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
             })))
+            .handoff(
+                self.handoff_targets(Some(chat.provider)),
+                Rc::new(move |target, window, cx| {
+                    handoff.update(cx, |this, cx| this.handoff_to(this.active, target, window, cx));
+                }),
+            )
             .on_reflow(row_reflow(view, ix))
             .into_any_element()
     }

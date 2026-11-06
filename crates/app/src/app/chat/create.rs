@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use aether_agent::{ExternalAgent, SavedChat};
+use aether_agent::{ExternalAgent, HISTORY_BUDGET, SavedChat, budget_history};
 use aether_core::{Message, Provider, RequestStatus, Role, Step, ToolStatus, attachments_dir};
 use aether_ui::{ChatStatus, background_rows};
 use gpui_kit::component::WindowExt;
@@ -14,6 +14,8 @@ use crate::app::format::now_ms;
 use crate::app::providers::initial_model;
 use crate::app::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued};
 use crate::attachments;
+
+const HANDOFF_DRAFT: &str = "Continue where the previous agent left off. You're in the same folder, so check the working tree for changes it already made.";
 
 pub(super) fn new_chat_folder(
     cli: bool,
@@ -72,10 +74,52 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.fork_chat(ix, None, window, cx);
+    }
+
+    pub(crate) fn handoff_to(
+        &mut self,
+        ix: usize,
+        provider: Provider,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let model = initial_model(&self.settings, provider);
+        self.handoff_chat(ix, provider, model, window, cx);
+    }
+
+    pub(in crate::app) fn handoff_chat(
+        &mut self,
+        ix: usize,
+        provider: Provider,
+        model: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.fork_chat(ix, Some((provider, model)), window, cx);
+    }
+
+    /// Installed agents and, with a key, OpenRouter: where a chat can continue, minus `current`.
+    pub(crate) fn handoff_targets(&self, current: Option<Provider>) -> Vec<Provider> {
+        let installed = |p: &Provider| self.probes.get(p).is_some_and(|probe| probe.installed);
+        CLIS.into_iter()
+            .filter(installed)
+            .chain(self.api_key.is_some().then_some(Provider::OpenRouter))
+            .filter(|p| Some(*p) != current)
+            .collect()
+    }
+
+    fn fork_chat(
+        &mut self,
+        ix: usize,
+        handoff: Option<(Provider, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(source) = self.chats.get(ix) else {
             return;
         };
-        let (messages, title, provider, provider_model, cwd, access, effort) = (
+        let (mut messages, title, provider, provider_model, mut cwd, access, effort) = (
             source.messages.clone(),
             source.title.to_string(),
             source.provider,
@@ -84,6 +128,39 @@ impl ChatApp {
             source.access,
             source.effort.clone(),
         );
+        if let Some(m) =
+            messages.last_mut().filter(|m| m.role == Role::Assistant && m.ended_at_ms.is_none())
+        {
+            m.interrupt(if handoff.is_some() { "Handed off" } else { "Copied" });
+            m.finish();
+        }
+        let (provider, provider_model, access, effort, title, draft) = match handoff {
+            Some((target, model)) => {
+                if CLIS.contains(&target) && cwd.is_empty() {
+                    cwd = self.settings.workspace_root.clone();
+                    if cwd.is_empty() {
+                        window.push_notification(
+                            Notification::error(
+                                "Pick a project folder or set a workspace root first.",
+                            ),
+                            cx,
+                        );
+                        return;
+                    }
+                }
+                (
+                    target,
+                    model,
+                    fit_access(target, access),
+                    String::new(),
+                    format!("{title} \u{2192} {}", target.label()),
+                    HANDOFF_DRAFT.to_string(),
+                )
+            }
+            None => {
+                (provider, provider_model, access, effort, format!("{title} copy"), String::new())
+            }
+        };
         let (project, worktree_path, worktree_branch) =
             (source.project.clone(), source.worktree_path.clone(), source.worktree_branch.clone());
         if let Some(r) = self.renaming
@@ -97,7 +174,11 @@ impl ChatApp {
             now_ms(),
         );
         let session = self.next_session_id();
-        if self.agent.fork_session(&session, &history(&messages)).is_err() {
+        if self
+            .agent
+            .fork_session(&session, &budget_history(&history(&messages), HISTORY_BUDGET).0)
+            .is_err()
+        {
             return;
         }
         self.chats.insert(
@@ -105,7 +186,7 @@ impl ChatApp {
             Chat {
                 id,
                 session,
-                title: SharedString::from(format!("{title} copy")),
+                title: SharedString::from(title),
                 messages,
                 pinned: false,
                 archived: false,
@@ -135,7 +216,7 @@ impl ChatApp {
                 worktree_info: None,
                 setup: None,
                 fresh_worktree: None,
-                draft: String::new(),
+                draft,
                 pending: Vec::new(),
                 edit_stash: None,
                 last_event_ms: 0,

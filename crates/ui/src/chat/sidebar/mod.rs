@@ -367,6 +367,7 @@ pub const SIDEBAR_MIN_WIDTH: f32 = 200.;
 pub const SIDEBAR_MAX_WIDTH: f32 = 480.;
 
 type WatchHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
+type HandoffHandler = Rc<dyn Fn(i64, Provider, &mut Window, &mut App)>;
 type PickHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 
 /// A row's bulk-select state: picked, any row picked, toggle.
@@ -391,6 +392,7 @@ struct ChatItem {
     child: bool,
     lead: bool,
     on_watch: Option<WatchHandler>,
+    handoff: Option<(Vec<Provider>, HandoffHandler)>,
     line: Option<ChatLine>,
     on_click: RowHandler,
     on_rename: RowHandler,
@@ -489,6 +491,7 @@ pub struct ChatSidebar {
     collapsed_crews: std::collections::HashSet<i64>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
+    handoff: Option<(Vec<Provider>, Vec<i64>, HandoffHandler)>,
     picks: Option<(Vec<i64>, PickHandler)>,
     bulk_bar: Option<AnyElement>,
 }
@@ -531,6 +534,7 @@ impl ChatSidebar {
             collapsed_crews: std::collections::HashSet::new(),
             leads: Vec::new(),
             on_watch: None,
+            handoff: None,
             picks: None,
             bulk_bar: None,
         }
@@ -544,6 +548,17 @@ impl ChatSidebar {
     ) -> Self {
         self.watched = watched;
         self.on_watch = Some(Rc::new(on_watch));
+        self
+    }
+
+    /// Adds "Hand off to" to the menus of chats in `ids`, listing `targets` but the row's own agent.
+    pub fn handoff(
+        mut self,
+        targets: Vec<Provider>,
+        ids: Vec<i64>,
+        on_pick: impl Fn(i64, Provider, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.handoff = Some((targets, ids, Rc::new(on_pick)));
         self
     }
 
@@ -723,6 +738,9 @@ impl ChatSidebar {
             child: self.children.contains(&id),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
+            handoff: self.handoff.as_ref().and_then(|(targets, ids, pick)| {
+                ids.contains(&id).then(|| (targets.clone(), pick.clone()))
+            }),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),
@@ -925,6 +943,9 @@ impl ChatSidebar {
             child: self.children.contains(&id),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
+            handoff: self.handoff.as_ref().and_then(|(targets, ids, pick)| {
+                ids.contains(&id).then(|| (targets.clone(), pick.clone()))
+            }),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),

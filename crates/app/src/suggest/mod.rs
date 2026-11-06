@@ -1,4 +1,4 @@
-use aether_core::{AccessMode, Appearance, Reasoning};
+use aether_core::{AccessMode, Appearance, Provider, Reasoning};
 use aether_ui::SuggestionMenu;
 use gpui_kit::{Context, EntityInputHandler, SharedString, Window};
 
@@ -30,6 +30,7 @@ pub(crate) enum SlashCommand {
     Diff,
     Terminal,
     AgentPrompt(String),
+    Handoff(Provider),
     Prefill(String),
 }
 
@@ -210,6 +211,7 @@ impl ChatApp {
             SlashCommand::Terminal => {
                 self.toggle_terminal(window, cx);
             }
+            SlashCommand::Handoff(provider) => self.handoff_to(self.active, provider, window, cx),
             SlashCommand::AgentPrompt(prompt) => {
                 self.submit(self.active, prompt, vec![], window, cx);
             }
