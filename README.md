@@ -258,6 +258,13 @@ The app ships a few third-party assets, each under its own license:
 Each icon pack folder in `crates/app/assets/icon-packs/` holds its license
 file. `crates/app/assets/icons/SOURCES.md` lists sources and changes.
 
+Aether's design draws on two open-source coding-agent apps, studied as
+references for agent wiring, transcript rendering, git, and terminal UX:
+
+- [Waku](https://github.com/egoist/waku), GPL-3.0. Design reference only, no
+  Waku code is included.
+- [T3 Code](https://github.com/pingdotgg/t3code), MIT
+
 Claude, Codex, OpenCode, Pi, Antigravity, and OpenRouter are trademarks of
 their respective owners. Their logos appear only to identify each provider.
 They are not covered by Aether's license, and Aether is not affiliated with
