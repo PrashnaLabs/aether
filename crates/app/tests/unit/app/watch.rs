@@ -1631,7 +1631,10 @@ fn a_window_off_browser_does_not_hide_the_browser_another_shows(cx: &mut TestApp
         .update(cx, |_, window, cx| {
             app.update(cx, |app, cx| {
                 app.side_panel(None, window, cx);
-                assert!(app.browser.read(cx).native_visible(cx), "detached render hid main's browser");
+                assert!(
+                    app.browser.read(cx).native_visible(cx),
+                    "detached render hid main's browser"
+                );
             })
         })
         .unwrap();

@@ -245,6 +245,8 @@ fn composer_settings_hold_the_voice_section(cx: &mut gpui_kit::TestAppContext) {
 
 #[gpui_kit::test]
 fn turning_notes_and_news_off_closes_every_way_in(cx: &mut gpui_kit::TestAppContext) {
+    // reopening news starts a real story fetch whose tokio thread wakes the task
+    cx.background_executor.allow_parking();
     let off = Settings { notes_enabled: false, hackernews_enabled: false, ..Settings::default() };
     let window = settings_window_with(off, cx);
     cx.update(crate::actions::bind_keys);

@@ -79,7 +79,12 @@ impl ChatApp {
             return notice("Wait for the worktree", worktree_busy(&chat.title), window, cx);
         }
         if chat.lead && self.running_children(ix) > 0 {
-            return notice("Wait for your crew", crew_busy(&chat.title, self.running_children(ix)), window, cx);
+            return notice(
+                "Wait for your crew",
+                crew_busy(&chat.title, self.running_children(ix)),
+                window,
+                cx,
+            );
         }
         let title = chat.title.to_string();
         let mut text = "This removes the chat and its history. This can't be undone.".to_string();
@@ -216,7 +221,10 @@ impl ChatApp {
         if lead && started && chat.busy() {
             return notice(
                 "Wait for this reply",
-                format!("“{}” is still replying. Wait for it to finish, then make it a lead — turning lead on restarts its driver with the orchestration tools.", chat.title),
+                format!(
+                    "“{}” is still replying. Wait for it to finish, then make it a lead — turning lead on restarts its driver with the orchestration tools.",
+                    chat.title
+                ),
                 window,
                 cx,
             );

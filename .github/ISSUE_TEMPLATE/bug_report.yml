@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in Aether is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead? Screenshots help for UI bugs.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a project
+        2. Start a Claude Code chat
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Aether version or commit
+      placeholder: 0.1.0 or a1b2c3d
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and CPU architecture
+      placeholder: macOS 15.5 arm64, Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider involved
+      multiple: true
+      options:
+        - None / not agent related
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Pi
+        - Antigravity
+        - OpenRouter
+  - type: input
+    id: provider-version
+    attributes:
+      label: Provider CLI version
+      placeholder: Output of `claude --version`, `codex --version`, ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Remove API keys, tokens, and private paths before pasting.
+      render: shell

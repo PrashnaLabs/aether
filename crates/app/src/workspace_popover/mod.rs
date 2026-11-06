@@ -25,8 +25,8 @@ pub(crate) use model::{
     GhState, PopView, ScriptRuns, back_of, choose_app_label, disabled_label, home_short,
     line_totals, machine_name,
 };
-use model::{footer_error, row_after_shrink};
 pub(crate) use model::{Stop, pop_step};
+use model::{footer_error, row_after_shrink};
 pub(crate) use rows::diff_stat;
 
 actions!(workspace_popover, [PopUp, PopDown, PopFirst, PopLast, PopBack, PopConfirm]);

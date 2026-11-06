@@ -548,7 +548,10 @@ fn status_bar_shows_cpu_ram_with_sample(cx: &mut TestAppContext) {
     draw(&mut visual, &app, |app| app.sys_sample = sample(42.7, 12, 16));
     assert!(visual.debug_bounds("sys-cpu").is_some());
     assert!(visual.debug_bounds("sys-mem").is_some());
-    assert_eq!(super::resource_text(&sample(42.7, 12, 16).unwrap()), ("43%".into(), "12.0/16 GB".into()));
+    assert_eq!(
+        super::resource_text(&sample(42.7, 12, 16).unwrap()),
+        ("43%".into(), "12.0/16 GB".into())
+    );
 }
 
 #[test]
@@ -603,9 +606,8 @@ fn usage_strip_and_rows_work_from_the_keyboard(cx: &mut TestAppContext) {
             app.read(cx).usage_pop.rows.iter().position(|row| row.is_focused(window))
         })
     };
-    // rows: claude 0, antigravity 2, details 5; sorted claude (66%) then agy (1%)
-    for (key, want) in [("down", 0), ("down", 2), ("down", 5), ("down", 5), ("up", 2)]
-    {
+    // rows: claude 0, antigravity 2, details 4; sorted claude (66%) then agy (1%)
+    for (key, want) in [("down", 0), ("down", 2), ("down", 4), ("down", 4), ("up", 2)] {
         visual.simulate_keystrokes(key);
         draw(&mut visual, &app, seed);
         assert_eq!(focused(&mut visual), Some(want), "{key}");

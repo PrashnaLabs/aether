@@ -6,11 +6,11 @@ use aether_ui::{
 };
 use aether_ui::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::{HandleEdge, resize_handle};
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_kit::base::{HandleEdge, resize_handle};
-use gpui_kit::component::{ActiveTheme, IconName, Selectable, Sizable, h_flex, v_flex};
 use gpui_kit::component::resizable::resize_handle_appearance;
+use gpui_kit::component::{ActiveTheme, IconName, Selectable, Sizable, h_flex, v_flex};
 use gpui_kit::{
     Anchor, AnyElement, App, Axis, Context, DragMoveEvent, KeyDownEvent, ScrollHandle,
     SharedString, StyleRefinement, Window, point, prelude::*, px, relative,
@@ -666,22 +666,20 @@ impl ChatApp {
 
     fn right_panel_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let tabs = Surface::tabs(self.right_review_open, self.right_browser_open);
-        let active = self
-            .right_surface
-            .filter(|s| tabs.contains(s))
-            .unwrap_or(Surface::Terminal);
+        let active = self.right_surface.filter(|s| tabs.contains(s)).unwrap_or(Surface::Terminal);
         let mut bar = TabBar::new("right-panel-tab-bar")
             .tabs_id("right-panel-tabs")
             .height(px(38.))
             .border_color(cx.theme().sidebar_border);
         for (index, surface) in tabs.iter().enumerate() {
             let surface = *surface;
-            let mut tab = Tab::new(("right-panel-tab", index), surface.label())
-                .icon(surface.icon())
-                .selected(active == surface)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.select_surface(surface, window, cx)
-                }));
+            let mut tab =
+                Tab::new(("right-panel-tab", index), surface.label())
+                    .icon(surface.icon())
+                    .selected(active == surface)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_surface(surface, window, cx)
+                    }));
             if surface.closable() {
                 tab = tab.on_close(
                     ("right-panel-tab-close", index),
@@ -828,7 +826,9 @@ impl ChatApp {
                         .icon(IconName::PanelLeftOpen)
                         .accessibility_label("Expand sidebar")
                         .tooltip_with_action("Expand sidebar", &ToggleSidebar, None)
-                        .on_click(cx.listener(|this, _, window, cx| this.toggle_sidebar(window, cx))),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.toggle_sidebar(window, cx)),
+                        ),
                 );
             h_flex()
                 .flex_1()
@@ -858,23 +858,26 @@ impl ChatApp {
                 .min_h_0()
                 .border_l_1()
                 .border_color(cx.theme().sidebar_border)
-                .on_drag_move(move |e: &DragMoveEvent<std::rc::Rc<RightPanelResize>>, window, cx| {
-                    let panel_px = f32::from(e.bounds.right()) - f32::from(e.event.position.x);
-                    let root_px = f32::from(window.bounds().size.width);
-                    resize.update(cx, |this, cx| {
-                        this.right_panel_resizing = true;
-                        let sidebar_px = if this.settings.sidebar_collapsed {
-                            0.
-                        } else {
-                            this.settings
-                                .sidebar_width
-                                .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
-                        };
-                        let available = (root_px - sidebar_px).max(panel_px);
-                        this.settings.right_panel_share = right_panel_share(panel_px / available);
-                        cx.notify();
-                    })
-                })
+                .on_drag_move(
+                    move |e: &DragMoveEvent<std::rc::Rc<RightPanelResize>>, window, cx| {
+                        let panel_px = f32::from(e.bounds.right()) - f32::from(e.event.position.x);
+                        let root_px = f32::from(window.bounds().size.width);
+                        resize.update(cx, |this, cx| {
+                            this.right_panel_resizing = true;
+                            let sidebar_px = if this.settings.sidebar_collapsed {
+                                0.
+                            } else {
+                                this.settings
+                                    .sidebar_width
+                                    .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+                            };
+                            let available = (root_px - sidebar_px).max(panel_px);
+                            this.settings.right_panel_share =
+                                right_panel_share(panel_px / available);
+                            cx.notify();
+                        })
+                    },
+                )
                 .capture_any_mouse_up(move |_, _, cx| {
                     resize_end.update(cx, |this, _| {
                         if std::mem::take(&mut this.right_panel_resizing) {

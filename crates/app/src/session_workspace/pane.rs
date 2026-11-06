@@ -309,8 +309,14 @@ impl ChatApp {
                     })
                     .or_else(|| layout.panes().first().copied());
                 let pop = focused.then(|| self.render_workspace_pop(window, cx)).flatten();
-                let merged =
-                    self.render_header_with_pane(pop, controls, leading == Some(pane), focused, host, cx);
+                let merged = self.render_header_with_pane(
+                    pop,
+                    controls,
+                    leading == Some(pane),
+                    focused,
+                    host,
+                    cx,
+                );
                 h_flex()
                     .id(("pane-header", pane as usize))
                     .group(gpui_kit::SharedString::from(format!("pane-header-{pane}")))
@@ -356,7 +362,11 @@ impl ChatApp {
                     cx.notify();
                 }),
             )
-            .on_action(self.session_listener(cx, |app, _: &StopGenerating, window, cx| app.stop(window, cx)))
+            .on_action(
+                self.session_listener(cx, |app, _: &StopGenerating, window, cx| {
+                    app.stop(window, cx)
+                }),
+            )
             .on_action(self.session_listener(cx, |app, _: &FocusComposer, window, cx| {
                 app.focus_composer(window, cx)
             }))

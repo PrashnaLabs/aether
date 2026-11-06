@@ -264,4 +264,3 @@ impl ProjectRow {
 #[cfg(test)]
 #[path = "../../../tests/unit/chat/sidebar/project_row.rs"]
 mod tests;
-

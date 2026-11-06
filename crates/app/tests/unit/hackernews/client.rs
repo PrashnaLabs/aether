@@ -59,7 +59,11 @@ impl ApiFixture {
                 let path = request.split_whitespace().nth(1).unwrap().to_string();
                 log.lock().unwrap().push(path.clone());
                 let (status, body) = routes.get(&path).cloned().unwrap_or((404, "null".into()));
-                let _ = write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
             }
         });
         Self { base, requests, stop, server: Some(server) }

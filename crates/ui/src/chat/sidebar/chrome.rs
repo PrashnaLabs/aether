@@ -34,11 +34,8 @@ pub fn row_hover(cx: &App) -> Hsla {
 pub fn row_style<E: StatefulInteractiveElement + Styled>(el: E, selected: bool, cx: &App) -> E {
     let ring = cx.theme().ring;
     let fills = Fills::new(cx);
-    let border_color = if selected {
-        cx.theme().sidebar_border.opacity(0.6)
-    } else {
-        transparent_black()
-    };
+    let border_color =
+        if selected { cx.theme().sidebar_border.opacity(0.6) } else { transparent_black() };
     let el = el
         .border_1()
         .border_color(border_color)
@@ -120,4 +117,3 @@ pub(super) fn swallow_click(id: impl Into<ElementId>, child: impl IntoElement) -
 #[cfg(test)]
 #[path = "../../../tests/unit/chat/sidebar/chrome.rs"]
 mod tests;
-

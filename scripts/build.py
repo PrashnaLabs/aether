@@ -42,6 +42,7 @@ def macos(binary, stage, version, identity):
     contents = app / "Contents"
     copy(binary, contents / "MacOS/aether")
     copy(ICONS / "Aether.icns", contents / "Resources/Aether.icns")
+    copy(ROOT / "LICENSE", contents / "Resources/LICENSE")
     info = {
         "CFBundleExecutable": "aether",
         "CFBundleIdentifier": APP_ID,
@@ -51,6 +52,7 @@ def macos(binary, stage, version, identity):
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,
         "CFBundleIconFile": "Aether.icns",
+        "NSHumanReadableCopyright": "Copyright © 2026 PrashnaLabs. MIT License.",
         "LSMinimumSystemVersion": os.environ.get("MACOSX_DEPLOYMENT_TARGET", "12.0"),
         "NSHighResolutionCapable": True,
         "NSMicrophoneUsageDescription": "Aether turns your speech into text in the composer. Audio stays on this device.",
@@ -73,6 +75,7 @@ def macos(binary, stage, version, identity):
 
 def linux(binary, stage):
     copy(binary, stage / "usr/bin/aether")
+    copy(ROOT / "LICENSE", stage / "usr/share/doc/aether/copyright")
     copy(ROOT / f"packaging/linux/{APP_ID}.desktop",
          stage / f"usr/share/applications/{APP_ID}.desktop")
     for size in (16, 32, 48, 64, 128, 256, 512, 1024):
@@ -110,8 +113,10 @@ def debian(stage, artifact, version, arch):
         "Maintainer: Aether contributors <noreply@localhost>\n"
         f"Depends: {depends}\n"
         "Recommends: git, ca-certificates, mesa-vulkan-drivers\n"
-        "Description: Agent workspace with terminals and Git\n"
-        " A native desktop workspace for coding agents and projects.\n"
+        "Homepage: https://aether.prashnalabs.com\n"
+        "Description: Coding agents side by side, in one native window\n"
+        " Aether runs Claude Code, Codex, OpenCode, Pi, and Antigravity side by\n"
+        " side, with terminals, Git worktrees, and a project file explorer.\n"
     )
     run("dpkg-deb", "--root-owner-group", "--build", stage, artifact)
 

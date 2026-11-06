@@ -5,17 +5,17 @@ use aether_core::{
 };
 use aether_ui::ChatStatus;
 use futures::StreamExt;
-use gpui_kit::component::button::ButtonVariant;
 use futures::channel::mpsc::UnboundedReceiver;
+use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{App, Context, SharedString, Window};
 
 use super::{Changed, history};
 use crate::app::composer::attach::{delete_later, first_refusal, is_cli_command, shell_command};
 use crate::app::composer::quote::quoted;
 use crate::app::format::now_ms;
+use crate::app::orchestrate::{clip, stranded_texts};
 use crate::app::providers::set_default_model;
 use crate::app::worktree::{WorktreeTarget, worktree_name_hint, worktree_target};
-use crate::app::orchestrate::{clip, stranded_texts};
 use crate::app::{Chat, ChatApp, Queued, chat_cwd};
 use crate::suggest::prompt_commands;
 

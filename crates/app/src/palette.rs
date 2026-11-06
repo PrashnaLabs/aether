@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use aether_core::{Appearance, Message, Reasoning, Role};
 use aether_ui::CommandMenu;
 use gpui_kit::component::{
-    command::{CommandGroup, CommandItem},
     IconName, IndexPath,
+    command::{CommandGroup, CommandItem},
 };
 use gpui_kit::{ClipboardItem, Context, SharedString, Window};
 

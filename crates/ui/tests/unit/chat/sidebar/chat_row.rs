@@ -74,7 +74,7 @@ fn aria_carries_hover_card_lines() {
         "Greeting, No project, OpenCode DeepSeek V4.1 Flash Free, 15h"
     );
     assert_eq!(aria("Plain", ChatStatus::Idle, false, None), "Plain");
-        assert_eq!(
+    assert_eq!(
         aria("Greeting", ChatStatus::Idle, true, Some(&bare)),
         "Greeting, Lead, No project, OpenCode DeepSeek V4.1 Flash Free, 15h"
     );
@@ -102,5 +102,3 @@ fn status_state_predicates_and_waiting_action() {
     assert!(!ChatStatus::Done.is_busy());
     assert!(!ChatStatus::Idle.is_busy());
 }
-
-

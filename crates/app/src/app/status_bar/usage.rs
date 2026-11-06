@@ -231,8 +231,7 @@ impl ChatApp {
     }
 
     fn usage_pop_move(&mut self, down: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let order: Vec<usize> =
-            self.sorted().iter().map(|r| slot(r.0)).chain([DETAILS]).collect();
+        let order: Vec<usize> = self.sorted().iter().map(|r| slot(r.0)).chain([DETAILS]).collect();
         let rows = &self.usage_pop.rows;
         let at = order.iter().position(|&ix| rows[ix].is_focused(window));
         if let Some(Stop::Row(to)) = pop_step(at, false, down)
@@ -379,9 +378,9 @@ impl ChatApp {
                     })
                 }),
             );
-        let card = pop.card.and_then(|p| {
-            Some(self.usage_card(p, self.provider_plan_usages.get(&p)?, max_h, cx))
-        });
+        let card = pop
+            .card
+            .and_then(|p| Some(self.usage_card(p, self.provider_plan_usages.get(&p)?, max_h, cx)));
         let narrow = is_narrow(window);
         Some(
             h_flex()
@@ -461,13 +460,7 @@ impl ChatApp {
             })
     }
 
-    fn usage_card(
-        &self,
-        p: Provider,
-        u: &PlanUsage,
-        max_h: f32,
-        cx: &App,
-    ) -> Stateful<Div> {
+    fn usage_card(&self, p: Provider, u: &PlanUsage, max_h: f32, cx: &App) -> Stateful<Div> {
         let metered = p != Provider::OpenRouter;
         let theme = cx.theme();
         let (fg, muted) = (theme.foreground, theme.muted_foreground);

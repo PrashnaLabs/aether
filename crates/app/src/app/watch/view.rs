@@ -309,7 +309,9 @@ impl ChatApp {
                         .flex_1()
                         .min_h_0()
                         .on_action(
-                            app.session_listener(cx, |app, _: &StopGenerating, window, cx| app.stop(window, cx)),
+                            app.session_listener(cx, |app, _: &StopGenerating, window, cx| {
+                                app.stop(window, cx)
+                            }),
                         )
                         .on_action(app.session_listener(
                             cx,

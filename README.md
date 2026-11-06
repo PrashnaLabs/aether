@@ -1,6 +1,46 @@
-# Aether
+<p align="center">
+  <img src="crates/app/assets/app-icons/256.png" width="96" height="96" alt="Aether icon">
+</p>
 
-A native Rust desktop workspace for coding agents, terminals, Git, and project files.
+<h1 align="center">Aether</h1>
+
+<p align="center">
+  <strong>Coding agents side by side, in one native window.</strong><br>
+  <a href="https://aether.prashnalabs.com">Website</a> ·
+  <a href="https://aether.prashnalabs.com/docs/install/">Install</a> ·
+  <a href="https://aether.prashnalabs.com/docs/quickstart/">Quickstart</a> ·
+  <a href="https://aether.prashnalabs.com/docs/">Docs</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://github.com/PrashnaLabs/aether/actions/workflows/build.yml"><img src="https://github.com/PrashnaLabs/aether/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+</p>
+
+Aether is a native desktop app, written in Rust on [GPUI](https://www.gpui.rs),
+that runs Claude Code, Codex, OpenCode, Pi, and Antigravity side by side, with
+Git worktrees, terminals, and your project files in the same window. It drives
+the agent CLIs you already have installed and signed in to.
+
+## Features
+
+- **Every agent in one place.** Chat with Claude Code, Codex, OpenCode, Pi, and
+  Antigravity through their own CLIs, or with any OpenRouter model directly.
+  Tool approvals, questions, plans, and subagents show up in one transcript.
+- **Side by side.** Split, float, or detach sessions into their own windows.
+  Layouts, drafts, and window positions come back after a restart.
+- **Orchestration.** Turn a chat into a lead that spawns, messages, and stops
+  child agents through Aether's built-in MCP server.
+- **Git and worktrees.** Review changes, switch branches, and give each chat
+  its own worktree.
+- **Terminals and files.** Split terminals, a file explorer and editor with
+  syntax highlighting, quick open, an image viewer, and a browser panel.
+- **Usage at a glance.** Token and cost history across providers.
+- **The rest of your desk.** Notes, a watch list for running agents, on-device
+  dictation, a command palette, and Touch Bar support.
+
+Aether runs on macOS 12+ (Apple Silicon and Intel) and on Linux (x86_64 and
+aarch64, glibc, Vulkan). Install the agent CLIs you want to use separately.
 
 ## Session layouts
 
@@ -150,9 +190,8 @@ sudo apt install ./dist/Aether-*.deb
 The Debian package derives shared library dependencies from the built binary.
 Build on the oldest distribution you intend to support. Packages and archives
 depend on compatible host libraries, including WebKitGTK. They are not
-self-contained Linux binaries. (A build workflow is checked in at
-`docs/.github/workflows/build.yml`; it is not active until moved to the
-repository root `.github/workflows/`.)
+self-contained Linux binaries. The [Build workflow](.github/workflows/build.yml)
+produces the same artifacts on GitHub Actions.
 
 To install a Linux archive under `/usr/local`, extract it and copy its `usr/`
 contents there. For example, from the repository root after building:
@@ -183,9 +222,8 @@ uv run scripts/build.py \
 The build signs the app with the hardened runtime, creates and signs the DMG,
 submits it for notarization, then staples and validates the ticket. You can
 also set `APPLE_SIGNING_IDENTITY` and `APPLE_NOTARY_PROFILE` in the environment.
-The checked-in workflow uses ad-hoc signatures for local-style builds; to
-run it in GitHub Actions, move it to `.github/workflows/` at the repository
-root. It builds for the [GitHub macOS and Linux runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+The Build workflow uses ad-hoc signatures and runs on the
+[GitHub macOS and Linux runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 
 ## Icons
 
@@ -205,3 +243,44 @@ Run the packaging checks with:
 ```sh
 uv run -m unittest discover -s scripts/tests -v
 ```
+
+## Credits
+
+The app ships a few third-party assets, each under its own license:
+
+- [Iconoir](https://iconoir.com) icons, MIT
+- [Remix Icon](https://remixicon.com) icons, Remix Icon License v1.0
+- [Solar](https://www.figma.com/community/file/1166831539721848736) icons by 480 Design, CC BY 4.0
+- [Lucide](https://lucide.dev) icons as the fallback set, ISC, bundled by the
+  `gpui-kit-assets` crate
+- English spelling data from [LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries)
+
+Each icon pack folder in `crates/app/assets/icon-packs/` holds its license
+file. `crates/app/assets/icons/SOURCES.md` lists sources and changes.
+
+Aether's design draws on two open-source coding-agent apps, studied as
+references for agent wiring, transcript rendering, git, and terminal UX:
+
+- [Waku](https://github.com/egoist/waku), GPL-3.0. Design reference only, no
+  Waku code is included.
+- [T3 Code](https://github.com/pingdotgg/t3code), MIT
+
+Claude, Codex, OpenCode, Pi, Antigravity, and OpenRouter are trademarks of
+their respective owners. Their logos appear only to identify each provider.
+They are not covered by Aether's license, and Aether is not affiliated with
+or endorsed by them.
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get
+started, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
+not in public issues.
+
+## License
+
+Aether is released under the [MIT License](LICENSE). Bundled third-party
+assets keep their own licenses, listed under [Credits](#credits).

@@ -5,6 +5,9 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+homepage = "https://aether.prashnalabs.com"
+repository = "https://github.com/PrashnaLabs/aether"
 
 [workspace.dependencies]
 aether-core = { path = "crates/core" }

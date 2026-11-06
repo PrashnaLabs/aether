@@ -50,8 +50,8 @@ fn theme_rows_match_scheme_names_without_accents() {
 
 #[test]
 fn lead_capable_covers_every_harness() {
-    use aether_core::Provider;
     use crate::app::orchestrate::lead_capable;
+    use aether_core::Provider;
     for p in crate::app::CLIS.into_iter().chain([Provider::OpenRouter]) {
         assert!(lead_capable(p), "{p:?}");
     }

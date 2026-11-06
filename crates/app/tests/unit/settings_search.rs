@@ -134,6 +134,10 @@ fn notes_settings_are_searchable_in_tools() {
 #[test]
 fn status_bar_position_and_visibility_are_not_searchable() {
     for query in ["status bar position", "show status bar"] {
-        assert!(search_settings(query).iter().all(|m| !m.id.starts_with("status-bar-p") && m.id != "status-bar-visible"));
+        assert!(
+            search_settings(query)
+                .iter()
+                .all(|m| !m.id.starts_with("status-bar-p") && m.id != "status-bar-visible")
+        );
     }
 }

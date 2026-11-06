@@ -5,7 +5,8 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::{Icon, IconName, Selectable, StyledExt, h_flex};
 use gpui_kit::{
-    AnyElement, App, Context, Div, Entity, Hsla, MouseButton, SharedString, Window, div, prelude::*, px,
+    AnyElement, App, Context, Div, Entity, Hsla, MouseButton, SharedString, Window, div,
+    prelude::*, px,
 };
 
 use super::{ChatApp, Page, SidebarView};

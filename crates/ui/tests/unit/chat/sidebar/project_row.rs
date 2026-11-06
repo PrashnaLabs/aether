@@ -5,13 +5,15 @@ fn project_aria_formats_collapsed_status_rollup() {
     let idle = project_aria("aether", 3, false, false, true, ChatStatus::Idle);
     assert_eq!(idle, "aether, 3 chats");
 
-    let working = project_aria("aether", 2, false, false, true, ChatStatus::Working { since_ms: 0 });
+    let working =
+        project_aria("aether", 2, false, false, true, ChatStatus::Working { since_ms: 0 });
     assert_eq!(working, "aether, 2 chats, working");
 
     let waiting = project_aria("aether", 1, false, false, true, ChatStatus::Waiting);
     assert_eq!(waiting, "aether, 1 chat, needs you");
 
-    let expanded = project_aria("aether", 2, false, false, false, ChatStatus::Working { since_ms: 0 });
+    let expanded =
+        project_aria("aether", 2, false, false, false, ChatStatus::Working { since_ms: 0 });
     assert_eq!(expanded, "aether, 2 chats");
 
     let missing = project_aria("broken", 0, false, true, true, ChatStatus::Idle);

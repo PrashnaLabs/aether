@@ -232,7 +232,10 @@ impl GitPanel {
     }
 
     /// Sidebar row counts for `folder`: `None` until it has a good read.
-    pub(crate) fn sidebar_git_summary(&self, folder: &Path) -> Option<(usize, u32, u32, Option<(u32, u32)>)> {
+    pub(crate) fn sidebar_git_summary(
+        &self,
+        folder: &Path,
+    ) -> Option<(usize, u32, u32, Option<(u32, u32)>)> {
         sidebar_cached_summary(&self.statuses, folder)
     }
 
