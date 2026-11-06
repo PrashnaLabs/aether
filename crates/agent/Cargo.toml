@@ -1,0 +1,23 @@
+[package]
+name = "aether-agent"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core.workspace = true
+aether-driver.workspace = true
+aether-git.workspace = true
+adk-rust.workspace = true
+chrono.workspace = true
+futures.workspace = true
+keyring.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+scraper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
