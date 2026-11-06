@@ -92,10 +92,11 @@ impl ChatApp {
         }
         let source = self.workspace.model.panes.get(&pane).copied();
         if let Some(id) = source
-            && let Some(ix) = self.chats.iter().position(|c| c.id == id) {
-                self.active = ix;
-                self.activate_session_ui(id, window, cx);
-            }
+            && let Some(ix) = self.chats.iter().position(|c| c.id == id)
+        {
+            self.active = ix;
+            self.activate_session_ui(id, window, cx);
+        }
         self.workspace.splitting = true;
         self.new_chat_in_current_project(window, cx);
         self.workspace.splitting = false;

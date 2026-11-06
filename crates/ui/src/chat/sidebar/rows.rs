@@ -1,11 +1,7 @@
 use crate::theme::Corners;
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Sizable, StyledExt,
-    button::ButtonVariants,
-    h_flex,
-    input::InputState,
-    spinner::Spinner,
-    v_flex,
+    ActiveTheme, Icon, IconName, Sizable, StyledExt, button::ButtonVariants, h_flex,
+    input::InputState, spinner::Spinner, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, Div, Entity, Hsla, KeyDownEvent, Role, SharedString, Window, div, prelude::*,
@@ -18,8 +14,8 @@ use super::menu::track_menu;
 use super::project_row::ProjectRow;
 use super::state::{SidebarState, navigate};
 use super::{
-    AgentState, ChatItem, ChatSidebar, CollapseHandler, OutsideLine, OutsideState,
-    ProjectHeader, ProjectItem, RowHandler, ToolsFactory, WorktreeItem,
+    AgentState, ChatItem, ChatSidebar, CollapseHandler, OutsideLine, OutsideState, ProjectHeader,
+    ProjectItem, RowHandler, ToolsFactory, WorktreeItem,
 };
 use crate::components::provider_icon;
 use aether_core::{Provider, SidebarStyle};
@@ -647,16 +643,20 @@ impl ChatSidebar {
                 let visible = collapsed_crew(&children, rename_ix);
                 let hidden = visible.iter().filter(|&&show| !show).count();
                 let expanded = !collapsed_crews.contains(&lead);
-                out.extend(children.into_iter().zip(visible).filter_map(|(chat, show)| {
-                    (expanded || show).then(|| row(chat, nested))
-                }));
+                out.extend(
+                    children
+                        .into_iter()
+                        .zip(visible)
+                        .filter_map(|(chat, show)| (expanded || show).then(|| row(chat, nested))),
+                );
                 if hidden > 0 {
                     out.push(ChatRow::CrewToggle { lead, hidden, expanded, nested });
                 }
             }
             out
         };
-        let header = |title: &str| ChatRow::Header { tools: None,
+        let header = |title: &str| ChatRow::Header {
+            tools: None,
             title: SharedString::from(title.to_string()),
             on_add: None,
             collapse: None,
@@ -674,7 +674,8 @@ impl ChatSidebar {
             .collect();
         if !self.agents.is_empty() {
             let collapsed = self.agents_collapse.as_ref().is_some_and(|(folded, _)| *folded);
-            rows.push(ChatRow::Header { tools: None,
+            rows.push(ChatRow::Header {
+                tools: None,
                 title: "Agents".into(),
                 on_add: None,
                 collapse: self.agents_collapse.take(),
@@ -697,7 +698,8 @@ impl ChatSidebar {
         }));
         if !self.pinned.is_empty() {
             let collapsed = self.pinned_collapse.as_ref().is_some_and(|(folded, _)| *folded);
-            rows.push(ChatRow::Header { tools: None,
+            rows.push(ChatRow::Header {
+                tools: None,
                 title: "Pinned".into(),
                 on_add: None,
                 collapse: self.pinned_collapse.take(),
@@ -712,10 +714,13 @@ impl ChatSidebar {
             .filter(|project| project.header.count > 0)
             .collect();
         let projects_collapsed = self.projects_collapse.as_ref().is_some_and(|(folded, _)| *folded);
-        if !projects.is_empty() || self.hidden.is_some() || self.on_add_project.is_some()
+        if !projects.is_empty()
+            || self.hidden.is_some()
+            || self.on_add_project.is_some()
             || self.projects_collapse.is_some()
         {
-            rows.push(ChatRow::Header { tools: None,
+            rows.push(ChatRow::Header {
+                tools: None,
                 title: "Projects".into(),
                 on_add: self.on_add_project.take(),
                 collapse: self.projects_collapse.take(),
@@ -767,7 +772,9 @@ impl ChatSidebar {
             }
         }
         rows.extend(
-            self.hidden.take().filter(|_| !projects_collapsed)
+            self.hidden
+                .take()
+                .filter(|_| !projects_collapsed)
                 .map(|(label, on_click)| ChatRow::Link { label, on_click }),
         );
         if !self.chats.is_empty() {

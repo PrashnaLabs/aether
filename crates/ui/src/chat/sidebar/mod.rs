@@ -141,18 +141,16 @@ impl ChatStatus {
                     .when_some(timer, |el, t| el.child(div().text_xs().child(t)))
                     .into_any_element()
             }
-            Self::Waiting => {
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .px_1p5()
-                    .py_0p5()
-                    .corner(px(4.))
-                    .text_color(mango)
-                    .child(Icon::new(Lucide::CircleDot).size(rems(0.75)))
-                    .child(div().text_xs().font_semibold().child("Needs you"))
-                    .into_any_element()
-            }
+            Self::Waiting => h_flex()
+                .gap_1()
+                .items_center()
+                .px_1p5()
+                .py_0p5()
+                .corner(px(4.))
+                .text_color(mango)
+                .child(Icon::new(Lucide::CircleDot).size(rems(0.75)))
+                .child(div().text_xs().font_semibold().child("Needs you"))
+                .into_any_element(),
             Self::Done => {
                 let info = theme::info_text(cx);
                 h_flex()

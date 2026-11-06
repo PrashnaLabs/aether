@@ -61,9 +61,10 @@ pub fn run_stdio() -> i32 {
         }
         let line = line.trim_end_matches(['\n', '\r']);
         if let Some(reply) = handle(line, token.as_deref(), &mut call)
-            && writeln!(out, "{reply}").and_then(|_| out.flush()).is_err() {
-                break;
-            }
+            && writeln!(out, "{reply}").and_then(|_| out.flush()).is_err()
+        {
+            break;
+        }
     }
     0
 }

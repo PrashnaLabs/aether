@@ -172,9 +172,10 @@ fn nvim_args(socket: &Path, path: &Path, line: Option<usize>) -> Vec<std::ffi::O
 
 fn expand_home(value: &str) -> PathBuf {
     if let Some(rest) = value.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
     PathBuf::from(value)
 }
 
@@ -217,15 +218,16 @@ fn remove_stale_socket(path: &Path) -> std::io::Result<()> {
             return Ok(());
         }
         if let Err(error) = UnixStream::connect(path)
-            && error.kind() == std::io::ErrorKind::ConnectionRefused {
-                let after = std::fs::symlink_metadata(path)?;
-                if after.file_type().is_socket()
-                    && before.dev() == after.dev()
-                    && before.ino() == after.ino()
-                {
-                    std::fs::remove_file(path)?;
-                }
+            && error.kind() == std::io::ErrorKind::ConnectionRefused
+        {
+            let after = std::fs::symlink_metadata(path)?;
+            if after.file_type().is_socket()
+                && before.dev() == after.dev()
+                && before.ino() == after.ino()
+            {
+                std::fs::remove_file(path)?;
             }
+        }
     }
     #[cfg(not(unix))]
     let _ = path;

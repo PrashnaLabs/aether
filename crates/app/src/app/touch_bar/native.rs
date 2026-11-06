@@ -124,12 +124,7 @@ impl ActionBar {
             buttons.push(button);
         }
         let timer_button = unsafe {
-            NSButton::buttonWithTitle_target_action(
-                &NSString::from_str(""),
-                None,
-                None,
-                mtm,
-            )
+            NSButton::buttonWithTitle_target_action(&NSString::from_str(""), None, None, mtm)
         };
         timer_button.setBordered(false);
         if let Some(image) = NSImage::imageWithSystemSymbolName_accessibilityDescription(
@@ -183,7 +178,9 @@ impl ActionBar {
                 active.push(ivars.timer_identifier.clone());
                 self.setDefaultItemIdentifiers(&NSArray::from_retained_slice(&active));
             } else {
-                self.setDefaultItemIdentifiers(&NSArray::from_retained_slice(&ivars.base_identifiers));
+                self.setDefaultItemIdentifiers(&NSArray::from_retained_slice(
+                    &ivars.base_identifiers,
+                ));
             }
         }
     }

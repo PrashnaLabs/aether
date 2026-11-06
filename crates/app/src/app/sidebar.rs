@@ -703,7 +703,8 @@ impl ChatApp {
                     self.settings
                         .watchlist
                         .iter()
-                        .filter(|&w| matches!(w, Watch::Chat(_))).map(|w| w.chat())
+                        .filter(|&w| matches!(w, Watch::Chat(_)))
+                        .map(|w| w.chat())
                         .collect(),
                     move |id, _, cx| {
                         watch.update(cx, |this, cx| this.toggle_watch(Watch::Chat(id), cx))
