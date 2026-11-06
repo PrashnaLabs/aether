@@ -72,7 +72,8 @@ pub fn tool_specs() -> Value {
                     "task": {"type": "string", "description": "What the agent should do"},
                     "effort": {"type": "string", "description": "Optional reasoning effort"},
                     "worktree": {"type": "boolean", "description": "Own git branch + folder off the lead's current branch; lead's uncommitted changes aren't included"},
-                    "nonce": {"type": "string", "description": "Idempotency key for this spawn; retrying with the same key returns the existing child instead of creating a second"}
+                    "nonce": {"type": "string", "description": "Idempotency key for this spawn; retrying with the same key returns the existing child instead of creating a second"},
+                    "card": {"type": "integer", "description": "Optional board card id to link; omitted adds a card for this agent"}
                 },
                 "required": ["provider", "model", "title", "task"]
             }
@@ -110,6 +111,36 @@ pub fn tool_specs() -> Value {
                     "id": {"type": "integer", "description": "Child agent id from the list_agents tool"}
                 },
                 "required": ["id"]
+            }
+        },
+        {
+            "name": "list_cards",
+            "description": "List open task-board cards, one line each.",
+            "inputSchema": {"type": "object", "properties": {}}
+        },
+        {
+            "name": "add_card",
+            "description": "Add a card to the task board (default column todo).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short card title"},
+                    "body": {"type": "string", "description": "Optional details"},
+                    "col": {"type": "string", "description": "One of: backlog, todo, doing, review"}
+                },
+                "required": ["title"]
+            }
+        },
+        {
+            "name": "move_card",
+            "description": "Move a task-board card to backlog, todo, doing or review.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "Card id from the list_cards tool"},
+                    "col": {"type": "string", "description": "One of: backlog, todo, doing, review"}
+                },
+                "required": ["id", "col"]
             }
         }
     ])

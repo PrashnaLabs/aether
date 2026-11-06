@@ -148,6 +148,26 @@ fn project_notes_follow_a_project_switch(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn toggled_project_notes_follow_a_project_switch(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let other = f.dir.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let window = f.window(cx);
+    window
+        .update(cx, |app, window, cx| {
+            app.settings.notes_enabled = true;
+            app.open_notes(window, cx);
+            assert_eq!(app.notes.project, None);
+            app.notes.project = Some("project".into());
+            app.open_page(Page::Chat, cx);
+            app.settings.workspace_root = other.display().to_string();
+            app.open_notes(window, cx);
+            assert_eq!(app.notes.project.as_deref(), Some("other"));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn invalidated_discovery_cannot_replace_newer_notes_results(cx: &mut TestAppContext) {
     let f = Fixture::new();
     std::fs::write(f.notes.join("old.md"), "old result").unwrap();

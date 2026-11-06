@@ -9,8 +9,13 @@ use aether_ui::{
     FatalCard, NoticeLine, NoticeLink, OnLink, StartupList, SteerMarker, StoppedMarker,
     stopped_lead, stopped_summary,
 };
-use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::{AnyElement, ClipboardItem, Context, SharedString, Window, div, prelude::*};
+use aether_ui::theme::Corners;
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::button::{ButtonVariant, ButtonVariants};
+use gpui_kit::component::{ActiveTheme, Sizable, h_flex};
+use gpui_kit::{
+    AnyElement, ClipboardItem, Context, FontWeight, Role, SharedString, Window, div, prelude::*, px,
+};
 
 use super::create::restored_background;
 use super::row_reflow;
@@ -19,6 +24,13 @@ use crate::app::orchestrate::needs_agy_registration;
 use crate::app::worktree::notice;
 use crate::app::{ChatApp, WorktreeJob};
 use crate::attachments;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Bulk {
+    Delete,
+    Archive,
+    Unarchive,
+}
 
 const AGY_REGISTER_PROMPT: &str = "Antigravity can only load Aether's tools from its global MCP config (~/.gemini/config/mcp_config.json). Register Aether there? Outside Aether the entry stays inactive.";
 
@@ -165,6 +177,170 @@ impl ChatApp {
             active -= 1;
         }
         self.select(active, window, cx);
+    }
+
+    /// Asks before deleting, archiving or unarchiving several chats at once.
+    pub(crate) fn confirm_bulk(
+        &mut self,
+        bulk: Bulk,
+        ids: Vec<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids: Vec<i64> = ids.into_iter().filter(|id| self.chat_ix(*id).is_some()).collect();
+        let n = ids.len();
+        if n == 0 {
+            return;
+        }
+        let noun = if n == 1 { "chat" } else { "chats" };
+        let (verb, text) = match bulk {
+            Bulk::Delete => (
+                "Delete",
+                "This removes them and their history. This can't be undone. Worktree folders stay on disk.",
+            ),
+            Bulk::Archive => ("Archive", "They move to the Archive. You can unarchive them any time."),
+            Bulk::Unarchive => ("Unarchive", "They move back to the sidebar."),
+        };
+        let view = cx.entity();
+        aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
+            let (view, ids) = (view.clone(), ids.clone());
+            alert
+                .confirm()
+                .title(SharedString::from(format!("{verb} {n} {noun}?")))
+                .description(text)
+                .ok_text(SharedString::from(format!("{verb} {n}")))
+                .ok_variant(if bulk == Bulk::Delete {
+                    ButtonVariant::Danger
+                } else {
+                    ButtonVariant::Primary
+                })
+                .on_ok(move |_, window, cx| {
+                    view.update(cx, |this, cx| this.apply_bulk(bulk, &ids, window, cx));
+                    true
+                })
+        });
+    }
+
+    fn picks(&mut self, project: bool) -> &mut std::collections::HashSet<i64> {
+        if project { &mut self.project_picks } else { &mut self.archive_picks }
+    }
+
+    /// Count, select all, the given actions and clear, for `picked` of `all`.
+    pub(crate) fn bulk_bar(
+        &self,
+        key: &'static str,
+        picked: Vec<i64>,
+        all: Vec<i64>,
+        actions: &[Bulk],
+        project: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if picked.is_empty() {
+            return None;
+        }
+        let theme = cx.theme();
+        let n = picked.len();
+        let select_all = (n < all.len()).then(|| {
+            aether_ui::button((key, 0usize))
+                .ghost()
+                .xsmall()
+                .label("Select all")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.picks(project).extend(all.iter().copied());
+                    cx.notify();
+                }))
+        });
+        let clear = aether_ui::button((key, 1usize))
+            .ghost()
+            .xsmall()
+            .icon(Lucide::X)
+            .accessibility_label("Clear selection")
+            .tooltip("Clear selection")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.picks(project).clear();
+                cx.notify();
+            }));
+        let buttons = actions.iter().enumerate().map(|(i, &bulk)| {
+            let (label, icon) = match bulk {
+                Bulk::Delete => ("Delete", Lucide::Trash),
+                Bulk::Archive => ("Archive", Lucide::Archive),
+                Bulk::Unarchive => ("Unarchive", Lucide::ArchiveRestore),
+            };
+            let ids = picked.clone();
+            aether_ui::button((key, 2 + i))
+                .small()
+                .h(px(28.))
+                .icon(icon)
+                .label(label)
+                .map(|b| if bulk == Bulk::Delete { b.danger() } else { b.outline() })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.confirm_bulk(bulk, ids.clone(), window, cx)
+                }))
+        });
+        Some(
+            h_flex()
+                .id(key)
+                .role(Role::Toolbar)
+                .aria_label("Selected chats")
+                .w_full()
+                .gap(px(6.))
+                .items_center()
+                .flex_wrap()
+                .p(px(6.))
+                .corner(px(9.))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .child(
+                    div()
+                        .px(px(4.))
+                        .text_size(px(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(format!("{n} selected")),
+                )
+                .children(select_all)
+                .child(div().flex_1())
+                .children(buttons)
+                .child(clear)
+                .into_any_element(),
+        )
+    }
+
+    /// Skips chats still creating a worktree or running a crew, then reports them.
+    pub(crate) fn apply_bulk(
+        &mut self,
+        bulk: Bulk,
+        ids: &[i64],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut skipped = Vec::new();
+        for &id in ids {
+            let Some(ix) = self.chat_ix(id) else { continue };
+            let chat = &self.chats[ix];
+            let busy = bulk != Bulk::Unarchive
+                && (chat.worktree_job.is_some() || (chat.lead && self.running_children(ix) > 0));
+            if busy {
+                skipped.push(format!("“{}”", chat.title));
+                continue;
+            }
+            match bulk {
+                Bulk::Delete => self.delete_chat(ix, window, cx),
+                Bulk::Archive => self.archive_chat(ix, window, cx),
+                Bulk::Unarchive => self.unarchive_chat(ix, cx),
+            }
+        }
+        self.archive_picks.retain(|id| !ids.contains(id));
+        self.project_picks.retain(|id| !ids.contains(id));
+        if !skipped.is_empty() {
+            let text = format!(
+                "{} {} still setting up a worktree or running agents. Wait for them, then try again.",
+                skipped.join(", "),
+                if skipped.len() == 1 { "is" } else { "are" }
+            );
+            notice("Some chats were skipped", text, window, cx);
+        }
+        cx.notify();
     }
 
     /// Flips the pin; pinned chats sort into their own sidebar section.

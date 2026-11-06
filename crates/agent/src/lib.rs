@@ -14,4 +14,4 @@ pub mod usage_history;
 pub use agent::{Agent, Cancel, ChatSession, Reply, SessionHealth, SideUpdate};
 pub use external::{ExternalAgent, ExternalState};
 pub use models::ModelInfo;
-pub use store::{SavedChat, SavedDelivery, Store};
+pub use store::{SavedCard, SavedChat, SavedDelivery, Store};

@@ -2,6 +2,7 @@ use crate::theme::Corners;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Sizable, StyledExt,
+    checkbox::Checkbox,
     button::ButtonVariants,
     h_flex,
     hover_card::HoverCard,
@@ -16,10 +17,10 @@ use gpui_kit::{
 
 use super::chrome::{reveal_on_hover, row_style, swallow_click, tabular, tooltip};
 use super::menu::chat_menu;
-use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, RowPlace};
+use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowPlace};
+use aether_core::SidebarStyle;
 use crate::arrow_count;
 use crate::components::provider_icon;
-use aether_core::SidebarStyle;
 
 /// Keeps both ends of a long name, which is where branch names differ.
 pub fn middle_truncate(text: &str, max: usize) -> String {
@@ -192,6 +193,52 @@ fn card(title: SharedString, line: ChatLine, cx: &App) -> impl IntoElement + use
         .child(entry(small(provider_icon(line.provider)), line.model.clone()))
 }
 
+/// The row's leading mark; with bulk select on, a checkbox takes its place on hover
+/// or while any row is picked.
+fn pick_slot(
+    mark: AnyElement,
+    pick: Option<&Pick>,
+    group: &SharedString,
+    id: i64,
+    title: &SharedString,
+) -> AnyElement {
+    let Some(pick) = pick else { return mark };
+    let shown = pick.picked || pick.picking;
+    let toggle = pick.on_toggle.clone();
+    div()
+        .relative()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .min_w(rems(1.))
+        .child(
+            div()
+                .when(shown, |d| d.opacity(0.))
+                .when(!shown, |d| d.group_hover(group.clone(), |s| s.opacity(0.)))
+                .child(mark),
+        )
+        .child(
+            div()
+                .id(("chat-pick-slot", id as u64))
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!shown, |d| d.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)))
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(
+                    Checkbox::new(("chat-pick", id as u64))
+                        .checked(pick.picked)
+                        .tab_stop(false)
+                        .aria_label(SharedString::from(format!("Select {title}")))
+                        .on_click(move |_: &bool, window, cx| toggle(id, window, cx)),
+                ),
+        )
+        .into_any_element()
+}
+
 pub(super) fn render_chat(
     chat: ChatItem,
     nested: bool,
@@ -207,6 +254,8 @@ pub(super) fn render_chat(
     let muted = cx.theme().muted_foreground;
     let ix = chat.ix;
     let title = chat.title.clone();
+    let (pick, pick_group, pick_id) = (chat.pick.clone(), group.clone(), chat.id);
+    let slot = |mark: AnyElement| pick_slot(mark, pick.as_ref(), &pick_group, pick_id, &title);
     let status = chat.status;
     let now = chat.now;
     let aria = aria(&title, status, chat.lead, chat.line.as_ref());
@@ -318,7 +367,15 @@ pub(super) fn render_chat(
             .w_full()
             .gap_2()
             .items_center()
-            .child(Icon::new(Lucide::MessageCircle).size(rems(0.875)).text_color(muted).flex_none())
+            .child(
+                slot(
+                    Icon::new(Lucide::MessageCircle)
+                        .size(rems(0.875))
+                        .text_color(muted)
+                        .flex_none()
+                        .into_any_element(),
+                ),
+            )
             .child(title_cell(title.clone()))
             .when(status != ChatStatus::Idle, |row| {
                 row.child(status.badge(("chat-status", ix), None, cx)).child(
@@ -358,14 +415,15 @@ pub(super) fn render_chat(
                 .items_center()
                 .text_xs()
                 .text_color(muted)
-                .child(
+                .child(slot(
                     Icon::new(Lucide::Folder)
                         .size(rems(0.75))
                         .flex_none()
                         .when_some(line.project.as_ref(), |icon, name| {
                             icon.text_color(project_color(name, cx))
-                        }),
-                )
+                        })
+                        .into_any_element(),
+                ))
                 .child(
                     div().flex_1().min_w_0().truncate().child(project_label(line.project.as_ref())),
                 )
@@ -390,7 +448,7 @@ pub(super) fn render_chat(
                 .w_full()
                 .gap_2()
                 .items_center()
-                .child(project_mark(line.project.as_ref(), cx))
+                .child(slot(project_mark(line.project.as_ref(), cx)))
                 .child(title_cell(title.clone()))
                 .child(trailing)
                 .children(approve_action)
@@ -420,7 +478,7 @@ pub(super) fn render_chat(
             .items_center()
             .text_xs()
             .text_color(muted)
-            .child(project_mark(line.project.as_ref(), cx))
+            .child(slot(project_mark(line.project.as_ref(), cx)))
             .child(div().flex_1().min_w_0().truncate().child(project_label(line.project.as_ref())))
             .child(
                 h_flex()

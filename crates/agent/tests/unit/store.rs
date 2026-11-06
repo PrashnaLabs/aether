@@ -363,3 +363,69 @@ fn new_database_file_is_owner_only() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(mode, 0o600);
 }
+
+fn card(id: i64, col: &str, position: f64) -> SavedCard {
+    SavedCard {
+        id,
+        title: format!("Card {id}"),
+        body: "body".into(),
+        col: col.into(),
+        position,
+        chat: Some(7),
+        project: "/code/p".into(),
+        updated_at: 99,
+    }
+}
+
+#[test]
+fn cards_round_trip() {
+    let path = std::env::temp_dir().join(format!("aether-store-cards-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let mut a = card(1, "todo", 2.0);
+    let b = SavedCard { chat: None, ..card(2, "doing", 0.5) };
+    store.save_card(a.clone());
+    store.save_card(b.clone());
+    a.title = "Renamed".into();
+    store.save_card(a.clone());
+    store.flush();
+    let cards = store.load_cards().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(cards, [b, a]);
+}
+
+#[test]
+fn card_delete() {
+    let path = std::env::temp_dir().join(format!("aether-store-carddel-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    store.save_card(card(1, "todo", 0.0));
+    store.delete_card(1);
+    store.flush();
+    let cards = store.load_cards().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert!(cards.is_empty());
+}
+
+#[test]
+fn old_db_gains_cards_table() {
+    let path = std::env::temp_dir().join(format!("aether-store-nocards-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    rt.block_on(async {
+        let options = SqliteConnectOptions::new().filename(&path).create_if_missing(true);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE chats (id INTEGER PRIMARY KEY, title TEXT NOT NULL, messages TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+    });
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let cards = store.load_cards();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(cards.unwrap(), vec![]);
+}

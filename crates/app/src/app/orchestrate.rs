@@ -10,6 +10,7 @@ use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
 use super::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms};
+use crate::board::model::{Col, lead_move, open_lines};
 use crate::session_workspace::SplitAxis;
 
 pub(crate) fn lead_capable(provider: Provider) -> bool {
@@ -47,6 +48,7 @@ pub(super) struct SpawnArgs {
     pub(super) task: String,
     pub(super) worktree: bool,
     pub(super) nonce: String,
+    pub(super) card: Option<i64>,
 }
 
 impl SpawnArgs {
@@ -84,6 +86,7 @@ impl SpawnArgs {
             task: need("task")?,
             worktree,
             nonce: text("nonce"),
+            card: args["card"].as_i64(),
         })
     }
 }
@@ -254,6 +257,9 @@ impl ChatApp {
                 "read_agent" => self.read_agent(ix, &call.args),
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
+                "list_cards" => Ok(Value::String(open_lines(&self.cards))),
+                "add_card" => self.add_card(ix, &call.args),
+                "move_card" => self.move_card(&call.args),
                 tool => Err(format!(r#"unknown tool "{tool}""#)),
             },
         };
@@ -289,6 +295,41 @@ impl ChatApp {
             })
             .collect();
         json!({"agents": agents, "children": children})
+    }
+
+    fn add_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
+        let text = |k: &str| args[k].as_str().unwrap_or_default().trim().to_string();
+        let title = text("title");
+        if title.is_empty() {
+            return Err(r#"missing "title""#.into());
+        }
+        let col = match text("col").as_str() {
+            "" => Col::Todo,
+            s => Col::parse(s).filter(|&c| c != Col::Done).ok_or_else(|| {
+                format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
+            })?,
+        };
+        let folder = chat_cwd(&self.chats[lead_ix], &self.settings.workspace_root);
+        let id =
+            self.board_add(title.clone(), text("body"), col, folder.display().to_string(), None);
+        Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
+    }
+
+    fn move_card(&mut self, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_i64()
+            .or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()))
+            .ok_or_else(|| r#"missing "id""#.to_string())?;
+        let to = args["col"].as_str().unwrap_or_default();
+        let card = self
+            .cards
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        let msg = lead_move(card, to)?;
+        let col = card.col;
+        self.board_move(id, col, None);
+        Ok(Value::String(msg))
     }
 
     pub(super) fn own_child(&self, lead_ix: usize, args: &Value) -> Result<usize, String> {
@@ -564,14 +605,32 @@ impl ChatApp {
         } else {
             None
         };
+        if let Some(id) = a.card
+            && !self.cards.iter().any(|c| c.id == id)
+        {
+            return Err(format!("card #{id} not found"));
+        }
         let ix = self.create_child(lead_ix, &a)?;
         if let Some(reason) = self.worktree_blocks_send(ix) {
             self.chats.remove(ix);
             return Err(reason.to_string());
         }
         self.persist(ix);
+        let child_id = self.chats[ix].id;
+        let card = match a.card {
+            Some(id) => {
+                self.board_link(id, child_id);
+                id
+            }
+            None => {
+                let lead = &self.chats[lead_ix];
+                let folder = chat_cwd(lead, &self.settings.workspace_root).display().to_string();
+                self.board_add(a.title.clone(), a.task.clone(), Col::Doing, folder, Some(child_id))
+            }
+        };
         let mut reply = json!({
-            "id": self.chats[ix].id,
+            "id": child_id,
+            "card": card,
             "title": a.title,
             "provider": a.provider.key(),
             "model": a.model,

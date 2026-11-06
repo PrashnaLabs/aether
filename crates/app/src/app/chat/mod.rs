@@ -19,6 +19,7 @@ pub(super) use create::reattach_wanted;
 mod edit;
 mod live;
 mod manage;
+pub(crate) use manage::Bulk;
 mod send;
 mod turn;
 

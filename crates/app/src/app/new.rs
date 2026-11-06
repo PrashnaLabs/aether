@@ -73,6 +73,9 @@ impl ChatApp {
             })
         });
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("Chat name"));
+        let board_title = cx.new(|cx| InputState::new(window, cx).placeholder("Title"));
+        let board_body =
+            cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 16).placeholder("Description"));
         let worktree_name_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Custom name, empty = auto from message")
         });
@@ -321,6 +324,16 @@ impl ChatApp {
                     this.refresh_git(false, cx);
                 }
             }),
+            cx.subscribe_in(&board_title, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } | InputEvent::Blur = ev {
+                    this.board_commit_in(window, cx);
+                }
+            }),
+            cx.subscribe_in(&board_body, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::Blur = ev {
+                    this.board_commit_in(window, cx);
+                }
+            }),
             cx.subscribe(&commit_message, |this, _, ev: &InputEvent, cx| {
                 if let InputEvent::Change = ev {
                     this.git_message_changed(cx);
@@ -445,6 +458,7 @@ impl ChatApp {
                     this.persist(ix);
                 }
             }
+            this.board_commit(cx);
             if let Some(store) = &this.store {
                 store.flush();
             }
@@ -464,6 +478,16 @@ impl ChatApp {
             ui_owner: None,
             workspace: Default::default(),
             agent,
+            cards: store
+                .as_ref()
+                .and_then(|s| s.load_cards().ok())
+                .unwrap_or_default()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            board_selected: None,
+            board_title,
+            board_body,
             store,
             chats: Vec::new(),
             active: 0,
@@ -581,6 +605,10 @@ impl ChatApp {
             right_surface: None,
             right_review_open: false,
             right_browser_open: false,
+            board_tab: false,
+            board_all: false,
+            archive_picks: Default::default(),
+            project_picks: Default::default(),
             right_panel_resizing: false,
             side_tabs: HashMap::new(),
             side_back: crate::side_panel::SideTab::Agent,

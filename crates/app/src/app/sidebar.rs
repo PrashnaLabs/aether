@@ -20,7 +20,7 @@ use gpui_kit::{Context, Entity, PathPromptOptions, SharedString, Window, prelude
 
 use super::format::now_ms;
 use super::providers::initial_model;
-use super::{CLIS, Chat, ChatApp, Page, SidebarView, chat_cwd, project_dir};
+use super::{Bulk, CLIS, Chat, ChatApp, Page, SidebarView, chat_cwd, project_dir};
 
 pub(super) fn disambiguated_names(folders: &[PathBuf]) -> HashMap<PathBuf, String> {
     let mut names: Vec<String> =
@@ -280,6 +280,27 @@ impl ChatApp {
 
     pub(crate) fn switch_sidebar_to_archive(&mut self, cx: &mut Context<Self>) {
         self.sidebar_view = SidebarView::Archived;
+        self.archive_picks.clear();
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_direct_chats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sidebar_view == SidebarView::DirectChats {
+            self.switch_sidebar_to_projects(window, cx);
+        } else {
+            self.switch_sidebar_to_direct_chats(window, cx);
+        }
+    }
+
+    pub(crate) fn toggle_archive(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_view != SidebarView::Archived {
+            return self.switch_sidebar_to_archive(cx);
+        }
+        self.sidebar_view = if self.chats[self.active].is_agent() {
+            SidebarView::Projects
+        } else {
+            SidebarView::DirectChats
+        };
         cx.notify();
     }
 
@@ -565,6 +586,29 @@ impl ChatApp {
             .empty("No archived chats")
             .style(self.settings.sidebar_style)
             .archived();
+        let ids: Vec<i64> = archived.iter().map(|&ix| self.chats[ix].id).collect();
+        let picked: Vec<i64> =
+            ids.iter().copied().filter(|id| self.archive_picks.contains(id)).collect();
+        let view = cx.entity().downgrade();
+        sidebar = sidebar.pickable(picked.clone(), move |id, _, cx| {
+            view.update(cx, |this, cx| {
+                if !this.archive_picks.remove(&id) {
+                    this.archive_picks.insert(id);
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        if let Some(bar) = self.bulk_bar(
+            "archive-bulk",
+            picked,
+            ids,
+            &[Bulk::Unarchive, Bulk::Delete],
+            false,
+            cx,
+        ) {
+            sidebar = sidebar.bulk_bar(bar);
+        }
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }

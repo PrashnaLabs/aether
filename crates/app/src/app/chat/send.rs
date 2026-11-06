@@ -17,6 +17,7 @@ use crate::app::orchestrate::{clip, stranded_texts};
 use crate::app::providers::set_default_model;
 use crate::app::worktree::{WorktreeTarget, worktree_name_hint, worktree_target};
 use crate::app::{Chat, ChatApp, Queued, chat_cwd};
+use crate::board::model::Turn;
 use crate::suggest::prompt_commands;
 
 /// Title a chat takes from its first message until renamed or titled by its CLI.
@@ -350,6 +351,8 @@ impl ChatApp {
             &session,
         );
         chat.cancel = Some(cancel);
+        let chat_id = chat.id;
+        self.board_on_turn(chat_id, Turn::Started);
         self.list_turn(ix, prev, follow, cx);
         if ix == self.active {
             self.worktree_menu.update(cx, |s, cx| s.dismiss(cx));
@@ -413,7 +416,8 @@ impl ChatApp {
         chat.stopped = false;
         chat.turn_at = now_ms();
         chat.cancel = Some(reply.cancel);
-        let (run, epoch) = (chat.run, chat.epoch);
+        let (run, epoch, chat_id) = (chat.run, chat.epoch, chat.id);
+        self.board_on_turn(chat_id, Turn::Started);
         self.persist(ix);
         if ix == self.active {
             // the CLI started this turn; only follow it if the reader is at the end
@@ -555,6 +559,11 @@ impl ChatApp {
             }
             for id in expired {
                 self.drop_request(id, window, cx);
+            }
+            let chat = &self.chats[ix];
+            if chat.run == run && !chat.stopped {
+                let chat_id = chat.id;
+                self.board_on_turn(chat_id, Turn::Finished { failed });
             }
             if failed {
                 self.refresh_health(ix, now_ms());

@@ -28,11 +28,13 @@ pub(crate) enum SideTab {
     Terminal,
     Explorer,
     Browser,
+    Board,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Surface {
     Browser,
+    Board,
     Terminal,
     Files,
     Review,
@@ -40,7 +42,7 @@ pub(crate) enum Surface {
 
 impl Surface {
     /// Tab order in the right panel: Terminal and Files fixed, Review then Browser closable.
-    pub(crate) fn tabs(review: bool, browser: bool) -> Vec<Self> {
+    pub(crate) fn tabs(review: bool, browser: bool, board: bool) -> Vec<Self> {
         let mut tabs = vec![Self::Terminal, Self::Files];
         if review {
             tabs.push(Self::Review);
@@ -48,16 +50,20 @@ impl Surface {
         if browser {
             tabs.push(Self::Browser);
         }
+        if board {
+            tabs.push(Self::Board);
+        }
         tabs
     }
 
     pub(crate) fn closable(self) -> bool {
-        matches!(self, Self::Review | Self::Browser)
+        matches!(self, Self::Review | Self::Browser | Self::Board)
     }
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Browser => "Browser",
+            Self::Board => "Board",
             Self::Terminal => "Terminal",
             Self::Files => "Files",
             Self::Review => "Review",
@@ -67,6 +73,7 @@ impl Surface {
     pub(crate) fn icon(self) -> Lucide {
         match self {
             Self::Browser => Lucide::Globe,
+            Self::Board => Lucide::LayoutDashboard,
             Self::Terminal => Lucide::Terminal,
             Self::Files => Lucide::Folder,
             Self::Review => Lucide::FileDiff,
@@ -77,6 +84,7 @@ impl Surface {
     pub(crate) fn tab(self) -> SideTab {
         match self {
             Self::Browser => SideTab::Browser,
+            Self::Board => SideTab::Board,
             Self::Terminal => SideTab::Terminal,
             Self::Files | Self::Review => SideTab::Explorer,
         }
@@ -88,7 +96,7 @@ impl Surface {
             Self::Review => {
                 Some(if diff_open { ExplorerView::Diff } else { ExplorerView::Changes })
             }
-            Self::Browser | Self::Terminal => None,
+            Self::Browser | Self::Board | Self::Terminal => None,
         }
     }
 }
@@ -100,6 +108,7 @@ pub(crate) fn surface_for_tab(
 ) -> Surface {
     match tab {
         SideTab::Browser => Surface::Browser,
+        SideTab::Board => Surface::Board,
         SideTab::Terminal => Surface::Terminal,
         SideTab::Explorer => match explorer_view {
             ExplorerView::Files => Surface::Files,
@@ -142,14 +151,17 @@ pub(crate) struct DiffTarget {
 /// Fixed tabs always lead; optional tabs appear only after being opened.
 #[cfg(test)]
 fn tab_order(browser: bool) -> Vec<SideTab> {
-    side_panel_tab_order(browser)
+    side_panel_tab_order(browser, false)
 }
 
-fn side_panel_tab_order(browser: bool) -> Vec<SideTab> {
+fn side_panel_tab_order(browser: bool, board: bool) -> Vec<SideTab> {
     use SideTab::*;
     let mut tabs = vec![Agent, Terminal, Explorer];
     if browser {
         tabs.push(Browser);
+    }
+    if board {
+        tabs.push(Board);
     }
     tabs
 }
@@ -393,6 +405,7 @@ impl ChatApp {
             SideTab::Browser => {
                 self.browser.update(cx, |browser, cx| browser.focus_address(window, cx))
             }
+            SideTab::Board => {}
         }
         cx.notify();
     }
@@ -415,7 +428,7 @@ impl ChatApp {
 
     /// The active chat's panel tabs, in order.
     fn side_tabs(&self, _cx: &App) -> Vec<SideTab> {
-        side_panel_tab_order(self.browser_open)
+        side_panel_tab_order(self.browser_open, self.board_tab)
     }
 
     /// Chat `id`'s terminal shows in the Terminal tab rather than the drawer.
@@ -446,18 +459,26 @@ impl ChatApp {
         let theme = cx.theme();
         let border = theme.sidebar_border;
         let tabs = self.side_tabs(cx);
-        let browser_open = self.browser_open;
+        let (browser_open, board_open) = (self.browser_open, self.board_tab);
         let view = cx.entity();
         let add = {
             let view = view.clone();
             move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
-                let v1 = view.clone();
+                let (v1, v2) = (view.clone(), view.clone());
                 menu.item(
                     PopupMenuItem::new("Browser")
                         .icon(Lucide::Globe)
                         .disabled(browser_open)
                         .on_click(move |_, window, cx| {
                             v1.update(cx, |this, cx| this.open_browser_tab(window, cx))
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("Board")
+                        .icon(Lucide::LayoutDashboard)
+                        .disabled(board_open)
+                        .on_click(move |_, window, cx| {
+                            v2.update(cx, |this, cx| this.open_board_tab(window, cx))
                         }),
                 )
             }
@@ -540,6 +561,13 @@ impl ChatApp {
                         cx.listener(|this, _, _, cx| this.close_browser_tab(cx)),
                     )
                 }
+                SideTab::Board => Tab::new("side-tab-board", "Board")
+                    .icon(Lucide::LayoutDashboard)
+                    .on_close(
+                        "side-tab-board-close",
+                        "Close board tab",
+                        cx.listener(|this, _, _, cx| this.close_board_tab(cx)),
+                    ),
             };
             bar = bar.tab(el.selected(active == tab).on_click(
                 cx.listener(move |this, _, window, cx| this.select_tab(tab, window, cx)),
@@ -618,6 +646,7 @@ impl ChatApp {
         self.right_surface = Some(surface);
         match surface {
             Surface::Browser => self.open_browser_tab(window, cx),
+            Surface::Board => {}
             Surface::Terminal => self.open_terminal(window, cx),
             Surface::Files | Surface::Review => {
                 let view = surface.explorer_view(self.diff_open).unwrap_or(ExplorerView::Files);
@@ -634,11 +663,13 @@ impl ChatApp {
                 self.right_browser_open = false;
                 self.close_browser_tab(cx);
             }
+            Surface::Board => self.close_board_tab(cx),
             Surface::Terminal | Surface::Files => return,
         }
         let active = self.right_surface.unwrap_or(Surface::Terminal);
         if active == surface {
-            let tabs = Surface::tabs(self.right_review_open, self.right_browser_open);
+            let tabs =
+                Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
             self.right_surface = tabs.first().copied();
         }
         cx.notify();
@@ -659,14 +690,18 @@ impl ChatApp {
             Surface::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
+            Surface::Board => self.render_board_tab(cx),
             Surface::Files | Surface::Review => self.render_explorer_page(window, cx),
             Surface::Terminal => self.side_terminal_content(cx),
         }
     }
 
     fn right_panel_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let tabs = Surface::tabs(self.right_review_open, self.right_browser_open);
-        let active = self.right_surface.filter(|s| tabs.contains(s)).unwrap_or(Surface::Terminal);
+        let tabs = Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
+        let active = self
+            .right_surface
+            .filter(|s| tabs.contains(s))
+            .unwrap_or(Surface::Terminal);
         let mut bar = TabBar::new("right-panel-tab-bar")
             .tabs_id("right-panel-tabs")
             .height(px(38.))
@@ -691,11 +726,13 @@ impl ChatApp {
         }
         let review_open = self.right_review_open;
         let browser_open = self.right_browser_open;
+        let board_open = self.board_tab;
         let add = {
             let view = cx.entity();
             move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
                 let v1 = view.clone();
                 let v2 = view.clone();
+                let v3 = view.clone();
                 menu.item(
                     PopupMenuItem::new("Review")
                         .icon(Lucide::FileDiff)
@@ -716,6 +753,14 @@ impl ChatApp {
                                 this.right_browser_open = true;
                                 this.select_surface(Surface::Browser, window, cx)
                             })
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("Board")
+                        .icon(Lucide::LayoutDashboard)
+                        .disabled(board_open)
+                        .on_click(move |_, window, cx| {
+                            v3.update(cx, |this, cx| this.open_board_tab(window, cx))
                         }),
                 )
             }
@@ -775,7 +820,7 @@ impl ChatApp {
                 .tooltip("Expand panel")
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_right_panel(cx))),
         );
-        let tabs = Surface::tabs(self.right_review_open, self.right_browser_open);
+        let tabs = Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
         for (index, surface) in tabs.into_iter().enumerate() {
             let active = self.right_surface == Some(surface);
             rail = rail.child(
@@ -957,6 +1002,7 @@ impl ChatApp {
             SideTab::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
+            SideTab::Board => self.render_board_tab(cx),
         };
         let bar = self.side_tab_bar(window, cx);
         Some(

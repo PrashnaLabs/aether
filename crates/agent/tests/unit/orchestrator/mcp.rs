@@ -44,7 +44,19 @@ fn tools_list_is_empty_without_token() {
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(names, ["list_agents", "spawn_agent", "read_agent", "message_agent", "stop_agent"]);
+    assert_eq!(
+        names,
+        [
+            "list_agents",
+            "spawn_agent",
+            "read_agent",
+            "message_agent",
+            "stop_agent",
+            "list_cards",
+            "add_card",
+            "move_card"
+        ]
+    );
 }
 
 #[test]

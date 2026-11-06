@@ -29,6 +29,17 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS chats (
     pending_deliveries TEXT NOT NULL DEFAULT '[]'
 )";
 
+const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    col TEXT NOT NULL DEFAULT 'todo',
+    position REAL NOT NULL DEFAULT 0,
+    chat INTEGER,
+    project TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT 0
+)";
+
 // Added after the first release; existing files gain them with zero values.
 
 /// A chat as kept on disk. `id` also orders chats, oldest first.
@@ -66,6 +77,19 @@ pub struct SavedDelivery {
     pub text: String,
 }
 
+/// A task-board card as kept on disk. `col` is one of backlog|todo|doing|review|done.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SavedCard {
+    pub id: i64,
+    pub title: String,
+    pub body: String,
+    pub col: String,
+    pub position: f64,
+    pub chat: Option<i64>,
+    pub project: String,
+    pub updated_at: i64,
+}
+
 /// Chats in a SQLite file. Saves queue up and are written in order.
 pub struct Store {
     pool: SqlitePool,
@@ -75,6 +99,8 @@ pub struct Store {
 
 enum Write {
     Save(Box<SavedChat>),
+    SaveCard(SavedCard),
+    DeleteCard(i64),
     /// Answered once every write queued before it is done.
     Flush(std::sync::mpsc::Sender<()>),
 }
@@ -97,6 +123,7 @@ impl Store {
         let pool = rt.block_on(async {
             let pool = SqlitePool::connect_with(options).await?;
             sqlx::query(SCHEMA).execute(&pool).await?;
+            sqlx::query(CARDS_SCHEMA).execute(&pool).await?;
             let cols: Vec<String> = sqlx::query("PRAGMA table_info(chats)")
                 .fetch_all(&pool)
                 .await?
@@ -175,6 +202,20 @@ impl Store {
                             eprintln!("aether: couldn't save chat {}: {e}", chat.id);
                         }
                     }
+                    Write::SaveCard(card) => {
+                        if let Err(e) = save_card(&writer, &card).await {
+                            eprintln!("aether: couldn't save card {}: {e}", card.id);
+                        }
+                    }
+                    Write::DeleteCard(id) => {
+                        if let Err(e) = sqlx::query("DELETE FROM cards WHERE id = ?")
+                            .bind(id)
+                            .execute(&writer)
+                            .await
+                        {
+                            eprintln!("aether: couldn't delete card {id}: {e}");
+                        }
+                    }
                     Write::Flush(done) => {
                         let _ = done.send(());
                     }
@@ -233,6 +274,43 @@ impl Store {
         let id = chat.id;
         if let Err(e) = self.writes.unbounded_send(Write::Save(Box::new(chat))) {
             eprintln!("aether: couldn't queue save for chat {id}: {e}");
+        }
+    }
+
+    /// Every card, ordered by column then position.
+    pub fn load_cards(&self) -> sqlx::Result<Vec<SavedCard>> {
+        let rows = self.rt.block_on(
+            sqlx::query("SELECT id, title, body, col, position, chat, project, updated_at FROM cards ORDER BY col, position")
+                .fetch_all(&self.pool),
+        )?;
+        rows.iter()
+            .map(|row| {
+                Ok(SavedCard {
+                    id: row.try_get("id")?,
+                    title: row.try_get("title")?,
+                    body: row.try_get("body")?,
+                    col: row.try_get("col")?,
+                    position: row.try_get("position")?,
+                    chat: row.try_get("chat")?,
+                    project: row.try_get("project")?,
+                    updated_at: row.try_get("updated_at")?,
+                })
+            })
+            .collect()
+    }
+
+    /// Inserts or replaces the card in the background.
+    pub fn save_card(&self, card: SavedCard) {
+        let id = card.id;
+        if let Err(e) = self.writes.unbounded_send(Write::SaveCard(card)) {
+            eprintln!("aether: couldn't queue save for card {id}: {e}");
+        }
+    }
+
+    /// Deletes the card in the background; a missing row is fine.
+    pub fn delete_card(&self, id: i64) {
+        if let Err(e) = self.writes.unbounded_send(Write::DeleteCard(id)) {
+            eprintln!("aether: couldn't queue delete for card {id}: {e}");
         }
     }
 
@@ -306,6 +384,26 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     .bind(i64::from(chat.lead))
     .bind(chat.lead_seen.map(i64::try_from).transpose().ok().flatten())
     .bind(pending_deliveries)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn save_card(pool: &SqlitePool, card: &SavedCard) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO cards (id, title, body, col, position, chat, project, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
+         col = excluded.col, position = excluded.position, chat = excluded.chat,
+         project = excluded.project, updated_at = excluded.updated_at",
+    )
+    .bind(card.id)
+    .bind(&card.title)
+    .bind(&card.body)
+    .bind(&card.col)
+    .bind(card.position)
+    .bind(card.chat)
+    .bind(&card.project)
+    .bind(card.updated_at)
     .execute(pool)
     .await?;
     Ok(())

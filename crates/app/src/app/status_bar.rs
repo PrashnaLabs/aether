@@ -145,7 +145,7 @@ impl ChatApp {
                 sidebar == SidebarView::DirectChats,
                 direct,
                 view,
-                |this, window, cx| this.switch_sidebar_to_direct_chats(window, cx),
+                |this, window, cx| this.toggle_direct_chats(window, cx),
                 cx,
             ))
             .child(nav_button(
@@ -154,7 +154,7 @@ impl ChatApp {
                 "Archive",
                 sidebar == SidebarView::Archived,
                 view,
-                |this, _, cx| this.switch_sidebar_to_archive(cx),
+                |this, _, cx| this.toggle_archive(cx),
                 cx,
             ))
             .when(outside > 0 || sidebar == SidebarView::Outside, |row| {
@@ -189,6 +189,15 @@ impl ChatApp {
                     cx,
                 ))
             })
+            .child(nav_button(
+                "nav-board",
+                Lucide::LayoutDashboard,
+                "Tasks board",
+                page == Page::Board,
+                view,
+                |this, window, cx| this.open_board(window, cx),
+                cx,
+            ))
             .when(self.settings.hackernews_enabled, |row| {
                 row.child(nav_button(
                     "nav-hackernews",

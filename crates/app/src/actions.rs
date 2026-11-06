@@ -56,6 +56,7 @@ actions!(
         NotesSearchDismiss,
         SaveSelectionToNote,
         OpenUsage,
+        OpenBoard,
         ToggleHackerNews,
         BackToChat,
         SearchWorkspace,
@@ -114,6 +115,7 @@ pub fn key_hint(action: &dyn Action, cx: &App) -> Option<String> {
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("alt-n", OpenNotes, None),
+        KeyBinding::new("alt-b", OpenBoard, None),
         KeyBinding::new("secondary-shift-n", SearchNotes, None),
         KeyBinding::new(
             "/",

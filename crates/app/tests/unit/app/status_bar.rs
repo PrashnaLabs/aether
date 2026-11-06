@@ -635,7 +635,7 @@ fn usage_strip_hugs_its_content(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn mid_width_clips_resources_before_the_clock(cx: &mut TestAppContext) {
-    for w in [640., 560., 440., 400.] {
+    for w in [640., 560., 470., 400.] {
         let (window, app) = open(cx, Some((w, 600.)));
         let mut visual = VisualTestContext::from_window(window, cx);
         draw(&mut visual, &app, |app| {
@@ -654,10 +654,10 @@ fn mid_width_clips_resources_before_the_clock(cx: &mut TestAppContext) {
         let clock_clipped = clock.right() > viewport.width;
         let cpu_clipped = row.size.width < px(1.) || cpu.right() > row.right() + px(0.5);
         assert!(!clock_clipped || cpu_clipped, "{w}: clock clipped first {clock:?} {row:?}");
-        if w >= 440. {
+        if w >= 470. {
             assert!(!clock_clipped, "{w}: clock whole {clock:?}");
         }
-        if w == 440. {
+        if w == 470. {
             assert!(cpu_clipped, "{w}: cpu gives way {row:?} {cpu:?}");
         }
     }

@@ -95,6 +95,8 @@ impl Render for ChatApp {
             self.render_project_page(cx)
         } else if self.page == Page::Terminal {
             self.render_terminal_page(window, cx)
+        } else if self.page == Page::Board {
+            self.render_board(window, cx)
         } else if self.page == Page::HackerNews {
             self.render_hackernews_page(window, cx).into_any_element()
         } else if self.page == Page::Chat || self.page == Page::Explorer {
@@ -184,6 +186,9 @@ impl Render for ChatApp {
             }))
             .on_action(cx.listener(|this, _: &OpenSkills, _, cx| this.open_page(Page::Skills, cx)))
             .on_action(cx.listener(|this, _: &OpenUsage, _, cx| this.toggle_usage_page(cx)))
+            .on_action(cx.listener(|this, _: &crate::actions::OpenBoard, window, cx| {
+                this.open_board(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &ToggleHackerNews, window, cx| {
                 this.toggle_hackernews_page(window, cx)
             }))
@@ -192,7 +197,12 @@ impl Render for ChatApp {
                 let editing_skill = this.page == Page::Skills && this.skill_editor.is_some();
                 if matches!(
                     this.page,
-                    Page::Settings | Page::Skills | Page::Usage | Page::HackerNews | Page::Notes
+                    Page::Settings
+                        | Page::Skills
+                        | Page::Usage
+                        | Page::HackerNews
+                        | Page::Notes
+                        | Page::Board
                 ) && !editing_skill
                 {
                     this.open_page(Page::Chat, cx);

@@ -190,7 +190,7 @@ impl ChatApp {
         .detach();
     }
 
-    pub fn new_chat_in_current_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn current_project_folder(&self) -> Option<PathBuf> {
         let cli = CLIS.contains(&self.settings.provider);
         let current = self
             .chats
@@ -199,8 +199,13 @@ impl ChatApp {
             .and_then(|_| self.chat_project(self.active));
         let recent =
             self.switcher_list().into_iter().find(|p| p.last_activity.is_some()).map(|p| p.folder);
+        new_chat_folder(cli, current, recent)
+    }
+
+    pub fn new_chat_in_current_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let folder = self.current_project_folder();
         self.new_chat(window, cx);
-        if let Some(f) = new_chat_folder(cli, current, recent) {
+        if let Some(f) = folder {
             self.apply_draft_folder(self.active, f, false, cx);
         }
     }
