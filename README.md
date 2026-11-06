@@ -1,0 +1,207 @@
+# Aether
+
+A native Rust desktop workspace for coding agents, terminals, Git, and project files.
+
+## Session layouts
+
+Agent sessions can run side by side in resizable splits, float over the workspace,
+or move into their own desktop windows. Each session keeps its draft, transcript
+position, running turn, and pending questions when you move it.
+
+Use the pane header to open its layout menu. The close button appears when the
+window contains multiple session panes. The menu offers split right/down,
+float/dock, detach to a desktop window, maximize/restore, docking beside a chosen
+pane, and opening an existing session beside the current one. The command
+palette includes the same layout actions. The ⋯ menu retains the pane layout
+controls. Right-click a non-interactive session area for pin/unpin, Stop generating,
+Jump to, Split session, Terminal, and File Explorer, with icons and grouped
+navigation/split submenus. Buttons, links, inputs, and embedded tools keep their
+own right-click behavior.
+
+- `Cmd+Option+[` / `Cmd+Option+]` on macOS, or `Ctrl+Alt+[` / `Ctrl+Alt+]`
+  elsewhere, moves between panes.
+- `Cmd+Option+Arrow` on macOS, or `Ctrl+Alt+Arrow` elsewhere, focuses a nearby
+  pane. Terminal, editor, and request-card key bindings keep their existing behavior.
+- Drag split dividers to resize; double-click a divider to reset it. Drag a
+  floating pane's header to move it and its lower-right grip to resize it.
+- Hiding a pane from the command palette keeps its agent running. Use **Stop** to stop the agent.
+  Closing a detached window returns its sessions to the main workspace.
+
+Layouts, window positions, and drafts restore on restart. Detached windows are
+retained for reuse after their sessions return. On Linux, retained windows are
+minimized; on macOS they are hidden.
+
+## Chat layouts
+
+Tabbed (default): chat in top tabs. Sidebar: chat center, right panel docked beside it. Split: chat center, right panel always docked and cannot be collapsed.
+
+Toggle in **Settings > Appearance > Chat layout** or the command palette (**Chat layout: Tabbed/Sidebar/Split**). No default key; `CycleChatLayout` cycles Tabbed → Sidebar → Split.
+
+Session panes still tile in Sidebar and Split. Monocle shows one pane at a time and keeps panel state; in Split, Monocle is off and panes tile beside the docked panel. See [docs/chat-layout.md](docs/chat-layout.md).
+
+## Touch Bar
+
+On supported MacBook Pro models, Aether provides **New Chat**,
+**Terminal**, **Files**, **Git Changes**, **Commands**, and **Settings** buttons in the Touch Bar.
+Terminal, Files, and Git Changes show icons only. Settings opens in the main window.
+Session controls follow the focused pane in the main window or a detached
+session window. Unavailable actions are disabled. New Chat opens in the main
+workspace and uses its current project. The macOS Control Strip remains available.
+
+## Image viewer
+
+Open a local image from Explorer, Quick Open, a chat link, or an attachment to
+preview it inside Aether. Pending image attachments are clickable too.
+
+Use the toolbar, `+` / `-`, the mouse wheel, or a trackpad pinch to zoom. Drag to
+pan, press `1` for actual size, and `0` to fit. Escape closes the viewer and
+restores focus. Each window has its own viewer.
+
+Supported formats are PNG, JPEG, WebP, GIF, TIFF, and BMP. Animated images show
+their first frame. Previews allow files up to 64 MiB, 32 megapixels, and 16,384
+pixels per side.
+
+## Dictation
+
+Click the mic in the composer, or press `Cmd+Shift+M` on macOS or `Ctrl+Shift+M`
+elsewhere, and speak. Press it again or choose **Done**, and the text lands in the
+chat you started from.
+
+Speech turns into text on this device. The first use offers a one-time 141 MB
+model download and asks for microphone permission. Dictation is English only.
+**Settings > Composer** turns it off and downloads or removes the model.
+
+## Notes
+
+Press `Alt+N` to open Notes. The default folder is `~/notes`; configure the
+folder and editor under **Settings > Tools > Notes**. See [docs/notes.md](docs/notes.md).
+
+## Development
+
+Install [Rust with rustup](https://rustup.rs/). The repository pins its compiler in
+`rust-toolchain.toml`; rustup installs it when you run Cargo. Packaging runs on
+[uv](https://docs.astral.sh/uv/), which uses the Python pinned in `.python-version`.
+
+On macOS, install the Xcode command line tools and CMake, which whisper.cpp needs:
+
+```sh
+xcode-select --install
+brew install cmake
+```
+
+On Ubuntu 24.04 or Debian 13, install the native build dependencies:
+
+```sh
+sudo bash scripts/setup-linux.sh
+```
+
+Linux uses GTK 3 and WebKitGTK 4.1 for the browser panel, plus a Vulkan driver
+for GPUI. See the upstream [GPUI dependency list](https://github.com/longbridge/gpui-component/blob/main/script/install-linux.sh)
+and [Wry Linux requirements](https://github.com/tauri-apps/wry#linux).
+Other distributions need equivalent development packages.
+
+```sh
+cargo run --locked -p aether
+cargo test --locked --workspace -- --skip hackernews::client
+cargo fmt --all -- --check
+```
+
+The `Makefile` wraps these and packaging: `make build`, `run`, `test`,
+`test-packaging`, `lint`, `fmt`, `fmt-check`, `package`, `pacman`, `app`, `clean`,
+and on macOS `install`, which puts a release `Aether.app` in `/Applications`.
+`make test` skips the flaky `hackernews::client` tests on macOS.
+
+Configure providers in the app's settings. Lead-chat orchestration (spawning
+child agents via MCP) is documented in [docs/orchestration.md](docs/orchestration.md).
+Development builds can also read a
+local `.env`. Packaging never copies `.env` or credentials. Install external
+agent CLIs, Git, and any project tools separately and make them available on
+the app's PATH. Finder launches inherit the desktop environment's PATH.
+
+## Build installers
+
+Run on the OS and CPU architecture you are packaging for:
+
+```sh
+uv run scripts/build.py
+```
+
+This builds with the locked dependencies and release profile, then writes
+artifacts and SHA-256 checksum files to `dist/`.
+
+| Host | Default output | Other formats |
+| --- | --- | --- |
+| macOS, Apple Silicon or Intel | `Aether-<version>-macos-<arch>.dmg` | `--format app`, `--format tar` |
+| Linux, x86_64 or aarch64, glibc | `Aether-<version>-linux-<arch>.tar.gz` | `--format deb` |
+
+The DMG includes an Applications shortcut. Drag Aether into Applications.
+`--format app` writes `dist/Aether.app`, which can be launched with
+`open dist/Aether.app`. The bundle includes its icon and version metadata.
+macOS builds target macOS 12 or newer. Set `MACOSX_DEPLOYMENT_TARGET` before
+building to choose a higher minimum version.
+
+For Debian and Ubuntu:
+
+```sh
+uv run scripts/build.py --format deb
+sudo apt install ./dist/Aether-*.deb
+```
+
+The Debian package derives shared library dependencies from the built binary.
+Build on the oldest distribution you intend to support. Packages and archives
+depend on compatible host libraries, including WebKitGTK. They are not
+self-contained Linux binaries. (A build workflow is checked in at
+`docs/.github/workflows/build.yml`; it is not active until moved to the
+repository root `.github/workflows/`.)
+
+To install a Linux archive under `/usr/local`, extract it and copy its `usr/`
+contents there. For example, from the repository root after building:
+
+```sh
+mkdir -p /tmp/aether-install
+tar -xzf dist/Aether-0.1.0-linux-x86_64.tar.gz -C /tmp/aether-install
+sudo cp -R /tmp/aether-install/Aether-0.1.0-linux-x86_64/usr/. /usr/local/
+sudo update-desktop-database /usr/local/share/applications
+sudo gtk-update-icon-cache -f -t /usr/local/share/icons/hicolor
+```
+
+Adjust the version and architecture to match your archive. The desktop entry,
+Wayland app ID, X11 window identity, and installed icon use `dev.aether.Aether`.
+
+## macOS signing
+
+Local builds use an ad-hoc signature. Distribution outside your own machine
+requires your Apple Developer ID certificate and notarization credentials.
+Store a keychain profile using `xcrun notarytool store-credentials`, then run:
+
+```sh
+uv run scripts/build.py \
+  --sign-identity 'Developer ID Application: Your Name (TEAMID)' \
+  --notary-profile aether-notary
+```
+
+The build signs the app with the hardened runtime, creates and signs the DMG,
+submits it for notarization, then staples and validates the ticket. You can
+also set `APPLE_SIGNING_IDENTITY` and `APPLE_NOTARY_PROFILE` in the environment.
+The checked-in workflow uses ad-hoc signatures for local-style builds; to
+run it in GitHub Actions, move it to `.github/workflows/` at the repository
+root. It builds for the [GitHub macOS and Linux runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+## Icons
+
+The official icon is the `岚` character on the app's amber-to-pink brand gradient,
+matching the sidebar's `BrandMark`. Its source is
+`crates/app/assets/app-icons/aether.svg`. The glyph is stored as vector outlines
+so builds do not depend on an installed CJK font. PNG sizes and the
+macOS ICNS are checked in so normal builds need no image tools. After editing
+the SVG, install ImageMagick and regenerate:
+
+```sh
+bash scripts/generate-icons.sh
+```
+
+Run the packaging checks with:
+
+```sh
+uv run -m unittest discover -s scripts/tests -v
+```
