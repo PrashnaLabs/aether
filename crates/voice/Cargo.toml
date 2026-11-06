@@ -1,0 +1,21 @@
+[package]
+name = "aether-voice"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aether-core.workspace = true
+cpal.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+whisper-rs.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { workspace = true, features = ["metal"] }
+
+[dev-dependencies]
+hound = "3"
