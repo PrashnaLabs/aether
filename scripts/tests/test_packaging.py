@@ -39,6 +39,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("Exec=aether\n", text)
         self.assertEqual(len(list(self.stage.rglob("*.png"))), 8)
         self.assertFalse(list(self.stage.rglob(".env")))
+        self.assertTrue((self.stage / "usr/share/doc/aether/copyright").is_file())
         if shutil.which("desktop-file-validate"):
             subprocess.run(["desktop-file-validate", desktop], check=True)
 
@@ -76,6 +77,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(info["CFBundleIdentifier"], build.APP_ID)
         self.assertEqual(info["CFBundleShortVersionString"], "0.1.0")
         self.assertTrue((app / "Contents/Resources/Aether.icns").is_file())
+        self.assertTrue((app / "Contents/Resources/LICENSE").is_file())
         self.assertTrue(os.access(app / "Contents/MacOS/aether", os.X_OK))
         self.assertIn("NSMicrophoneUsageDescription", info)
         entitlements = subprocess.run(["codesign", "-d", "--entitlements", "-", app],
