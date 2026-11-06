@@ -10,16 +10,16 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Anchor, AnyElement, App, ClickEvent, Div, Entity, FocusHandle, Hsla, KeyDownEvent,
-    MouseButton, Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, rems,
+    Anchor, AnyElement, App, ClickEvent, Div, Entity, FocusHandle, Hsla, KeyDownEvent, MouseButton,
+    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, rems,
 };
 
 use super::chrome::{reveal_on_hover, row_style, swallow_click, tabular, tooltip};
 use super::menu::chat_menu;
 use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, RowPlace};
-use aether_core::SidebarStyle;
 use crate::arrow_count;
 use crate::components::provider_icon;
+use aether_core::SidebarStyle;
 
 /// Keeps both ends of a long name, which is where branch names differ.
 pub fn middle_truncate(text: &str, max: usize) -> String {
@@ -318,9 +318,7 @@ pub(super) fn render_chat(
             .w_full()
             .gap_2()
             .items_center()
-            .child(
-                Icon::new(Lucide::MessageCircle).size(rems(0.875)).text_color(muted).flex_none(),
-            )
+            .child(Icon::new(Lucide::MessageCircle).size(rems(0.875)).text_color(muted).flex_none())
             .child(title_cell(title.clone()))
             .when(status != ChatStatus::Idle, |row| {
                 row.child(status.badge(("chat-status", ix), None, cx)).child(
@@ -449,9 +447,8 @@ pub(super) fn render_chat(
     let clickable = clickable_chip.then(|| chat.on_status.clone()).flatten();
     let (ahead, behind) = line.ahead_behind.unwrap_or((0, 0));
     let chip_label: SharedString = {
-        let mut label = format!(
-            "Show changes, {} lines added, {} lines deleted", line.added, line.deleted
-        );
+        let mut label =
+            format!("Show changes, {} lines added, {} lines deleted", line.added, line.deleted);
         if ahead > 0 {
             label.push_str(&format!(", {ahead} ahead"));
         }

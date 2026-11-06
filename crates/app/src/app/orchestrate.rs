@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use super::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms};
 use crate::session_workspace::SplitAxis;
 
-
 pub(crate) fn lead_capable(provider: Provider) -> bool {
     provider == Provider::OpenRouter || CLIS.contains(&provider)
 }
@@ -596,9 +595,7 @@ impl ChatApp {
         let mut kids: Vec<usize> = (0..self.chats.len())
             .filter(|&i| {
                 let child = &self.chats[i];
-                child.parent == Some(lead)
-                    && !child.archived
-                    && (child.busy() || starting(child))
+                child.parent == Some(lead) && !child.archived && (child.busy() || starting(child))
             })
             .collect();
         kids.sort_by_key(|&i| (crew_rank(&self.chats[i]), self.chats[i].id));

@@ -15,9 +15,9 @@ mod remove;
 mod send;
 mod setup;
 
-pub(super) use setup::SetupJob;
 #[cfg(test)]
 pub(super) use setup::SetupFailure;
+pub(super) use setup::SetupJob;
 
 /// What a draft's first send does with its composer worktree toggle.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

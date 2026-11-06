@@ -347,9 +347,10 @@ impl ChatApp {
         let template = self.notes.template.read(cx).value().to_string();
         let initial = self.notes.initial.clone();
         if let Form::Rename(path) = &form
-            && !self.note_clean(path, cx) {
-                return;
-            }
+            && !self.note_clean(path, cx)
+        {
+            return;
+        }
         if matches!(form, Form::ArchiveAge | Form::Capture | Form::EmptyTrash)
             && self
                 .notes
@@ -639,14 +640,15 @@ impl ChatApp {
         };
         self.notes_form(Form::Create(NoteKind::Named), String::new(), window, cx);
         if let Ok(store) = self.notes_store()
-            && let Ok(relative) = target.strip_prefix(store.scope_root()) {
-                let prefix = if relative.as_os_str().is_empty() {
-                    String::new()
-                } else {
-                    format!("{}/", relative.display())
-                };
-                self.notes.name.update(cx, |s, cx| s.set_value(prefix, window, cx));
-            }
+            && let Ok(relative) = target.strip_prefix(store.scope_root())
+        {
+            let prefix = if relative.as_os_str().is_empty() {
+                String::new()
+            } else {
+                format!("{}/", relative.display())
+            };
+            self.notes.name.update(cx, |s, cx| s.set_value(prefix, window, cx));
+        }
     }
 }
 pub(crate) enum NoteResult {

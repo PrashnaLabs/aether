@@ -273,10 +273,11 @@ pub fn reply_blocks(m: &Message, view: &ReplyView) -> Vec<Block> {
                                 && n.state == NoticeState::Failed))
                     }
                     Block::Subagent { step, children } => {
-                        (view.kept)(id(*step)) || children.iter().any(|i| {
-                            (view.kept)(id(*i))
-                                || (view.kept)(&format!("{}-activity-{}", id(*step), id(*i)))
-                        })
+                        (view.kept)(id(*step))
+                            || children.iter().any(|i| {
+                                (view.kept)(id(*i))
+                                    || (view.kept)(&format!("{}-activity-{}", id(*step), id(*i)))
+                            })
                     }
                     Block::Tool(i) => opened_groups.contains(i) || (view.kept)(id(*i)),
                     _ => false,

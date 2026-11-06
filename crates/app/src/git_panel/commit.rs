@@ -293,7 +293,13 @@ impl ChatApp {
                     }
                     Err(e) => {
                         this.git.job = None;
-                        this.pop_git_failed(&folder, failed_text(&op), &e, this.host_of(window), cx);
+                        this.pop_git_failed(
+                            &folder,
+                            failed_text(&op),
+                            &e,
+                            this.host_of(window),
+                            cx,
+                        );
                         this.git.feedback = Some(Feedback {
                             folder: Some(folder),
                             error: true,

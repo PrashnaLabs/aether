@@ -75,9 +75,7 @@ impl ChatApp {
                             Some(
                                 v_flex()
                                     .id(("notes-search-result", index))
-                                    .debug_selector(move || {
-                                        format!("notes-search-result-{index}")
-                                    })
+                                    .debug_selector(move || format!("notes-search-result-{index}"))
                                     .w_full()
                                     .min_w_0()
                                     .h(px(if mode == Mode::Grep { 56. } else { 36. }))

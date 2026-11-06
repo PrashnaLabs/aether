@@ -30,25 +30,25 @@ impl Render for ChatApp {
                 .get(&0)
                 .and_then(|w| w.focused)
                 .and_then(|p| self.workspace.model.panes.get(&p).copied())
-                && let Some(ix) = self.chats.iter().position(|c| c.id == id)
-            {
-                let changed = self.chats.get(self.active).is_none_or(|chat| chat.id != id);
-                self.activate_session_ui(id, window, cx);
-                self.active = ix;
-                if changed {
-                    if self.folder_of(&self.chats[ix]).is_none() {
-                        self.active_terminal_tab = aether_terminal::TerminalTab::Global;
-                    } else if matches!(
-                        self.active_terminal_tab,
-                        aether_terminal::TerminalTab::Project(_)
-                    ) {
-                        self.active_terminal_tab = aether_terminal::TerminalTab::Project(id);
-                    }
-                    self.refresh_git(false, cx);
-                    self.refresh_missing_attachments(false, cx);
-                    self.load_bases(cx);
+            && let Some(ix) = self.chats.iter().position(|c| c.id == id)
+        {
+            let changed = self.chats.get(self.active).is_none_or(|chat| chat.id != id);
+            self.activate_session_ui(id, window, cx);
+            self.active = ix;
+            if changed {
+                if self.folder_of(&self.chats[ix]).is_none() {
+                    self.active_terminal_tab = aether_terminal::TerminalTab::Global;
+                } else if matches!(
+                    self.active_terminal_tab,
+                    aether_terminal::TerminalTab::Project(_)
+                ) {
+                    self.active_terminal_tab = aether_terminal::TerminalTab::Project(id);
                 }
+                self.refresh_git(false, cx);
+                self.refresh_missing_attachments(false, cx);
+                self.load_bases(cx);
             }
+        }
         let native_bounds = window.window_bounds().get_bounds();
         if let Some(layout) = self.workspace.model.windows.get_mut(&0) {
             layout.bounds = Some(crate::session_workspace::Rect::new(

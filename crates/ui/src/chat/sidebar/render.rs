@@ -3,29 +3,23 @@ use std::{rc::Rc, time::Duration};
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::base::{HandleEdge, resize_handle};
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Sizable, StyledExt,
-    button::ButtonVariants,
-    h_flex,
-    resizable::resize_handle_appearance,
-    v_flex,
+    ActiveTheme, Icon, IconName, Sizable, StyledExt, button::ButtonVariants, h_flex,
+    resizable::resize_handle_appearance, v_flex,
 };
 use gpui_kit::{
-    App, Axis, DragMoveEvent, ElementId, MouseButton, SharedString, Window, div,
-    linear_color_stop, linear_gradient, list, prelude::*, px, rems,
+    App, Axis, DragMoveEvent, ElementId, MouseButton, SharedString, Window, div, linear_color_stop,
+    linear_gradient, list, prelude::*, px, rems,
 };
 
 const FADE_HEIGHT: f32 = 2.;
 const FADE_TRANSITION: Duration = Duration::from_millis(200);
 
 fn fade(color: gpui_kit::Hsla, angle: f32, opacity: f32) -> gpui_kit::Div {
-    div()
-        .h(rems(FADE_HEIGHT))
-        .opacity(opacity)
-        .bg(linear_gradient(
-            angle,
-            linear_color_stop(color.opacity(0.), 0.),
-            linear_color_stop(color, 1.),
-        ))
+    div().h(rems(FADE_HEIGHT)).opacity(opacity).bg(linear_gradient(
+        angle,
+        linear_color_stop(color.opacity(0.), 0.),
+        linear_color_stop(color, 1.),
+    ))
 }
 
 use super::ChatSidebar;
@@ -205,11 +199,7 @@ impl RenderOnce for ChatSidebar {
                     .child(body)
                     .when(sidebar_bg.a >= 1. && top_fade > 0., |this| {
                         this.child(
-                            fade(*sidebar_bg, 0., top_fade)
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .top_0(),
+                            fade(*sidebar_bg, 0., top_fade).absolute().left_0().right_0().top_0(),
                         )
                     })
                     .when(sidebar_bg.a >= 1. && bottom_fade > 0., |this| {

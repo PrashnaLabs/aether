@@ -55,9 +55,10 @@ pub(crate) fn open_link(href: &str, cwd: Option<&Path>, window: &mut Window, cx:
     }
     let open_web = cx.try_global::<OpenWebLink>().map(|open| open.0.clone());
     if let Some(open) = open_web
-        && open(href, window, cx) {
-            return;
-        }
+        && open(href, window, cx)
+    {
+        return;
+    }
     cx.open_url(href);
 }
 

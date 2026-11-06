@@ -245,14 +245,7 @@ fn default_project_crews_use_the_same_preview_and_expand_inside_the_project() {
                 vec![10, 104, 105, 106]
             }
         );
-        assert!(matches!(
-            rows.last(),
-            Some(ChatRow::CrewToggle {
-                hidden: 4,
-                nested: true,
-                ..
-            })
-        ));
+        assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { hidden: 4, nested: true, .. })));
     }
 }
 
@@ -287,14 +280,7 @@ fn default_worktree_crews_keep_running_agents_and_respect_project_collapse() {
         })
         .collect();
     assert_eq!(ids, [10, 100, 101, 102, 103]);
-    assert!(matches!(
-        rows.last(),
-        Some(ChatRow::CrewToggle {
-            hidden: 2,
-            nested: true,
-            ..
-        })
-    ));
+    assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { hidden: 2, nested: true, .. })));
 
     let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 7], Some(0));
     sidebar.projects[0].header.collapsed = true;
@@ -342,9 +328,7 @@ fn crew_toggle_supports_click_and_keyboard_and_retains_state(cx: &mut gpui_kit::
         visual.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        let toggle = visual
-            .debug_bounds("crew-toggle-10")
-            .expect("crew expansion row");
+        let toggle = visual.debug_bounds("crew-toggle-10").expect("crew expansion row");
         visual.simulate_click(toggle.center(), gpui_kit::Modifiers::default());
         visual.update(|window, cx| {
             let _ = window.draw(cx);
@@ -437,11 +421,8 @@ fn project_headers_only_show_when_agents_count_is_positive() {
             |_, _, _| {},
             |_, _, _| {},
         );
-        let expected = if count == 0 {
-            vec![]
-        } else {
-            vec!["caption:Projects", "project:/w/empty"]
-        };
+        let expected =
+            if count == 0 { vec![] } else { vec!["caption:Projects", "project:/w/empty"] };
         assert_eq!(keys(&mut sidebar), expected);
     }
 }
@@ -486,7 +467,6 @@ fn agent_stop_helpers() {
     assert_eq!(agent_stop_label("Fix bug"), "Stop Fix bug");
     assert_eq!(agent_stop_tooltip(), "Stop execution (Esc)");
 }
-
 
 #[test]
 fn projects_section_collapse_hides_groups_and_preserves_add_button() {
