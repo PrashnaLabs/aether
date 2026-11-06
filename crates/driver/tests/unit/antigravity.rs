@@ -107,7 +107,8 @@ fn launch_args_per_access_mode() {
     assert_eq!(args(AccessMode::AutoEdit, false), accept);
     assert_eq!(args(AccessMode::Auto, false), format!("{base} --mode auto"));
     assert_eq!(args(AccessMode::Ask, false), accept);
-    assert_eq!(args(AccessMode::ReadOnly, false), accept);
+    assert_eq!(args(AccessMode::ReadOnly, false), format!("{base} --mode plan"));
+    assert_eq!(requested_mode(AccessMode::ReadOnly), AccessMode::ReadOnly);
     assert_eq!(args(AccessMode::Auto, true), full);
 }
 

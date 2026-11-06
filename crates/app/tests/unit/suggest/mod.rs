@@ -59,3 +59,24 @@ fn slash_commands_offer_every_color_scheme(cx: &mut gpui_kit::TestAppContext) {
         assert!(all.iter().any(|(label, _, _)| label.as_ref() == "/theme rose-pine-moon"));
     });
 }
+
+#[gpui_kit::test]
+fn slash_commands_offer_btw_in_direct_chats(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    let app = window.root(cx).unwrap();
+    app.read_with(cx, |app, _| {
+        assert!(!app.chats[app.active].is_agent());
+        assert!(app.slash_commands("btw").iter().any(|(label, _, _)| label.as_ref() == "/btw"));
+    });
+}

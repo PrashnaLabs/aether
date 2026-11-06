@@ -9,7 +9,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{App, Context, SharedString, Window};
 
-use super::{Changed, history};
+use super::{Changed, btw_question, btw_rest, history};
 use crate::app::composer::attach::{delete_later, first_refusal, is_cli_command, shell_command};
 use crate::app::composer::quote::quoted;
 use crate::app::format::now_ms;
@@ -102,6 +102,17 @@ impl ChatApp {
     /// Sends the composer's text. While a reply streams it joins the chat's
     /// queue, unless it replaces an edited message.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = self.composer.read(cx).value().to_string();
+        if btw_rest(&draft).is_some() {
+            if let Some(question) = btw_question(&draft) {
+                let question = question.to_string();
+                self.composer.update(cx, |s, cx| s.clean(window, cx));
+                self.composer_history_index = None;
+                self.composer_draft = None;
+                self.ask_side(self.active, question, cx);
+            }
+            return;
+        }
         if self.locked(self.active)
             || self.worktree_blocks_send(self.active).is_some()
             || self.attaching(self.chats[self.active].id)

@@ -21,6 +21,8 @@ mod live;
 mod manage;
 pub(crate) use manage::Bulk;
 mod send;
+mod side;
+pub(crate) use side::{SideCard, btw_question, btw_rest};
 mod turn;
 
 fn default_access(provider: Provider) -> AccessMode {

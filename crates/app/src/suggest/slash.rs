@@ -43,6 +43,11 @@ impl ChatApp {
             // ==========================================
             all.push(("clear".into(), "Clear chat history".into(), SlashCommand::ClearChat));
             all.push((
+                "btw".into(),
+                "Ask a side question".into(),
+                SlashCommand::Prefill("/btw ".into()),
+            ));
+            all.push((
                 "search".into(),
                 if self.settings.web_search { "Turn web search off" } else { "Turn web search on" }
                     .into(),
@@ -83,6 +88,11 @@ impl ChatApp {
             // AGENTS (Claude, Codex, Antigravity, OpenCode, Pi)
             // ==========================================
             all.push(("clear".into(), "Clear session history".into(), SlashCommand::ClearChat));
+            all.push((
+                "btw".into(),
+                "Ask a side question without interrupting the agent".into(),
+                SlashCommand::Prefill("/btw ".into()),
+            ));
             all.push((
                 "doctor".into(),
                 "Check agent CLI binary, environment and diagnostics".into(),

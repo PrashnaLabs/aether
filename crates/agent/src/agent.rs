@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use adk_rust::prelude::*;
-use adk_rust::session::{CreateRequest, SessionService};
+use adk_rust::session::{CreateRequest, DeleteRequest, SessionService};
 use aether_core::{
     AccessMode, Answer, Attachment, MutexExt, NoticeKind, Provider, Role, Settings, Skill,
     ToolStatus, Update, attached_files_block, attachments_dir, find_binary, mentioned_skills,
@@ -938,6 +938,19 @@ impl Agent {
 
     pub fn live_sessions(&self) -> std::collections::HashSet<String> {
         self.live.guard().keys().cloned().collect()
+    }
+
+    /// Drops the in-memory conversation behind `key` (OpenRouter only).
+    pub fn delete_session(&self, key: &str) {
+        let sessions = self.sessions.clone();
+        let req = DeleteRequest {
+            app_name: APP.into(),
+            user_id: USER.into(),
+            session_id: key.into(),
+        };
+        self.rt.spawn(async move {
+            let _ = sessions.delete(req).await;
+        });
     }
 
     pub fn close_session(&self, key: &str) {

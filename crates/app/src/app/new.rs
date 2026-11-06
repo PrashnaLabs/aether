@@ -585,6 +585,8 @@ impl ChatApp {
             attach_error: None,
             attaching: HashMap::new(),
             quotes: HashMap::new(),
+            side: HashMap::new(),
+            side_runs: 0,
             selection_bar: None,
             copied: None,
             sessions_made: 0,

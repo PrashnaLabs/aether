@@ -638,7 +638,10 @@ fn window(model: &str) -> Option<u64> {
 }
 
 fn requested_mode(access: AccessMode) -> AccessMode {
-    if access == AccessMode::Auto { AccessMode::Auto } else { AccessMode::AutoEdit }
+    match access {
+        AccessMode::Auto | AccessMode::ReadOnly => access,
+        _ => AccessMode::AutoEdit,
+    }
 }
 
 fn agy_mode(permission_mode: &str) -> Option<AccessMode> {
@@ -760,6 +763,7 @@ fn launch_args(opts: &DriverStartOptions, conversation: &str, full: bool) -> Vec
     let mode: &[&str] = match opts.access {
         _ if full => &["--dangerously-skip-permissions"],
         AccessMode::Auto => &["--mode", "auto"],
+        AccessMode::ReadOnly => &["--mode", "plan"],
         _ => &["--mode", "accept-edits"],
     };
     args.extend(mode.iter().map(|s| s.to_string()));
