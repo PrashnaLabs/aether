@@ -205,3 +205,17 @@ Run the packaging checks with:
 ```sh
 uv run -m unittest discover -s scripts/tests -v
 ```
+
+## Credits
+
+The app ships a few third-party assets, each under its own license:
+
+- [Iconoir](https://iconoir.com) icons, MIT
+- [Remix Icon](https://remixicon.com) icons, Remix Icon License v1.0
+- [Solar](https://www.figma.com/community/file/1166831539721848736) icons by 480 Design, CC BY 4.0
+- [Lucide](https://lucide.dev) icons as the fallback set, ISC, bundled by the
+  `gpui-kit-assets` crate
+- English spelling data from [LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries)
+
+Each icon pack folder in `crates/app/assets/icon-packs/` holds its license
+file. `crates/app/assets/icons/SOURCES.md` lists sources and changes.
