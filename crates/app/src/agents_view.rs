@@ -50,15 +50,18 @@ pub(crate) fn open_blocker(a: &ExternalAgent) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn transcript_messages(turns: Vec<(Role, String)>) -> Vec<Message> {
+pub(crate) fn transcript_messages(turns: Vec<aether_agent::Turn>) -> Vec<Message> {
     turns
         .into_iter()
-        .map(|(role, text)| {
-            if role == Role::User {
-                return Message::user(text);
+        .map(|turn| {
+            if turn.role == Role::User {
+                return Message::user(turn.text);
             }
             let mut m = Message::assistant();
-            m.apply(Update::Final(text));
+            for call in turn.tools {
+                m.apply(Update::Tool(call));
+            }
+            m.apply(Update::Final(turn.text));
             m.finish();
             m
         })

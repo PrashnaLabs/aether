@@ -354,10 +354,38 @@ fn claude_transcript_keeps_plain_text_only() {
         "not json",
     ]
     .join("\n");
+    let turns = claude_transcript(&t);
+    assert_eq!(texts(&turns), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    assert_eq!(turns[1].tools.len(), 1);
+}
+
+fn texts(turns: &[Turn]) -> Vec<(Role, String)> {
+    turns.iter().map(|t| (t.role, t.text.clone())).collect()
+}
+
+#[test]
+fn claude_tool_calls_come_back_typed_with_their_results() {
+    let t = [
+        r#"{"type":"user","message":{"content":"what is this"}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Read","input":{"file_path":"README.md"}}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"ls api"}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b","content":"views.py"}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"A Django API."}]}}"#,
+    ]
+    .join("\n");
+    let turns = claude_transcript(&t);
     assert_eq!(
-        claude_transcript(&t),
-        [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]
+        texts(&turns),
+        [(Role::User, "what is this".into()), (Role::Assistant, "A Django API.".into())]
     );
+    let tools = &turns[1].tools;
+    assert!(
+        matches!(&tools[0].detail, aether_core::ToolDetail::Read { path, .. } if path == "README.md")
+    );
+    assert!(
+        matches!(&tools[1].detail, aether_core::ToolDetail::Command { command, output, .. } if command == "ls api" && output.contains("views.py"))
+    );
+    assert!(tools.iter().all(|c| c.status == aether_core::ToolStatus::Done));
 }
 
 #[test]
@@ -369,7 +397,9 @@ fn pi_transcript_keeps_user_and_assistant_text() {
         r#"{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"out"}]}}"#,
     ]
     .join("\n");
-    assert_eq!(pi_transcript(&t), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    let turns = pi_transcript(&t);
+    assert_eq!(texts(&turns), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    assert_eq!(turns[1].tools.len(), 1);
 }
 
 #[test]
@@ -387,14 +417,16 @@ fn codex_transcript_keeps_user_and_assistant_text() {
         "not json",
     ]
     .join("\n");
+    let turns = codex_transcript(&t);
     assert_eq!(
-        codex_transcript(&t),
+        texts(&turns),
         [
             (Role::User, "hi".into()),
             (Role::Assistant, "hello".into()),
-            (Role::User, "again".into()),
+            (Role::User, "again".into())
         ]
     );
+    assert_eq!(turns[1].tools.len(), 1);
 }
 
 #[test]
@@ -428,7 +460,7 @@ fn agy_transcript_decodes_user_and_planner_steps() {
     ]
     .join("\n");
     assert_eq!(
-        agy_transcript(&rows),
+        texts(&agy_transcript(&rows)),
         [
             (Role::User, "hi".to_string()),
             (Role::User, "yo".to_string()),
@@ -446,9 +478,9 @@ fn agy_rows_reads_with_and_without_a_wal() {
                INSERT INTO steps VALUES (0, 14, X'9A010412026869'), (1, 132, X'00');";
     let made = std::process::Command::new("/usr/bin/sqlite3").arg(&db).arg(&sql).status();
     assert!(made.unwrap().success());
-    assert_eq!(agy_rows(&db).as_deref(), Some("14|9A010412026869\n"));
+    assert_eq!(agy_rows(&db).as_deref(), Some("14|9A010412026869\n132|00\n"));
     std::fs::write(db.with_extension("db-wal"), "not a wal").unwrap();
-    assert_eq!(agy_transcript(&agy_rows(&db).unwrap()), [(Role::User, "hi".to_string())]);
+    assert_eq!(texts(&agy_transcript(&agy_rows(&db).unwrap())), [(Role::User, "hi".to_string())]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -458,10 +490,9 @@ fn opencode_transcript_keeps_text_parts() {
             {"type":"assistant","id":"msg_3","content":[{"type":"tool","id":"d","name":"bash"}]},
             {"type":"assistant","id":"msg_2","content":[{"type":"reasoning","text":"hm"},{"type":"tool","id":"c","name":"bash"},{"type":"text","text":"hello"}]},
             {"type":"user","id":"msg_1","text":"hi"}]}"#;
-    assert_eq!(
-        opencode_transcript(body),
-        [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]
-    );
+    let turns = opencode_transcript(body);
+    assert_eq!(texts(&turns), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    assert_eq!(turns[1].tools.len(), 2);
 }
 
 #[test]
@@ -476,4 +507,34 @@ fn live_scan_summary() {
             a.provider, a.pid, a.state, a.exact, a.origin
         );
     }
+}
+
+#[test]
+fn agy_planner_calls_settle_from_tool_steps() {
+    fn field(n: u64, body: &[u8]) -> Vec<u8> {
+        let mut out = vec![];
+        let mut key = n << 3 | 2;
+        while key >= 0x80 {
+            out.push((key as u8) | 0x80);
+            key >>= 7;
+        }
+        out.push(key as u8);
+        out.push(body.len() as u8);
+        out.extend_from_slice(body);
+        out
+    }
+    let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02X}")).collect::<String>();
+    let call =
+        [field(1, b"t1"), field(2, b"run_command"), field(3, br#"{"CommandLine":"ls"}"#)].concat();
+    let plan = field(20, &[field(1, b"Looking."), field(7, &call)].concat());
+    let step = [field(5, &field(4, &field(1, b"t1"))), field(140, &field(2, &field(1, b"a.txt")))]
+        .concat();
+    let rows = format!("15|{}\n132|{}", hex(plan), hex(step));
+    let turns = agy_transcript(&rows);
+    assert_eq!(texts(&turns), [(Role::Assistant, "Looking.".to_string())]);
+    let tool = &turns[0].tools[0];
+    assert!(
+        matches!(&tool.detail, aether_core::ToolDetail::Other { name, output, .. } if name == "run_command" && output.contains("a.txt")),
+        "{tool:?}"
+    );
 }

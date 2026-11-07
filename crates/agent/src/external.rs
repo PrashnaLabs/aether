@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
-use aether_core::{Provider, Role, home_dir};
-use aether_driver::{claude, opencode};
+use aether_core::{Provider, Role, ToolCall, home_dir};
+use aether_driver::{claude, logged_call, opencode};
 use reqwest::Method;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use ExternalState::{Idle, Waiting, Working};
 
@@ -579,8 +579,65 @@ pub fn stop(a: &ExternalAgent, force: bool) -> Result<(), String> {
     }
 }
 
-/// User/assistant text, oldest first, last 200.
-pub fn transcript(a: &ExternalAgent) -> Vec<(Role, String)> {
+/// One transcript entry: its text and, for a reply, the tool calls the CLI logged.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Turn {
+    pub role: Role,
+    pub text: String,
+    pub tools: Vec<ToolCall>,
+}
+
+/// Builds turns from a CLI log: consecutive reply pieces join, results settle their calls.
+#[derive(Default)]
+struct Log {
+    turns: Vec<Turn>,
+    calls: HashMap<String, (usize, usize, String, Value)>,
+}
+
+impl Log {
+    fn text(&mut self, role: Role, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        match self.turns.last_mut() {
+            Some(t) if role == Role::Assistant && t.role == Role::Assistant => {
+                if !t.text.is_empty() {
+                    t.text.push_str("\n\n");
+                }
+                t.text.push_str(&text);
+            }
+            _ => self.turns.push(Turn { role, text, tools: Vec::new() }),
+        }
+    }
+
+    fn call(&mut self, id: &str, name: &str, input: &Value) {
+        let mut input = input.clone();
+        if let Some(parts) = input["command"].as_array() {
+            let words: Vec<&str> = parts.iter().filter_map(Value::as_str).collect();
+            input["command"] = words.join(" ").into();
+        }
+        if self.turns.last().is_none_or(|t| t.role != Role::Assistant) {
+            self.turns.push(Turn { role: Role::Assistant, text: String::new(), tools: Vec::new() });
+        }
+        let t = self.turns.len() - 1;
+        let tools = &mut self.turns[t].tools;
+        tools.push(logged_call(id, name, &input, None));
+        self.calls.insert(id.to_string(), (t, tools.len() - 1, name.to_string(), input));
+    }
+
+    fn result(&mut self, id: &str, text: &str, failed: bool) {
+        if let Some((t, c, name, input)) = self.calls.get(id) {
+            self.turns[*t].tools[*c] = logged_call(id, name, input, Some((text, failed)));
+        }
+    }
+
+    fn done(self) -> Vec<Turn> {
+        self.turns.into_iter().filter(|t| !t.text.is_empty() || !t.tools.is_empty()).collect()
+    }
+}
+
+/// User/assistant turns with logged tool calls, oldest first, last 200.
+pub fn transcript(a: &ExternalAgent) -> Vec<Turn> {
     let mut out = match a.provider {
         Provider::Claude => {
             claude_file(&a.session).map(|t| claude_transcript(&t)).unwrap_or_default()
@@ -620,8 +677,7 @@ pub fn transcript(a: &ExternalAgent) -> Vec<(Role, String)> {
 
 /// mode=ro can't open these WAL dbs and immutable skips the WAL, so a live one is read from a copy.
 fn agy_rows(db: &Path) -> Option<String> {
-    let sql =
-        "SELECT step_type, hex(step_payload) FROM steps WHERE step_type IN (14, 15) ORDER BY idx";
+    let sql = "SELECT step_type, hex(step_payload) FROM steps WHERE step_type IN (14, 15, 132) ORDER BY idx";
     let wal = db.with_extension("db-wal");
     if !wal.exists() {
         return run("/usr/bin/sqlite3", &[&format!("file:{}?immutable=1", db.display()), sql]);
@@ -639,23 +695,38 @@ fn agy_rows(db: &Path) -> Option<String> {
     rows
 }
 
-/// `step_type|hex(step_payload)` rows: 14 is the user (field 19.2, else 19.3.1), 15 the planner (20.1).
-fn agy_transcript(rows: &str) -> Vec<(Role, String)> {
-    rows.lines()
-        .filter_map(|line| {
-            let (kind, hex) = line.split_once('|')?;
-            let step = unhex(hex.trim())?;
-            let (role, text) = match kind {
-                "14" => {
-                    (Role::User, pb_path(&step, &[19, 2]).or_else(|| pb_path(&step, &[19, 3, 1]))?)
+/// `step_type|hex(step_payload)` rows: 14 is the user (field 19.2, else 19.3.1), 15 the planner
+/// (text 20.1, calls 20.7 {1 id, 2 name, 3 JSON args}), 132 a tool step (call 5.4.1, output 140.2.1).
+fn agy_transcript(rows: &str) -> Vec<Turn> {
+    let mut log = Log::default();
+    let utf8 = |b: &[u8]| String::from_utf8_lossy(b).trim().to_string();
+    for line in rows.lines() {
+        let Some((kind, hex)) = line.split_once('|') else { continue };
+        let Some(step) = unhex(hex.trim()) else { continue };
+        match kind {
+            "14" => {
+                let text = pb_path(&step, &[19, 2]).or_else(|| pb_path(&step, &[19, 3, 1]));
+                log.text(Role::User, text.map(utf8).unwrap_or_default());
+            }
+            "15" => {
+                let Some(plan) = pb_field(&step, 20) else { continue };
+                log.text(Role::Assistant, pb_field(plan, 1).map(utf8).unwrap_or_default());
+                for call in pb_fields(plan, 7) {
+                    let field = |n| pb_field(call, n).map(utf8).unwrap_or_default();
+                    let args = serde_json::from_str(&field(3)).unwrap_or(Value::Null);
+                    log.call(&field(1), &field(2), &args);
                 }
-                "15" => (Role::Assistant, pb_path(&step, &[20, 1])?),
-                _ => return None,
-            };
-            let text = String::from_utf8_lossy(text).trim().to_string();
-            (!text.is_empty()).then_some((role, text))
-        })
-        .collect()
+            }
+            "132" => {
+                let id = pb_path(&step, &[5, 4, 1]).map(utf8).unwrap_or_default();
+                if let Some(out) = pb_path(&step, &[140, 2, 1]) {
+                    log.result(&id, &utf8(out), false);
+                }
+            }
+            _ => {}
+        }
+    }
+    log.done()
 }
 
 fn unhex(s: &str) -> Option<Vec<u8>> {
@@ -668,6 +739,37 @@ fn pb_path<'a>(mut buf: &'a [u8], path: &[u64]) -> Option<&'a [u8]> {
         buf = pb_field(buf, want)?;
     }
     Some(buf)
+}
+
+/// Every length-delimited occurrence of field `want`.
+fn pb_fields(buf: &[u8], want: u64) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    let mut rest = buf;
+    while let Some((value, next)) = pb_next(rest, want) {
+        out.extend(value);
+        rest = next;
+    }
+    out
+}
+
+/// The next field from `buf`: its value when it's `want` and length-delimited, and what follows.
+fn pb_next(mut buf: &[u8], want: u64) -> Option<(Option<&[u8]>, &[u8])> {
+    if buf.is_empty() {
+        return None;
+    }
+    let key = varint(&mut buf)?;
+    let len = match key & 7 {
+        0 => {
+            varint(&mut buf)?;
+            return Some((None, buf));
+        }
+        1 => 8,
+        2 => usize::try_from(varint(&mut buf)?).ok()?,
+        5 => 4,
+        _ => return None,
+    };
+    let value = buf.get(..len)?;
+    Some(((key == (want << 3 | 2)).then_some(value), &buf[len..]))
 }
 
 fn pb_field(mut buf: &[u8], want: u64) -> Option<&[u8]> {
@@ -740,19 +842,47 @@ fn text_of(content: &Value) -> String {
     }
 }
 
-fn claude_transcript(jsonl: &str) -> Vec<(Role, String)> {
-    jsonl
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|v| {
-            v["isMeta"] != true && v["isSidechain"] != true && v["isCompactSummary"] != true
-        })
-        .filter_map(|v| {
-            let text = text_of(&v["message"]["content"]);
-            let echo = text.starts_with("<command-name>") || text.starts_with("<local-command-");
-            Some((role_of(v["type"].as_str()?)?, text)).filter(|(_, t)| !t.is_empty() && !echo)
-        })
-        .collect()
+fn claude_transcript(jsonl: &str) -> Vec<Turn> {
+    let mut log = Log::default();
+    let lines = jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+    for v in lines.filter(|v| {
+        v["isMeta"] != true && v["isSidechain"] != true && v["isCompactSummary"] != true
+    }) {
+        let Some(role) = v["type"].as_str().and_then(role_of) else { continue };
+        let content = &v["message"]["content"];
+        let text = text_of(content);
+        let echo = text.starts_with("<command-name>") || text.starts_with("<local-command-");
+        if !echo {
+            log.text(role, text);
+        }
+        for c in content.as_array().into_iter().flatten() {
+            match c["type"].as_str() {
+                Some("tool_use") => log.call(
+                    c["id"].as_str().unwrap_or_default(),
+                    c["name"].as_str().unwrap_or_default(),
+                    &c["input"],
+                ),
+                Some("tool_result") => log.result(
+                    c["tool_use_id"].as_str().unwrap_or_default(),
+                    &result_text(&c["content"]),
+                    c["is_error"] == true,
+                ),
+                _ => {}
+            }
+        }
+    }
+    log.done()
+}
+
+/// A tool result's text: a plain string or its text blocks.
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => {
+            parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n")
+        }
+        _ => String::new(),
+    }
 }
 
 fn codex_file(root: &Path, session: &str) -> Option<String> {
@@ -784,69 +914,120 @@ fn codex_file(root: &Path, session: &str) -> Option<String> {
     None
 }
 
-fn codex_transcript(jsonl: &str) -> Vec<(Role, String)> {
-    jsonl
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| {
-            let p = &v["payload"];
-            if v["type"] != "response_item" || p["type"] != "message" {
-                return None;
+fn codex_transcript(jsonl: &str) -> Vec<Turn> {
+    let mut log = Log::default();
+    for v in jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let p = &v["payload"];
+        if v["type"] != "response_item" {
+            continue;
+        }
+        let id = p["call_id"].as_str().unwrap_or_default();
+        match p["type"].as_str() {
+            Some("message") => {
+                let Some(role) = p["role"].as_str().and_then(role_of) else { continue };
+                let text = p["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|c| {
+                        matches!(c["type"].as_str(), Some("input_text" | "output_text" | "text"))
+                    })
+                    .filter_map(|c| c["text"].as_str())
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .filter(|t| {
+                        !["<environment_context>", "<user_instructions>"]
+                            .iter()
+                            .any(|tag| t.starts_with(tag))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                log.text(role, text);
             }
-            let text = p["content"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|c| {
-                    matches!(c["type"].as_str(), Some("input_text" | "output_text" | "text"))
-                })
-                .filter_map(|c| c["text"].as_str())
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .filter(|t| {
-                    !["<environment_context>", "<user_instructions>"]
-                        .iter()
-                        .any(|tag| t.starts_with(tag))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            Some((role_of(p["role"].as_str()?)?, text)).filter(|(_, t)| !t.is_empty())
-        })
-        .collect()
+            Some("function_call") => {
+                let raw = p["arguments"].as_str().unwrap_or_default();
+                let args = serde_json::from_str(raw).unwrap_or_else(|_| json!({"arguments": raw}));
+                log.call(id, p["name"].as_str().unwrap_or_default(), &args);
+            }
+            Some("custom_tool_call") => {
+                log.call(id, p["name"].as_str().unwrap_or_default(), &json!({"input": p["input"]}))
+            }
+            Some("local_shell_call") => {
+                log.call(id, "shell", &json!({"command": p["action"]["command"]}))
+            }
+            Some("function_call_output" | "custom_tool_call_output") => {
+                let out = match &p["output"] {
+                    Value::String(s) => s.clone(),
+                    o => o["content"].as_str().map_or_else(|| o.to_string(), str::to_string),
+                };
+                log.result(id, &out, false);
+            }
+            _ => {}
+        }
+    }
+    log.done()
 }
 
-fn pi_transcript(jsonl: &str) -> Vec<(Role, String)> {
-    jsonl
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|v| v["type"] == "message")
-        .filter_map(|v| {
-            let m = &v["message"];
-            let text = text_of(&m["content"]);
-            Some((role_of(m["role"].as_str()?)?, text)).filter(|(_, t)| !t.is_empty())
-        })
-        .collect()
+fn pi_transcript(jsonl: &str) -> Vec<Turn> {
+    let mut log = Log::default();
+    let lines = jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+    for v in lines.filter(|v| v["type"] == "message") {
+        let m = &v["message"];
+        match m["role"].as_str() {
+            Some("toolResult") => log.result(
+                m["toolCallId"].as_str().unwrap_or_default(),
+                &result_text(&m["content"]),
+                m["isError"] == true,
+            ),
+            Some(r) => {
+                let Some(role) = role_of(r) else { continue };
+                log.text(role, text_of(&m["content"]));
+                for c in m["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|c| c["type"] == "toolCall")
+                {
+                    log.call(
+                        c["id"].as_str().unwrap_or_default(),
+                        c["name"].as_str().unwrap_or_default(),
+                        &c["arguments"],
+                    );
+                }
+            }
+            None => {}
+        }
+    }
+    log.done()
 }
 
 // user messages may carry `text` directly; assistant ones carry `content[]`
 // newest first on the wire (`order=desc`); returned oldest first
-fn opencode_transcript(body: &str) -> Vec<(Role, String)> {
+fn opencode_transcript(body: &str) -> Vec<Turn> {
     let v: Value = serde_json::from_str(body).unwrap_or_default();
-    let mut out: Vec<_> = v["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| {
-            let role = role_of(m["type"].as_str().or_else(|| m["role"].as_str())?)?;
-            let text = match m["text"].as_str() {
-                Some(t) => t.trim().to_string(),
-                None => text_of(&m["content"]),
-            };
-            Some((role, text)).filter(|(_, t)| !t.is_empty())
-        })
-        .collect();
-    out.reverse();
-    out
+    let mut log = Log::default();
+    let mut messages: Vec<&Value> = v["data"].as_array().into_iter().flatten().collect();
+    messages.reverse();
+    for m in messages {
+        let Some(role) = m["type"].as_str().or_else(|| m["role"].as_str()).and_then(role_of) else {
+            continue;
+        };
+        let text = match m["text"].as_str() {
+            Some(t) => t.trim().to_string(),
+            None => text_of(&m["content"]),
+        };
+        log.text(role, text);
+        for c in m["content"].as_array().into_iter().flatten().filter(|c| c["type"] == "tool") {
+            let id = c["callID"].as_str().or_else(|| c["id"].as_str()).unwrap_or_default();
+            let state = &c["state"];
+            let name = c["tool"].as_str().or_else(|| c["name"].as_str()).unwrap_or_default();
+            log.call(id, name, &state["input"]);
+            if let Some(out) = state["output"].as_str().or_else(|| state["error"].as_str()) {
+                log.result(id, out, state["status"] == "error");
+            }
+        }
+    }
+    log.done()
 }
 
 #[cfg(test)]

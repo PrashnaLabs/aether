@@ -20,7 +20,7 @@ pub use claude::ClaudeDriver;
 pub use codex::CodexDriver;
 pub use opencode::OpencodeDriver;
 pub use pi::PiDriver;
-pub use tool::{INPUT_CHARS, clip, head_tail};
+pub use tool::{INPUT_CHARS, clip, head_tail, logged_call};
 
 #[derive(Clone)]
 pub struct DriverStartOptions {

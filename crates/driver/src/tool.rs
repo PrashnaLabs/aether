@@ -219,6 +219,16 @@ pub(crate) fn parse_question_and_choices(input: &Value) -> Option<(String, Vec<S
     None
 }
 
+/// A finished call read back from a CLI's own log: typed like a live one, with its result when known.
+pub fn logged_call(id: &str, name: &str, input: &Value, result: Option<(&str, bool)>) -> ToolCall {
+    let mut call = start(id, name, input);
+    match result {
+        Some((text, failed)) => finish(&mut call, text, failed),
+        None => call.status = ToolStatus::Done,
+    }
+    call
+}
+
 pub(crate) fn start(id: impl Into<String>, name: &str, input: &Value) -> ToolCall {
     let (title, detail) = classify(name, input);
     ToolCall::new(id, title, detail)

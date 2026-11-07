@@ -61,7 +61,17 @@ fn opencode_service_session_opens_without_a_pid() {
 
 #[test]
 fn transcript_becomes_finished_messages() {
-    let msgs = transcript_messages(vec![(Role::User, "hi".into()), (Role::Assistant, "yo".into())]);
+    let turn = |role, text: &str, tools| aether_agent::Turn { role, text: text.into(), tools };
+    let read = aether_core::ToolCall::new(
+        "a",
+        "Read",
+        aether_core::ToolDetail::Read { path: "x".into(), range: None },
+    );
+    let msgs = transcript_messages(vec![
+        turn(Role::User, "hi", vec![]),
+        turn(Role::Assistant, "yo", vec![read]),
+    ]);
+    assert!(matches!(msgs[1].steps.as_slice(), [aether_core::Step::Tool(c)] if c.id == "a"));
     assert_eq!(msgs.len(), 2);
     assert_eq!(msgs[0].role, Role::User);
     assert_eq!(msgs[0].text, "hi");

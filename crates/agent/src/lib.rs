@@ -15,6 +15,6 @@ pub use agent::{
     Agent, Cancel, ChatSession, HISTORY_BUDGET, Reply, SIDE_UNSUPPORTED, SessionHealth, SideUpdate,
     budget_history,
 };
-pub use external::{ExternalAgent, ExternalState};
+pub use external::{ExternalAgent, ExternalState, Turn};
 pub use models::ModelInfo;
 pub use store::{SavedCard, SavedChat, SavedDelivery, Store};
