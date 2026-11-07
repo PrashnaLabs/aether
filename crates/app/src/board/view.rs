@@ -198,6 +198,7 @@ impl ChatApp {
                             .items_stretch()
                             .gap(px(8.))
                             .overflow_x_scroll()
+                            .restrict_scroll_to_axis()
                             .children(columns),
                     )
                     .children(detail),
@@ -318,6 +319,7 @@ impl ChatApp {
                     .pt(px(2.))
                     .gap(px(6.))
                     .overflow_y_scroll()
+                    .restrict_scroll_to_axis()
                     .children(cards)
                     .children(hint)
                     .children(add),
