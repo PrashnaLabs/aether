@@ -224,7 +224,9 @@ impl ChatApp {
                 .justify_between()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("Running in {origin}. Stop it or wait for it to finish to continue here."))
+                .child(format!(
+                    "Running in {origin}. Stop it or wait for it to finish to continue here."
+                ))
                 .child(
                     div().debug_selector(|| "composer-stop-external".into()).child(
                         aether_ui::button("composer-stop-external")

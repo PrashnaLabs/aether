@@ -5,11 +5,11 @@ use std::sync::atomic::Ordering;
 
 use aether_core::{Message, Provider, Step};
 use aether_driver::antigravity::{agy_aether_entry, agy_mcp_config, register_agy_aether};
+use aether_ui::theme::Corners;
 use aether_ui::{
     FatalCard, NoticeLine, NoticeLink, OnLink, StartupList, SteerMarker, StoppedMarker,
     stopped_lead, stopped_summary,
 };
-use aether_ui::theme::Corners;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{ButtonVariant, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex};
@@ -218,7 +218,9 @@ impl ChatApp {
                 "Delete",
                 "This removes them and their history. This can't be undone. Worktree folders stay on disk.",
             ),
-            Bulk::Archive => ("Archive", "They move to the Archive. You can unarchive them any time."),
+            Bulk::Archive => {
+                ("Archive", "They move to the Archive. You can unarchive them any time.")
+            }
             Bulk::Unarchive => ("Unarchive", "They move back to the sidebar."),
         };
         let view = cx.entity();
@@ -261,14 +263,12 @@ impl ChatApp {
         let theme = cx.theme();
         let n = picked.len();
         let select_all = (n < all.len()).then(|| {
-            aether_ui::button((key, 0usize))
-                .ghost()
-                .xsmall()
-                .label("Select all")
-                .on_click(cx.listener(move |this, _, _, cx| {
+            aether_ui::button((key, 0usize)).ghost().xsmall().label("Select all").on_click(
+                cx.listener(move |this, _, _, cx| {
                     this.picks(project).extend(all.iter().copied());
                     cx.notify();
-                }))
+                }),
+            )
         });
         let clear = aether_ui::button((key, 1usize))
             .ghost()

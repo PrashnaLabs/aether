@@ -126,9 +126,8 @@ impl PlanUsage {
         let scoped = val.get("limits").and_then(|v| v.as_array()).into_iter().flatten();
         for limit in scoped.filter(|l| l["kind"] == "weekly_scoped") {
             let scope = &limit["scope"];
-            let Some(name) = ["model", "surface"]
-                .iter()
-                .find_map(|k| scope[k]["display_name"].as_str())
+            let Some(name) =
+                ["model", "surface"].iter().find_map(|k| scope[k]["display_name"].as_str())
             else {
                 continue;
             };

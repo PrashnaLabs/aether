@@ -58,9 +58,9 @@ mod watch;
 pub(crate) use watch::{WATCH_STRIP, watch_item};
 mod worktree;
 
+pub(crate) use chat::Bulk;
 pub(crate) use format::{chat_markdown, display_path, format_full, format_time, now_ms};
 pub(crate) use providers::picker_value;
-pub(crate) use chat::Bulk;
 use sidebar::folder_label;
 use worktree::SetupJob;
 

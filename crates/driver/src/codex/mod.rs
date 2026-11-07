@@ -261,9 +261,7 @@ impl State {
 
 /// Responses API messages for thread/inject_items: the context note, then each message.
 pub(crate) fn inject_items(context: &str, messages: &[(aether_core::Role, String)]) -> Value {
-    let item = |role: &str, kind: &str, text: &str| {
-        json!({"type": "message", "role": role, "content": [{"type": kind, "text": text}]})
-    };
+    let item = |role: &str, kind: &str, text: &str| json!({"type": "message", "role": role, "content": [{"type": kind, "text": text}]});
     let mut items = vec![item("user", "input_text", context)];
     for (role, text) in messages {
         items.push(match role {

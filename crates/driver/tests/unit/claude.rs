@@ -1263,10 +1263,7 @@ fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
     let notice = lost_resume("no-such-session-aether-test", false).unwrap();
     assert_eq!(notice.id, "info-resume");
     assert_eq!(notice.kind, NoticeKind::Info);
-    assert_eq!(
-        notice.text,
-        "Couldn't find the earlier Claude session, so this is a new one."
-    );
+    assert_eq!(notice.text, "Couldn't find the earlier Claude session, so this is a new one.");
     assert!(lost_resume("", false).is_none());
     assert!(lost_resume("abc", true).is_none());
     let opts = DriverStartOptions { resume: "no-such-session-aether-test".into(), ..ask_opts() };
