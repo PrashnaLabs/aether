@@ -166,6 +166,7 @@ fn opencode_list_keeps_slash_ids_only() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn claude_falls_back_to_named_aliases_only_when_found() {
     let missing =
@@ -187,6 +188,7 @@ fn claude_falls_back_to_named_aliases_only_when_found() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn rpc_matches_replies_by_id_and_stops_at_a_silent_one() {
     let script =
@@ -213,6 +215,7 @@ fn sh_rpc(script: &str, timeout: Duration) -> Vec<Value> {
     rpc(cmd, &[("one", json!({"id": "one"}))], timeout)
 }
 
+#[cfg(unix)]
 #[test]
 fn rpc_reads_bad_utf8_lossily_and_stops_on_an_oversized_line() {
     let bad = r#"read a; printf '{"id":"one","s":"\377"}\n'"#;
@@ -227,6 +230,7 @@ fn rpc_reads_bad_utf8_lossily_and_stops_on_an_oversized_line() {
     assert!(start.elapsed() < Duration::from_secs(3));
 }
 
+#[cfg(unix)]
 #[test]
 fn rpc_kills_the_probe_process_group() {
     let script = r#"read a; sleep 30 & echo "{\"id\":\"one\",\"pid\":$!}"; sleep 30"#;
@@ -255,6 +259,7 @@ fn rpc_kills_the_probe_process_group() {
     assert!(!alive(), "grandchild {pid} survived");
 }
 
+#[cfg(unix)]
 #[test]
 fn hung_list_command_times_out() {
     let opts = sh_opts();

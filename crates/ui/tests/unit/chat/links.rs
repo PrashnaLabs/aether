@@ -28,6 +28,7 @@ fn suffixes_give_line_and_column() {
     assert_eq!(parse("src/a.rs#L12C3"), at(a, Some(12), Some(3)));
 }
 
+#[cfg(unix)]
 #[test]
 fn file_urls_are_percent_decoded() {
     let dir = project("url");
@@ -41,6 +42,7 @@ fn file_urls_are_percent_decoded() {
     assert_eq!(parse_file_link(&url, None), at(dir.join("src/a.rs"), None, None));
 }
 
+#[cfg(unix)]
 #[test]
 fn file_urls_take_localhost_but_no_other_host() {
     let dir = project("host");
@@ -82,6 +84,7 @@ fn a_colon_name_that_exists_keeps_its_suffix() {
     assert_eq!(parse_file_link("odd:12", Some(&dir)), at(dir.join("odd:12"), None, None));
 }
 
+#[cfg(unix)]
 #[test]
 fn inline_code_naming_a_file_becomes_a_link() {
     let dir = project("inline");
@@ -143,7 +146,7 @@ fn markdown_routes_web_links_to_the_app_and_keeps_file_links_separate(
         *calls.borrow(),
         vec![
             "https://example.com/docs#intro".to_string(),
-            dir.join("src/a.rs").display().to_string()
+            dir.join("src").join("a.rs").display().to_string()
         ]
     );
     std::fs::remove_dir_all(dir).unwrap();

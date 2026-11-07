@@ -300,7 +300,7 @@ fn stage_unstage_and_commit_round_trip_in_a_temp_repo() {
     write("f[1].txt", b"bracket\n");
     write("f1.txt", b"plain\n");
     let unborn = status(&repo.join("sub")).unwrap();
-    assert_eq!(unborn.top, repo.canonicalize().unwrap());
+    assert_eq!(unborn.top, aether_core::canonicalize(&repo).unwrap());
     assert_eq!((unborn.branch.as_deref(), unborn.commit.as_deref()), (Some("main"), None));
     assert_eq!(
         paths(&unborn, false),

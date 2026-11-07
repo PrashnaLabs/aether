@@ -40,6 +40,7 @@ fn describe_hides_env() {
     assert!(d.contains("/bin/codex") && d.contains("app-server"));
 }
 
+#[cfg(unix)]
 #[test]
 fn command_strips_lead_env() {
     let opts = DriverStartOptions {

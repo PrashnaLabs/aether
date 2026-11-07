@@ -33,7 +33,8 @@ fn walk_skips_build_and_vcs_folders() {
 
     let mut files = walk_files(&dir);
     files.sort();
-    assert_eq!(files, ["README.md", "src/f.txt"]);
+    let nested = format!("src{}f.txt", std::path::MAIN_SEPARATOR);
+    assert_eq!(files, ["README.md", nested.as_str()]);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

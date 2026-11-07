@@ -13,13 +13,11 @@ fn lists_ordinary_and_detached_worktrees_without_chats() {
     assert!(sh(&repo, &["worktree", "add", "-b", "review", ordinary.to_str().unwrap()]));
     assert!(sh(&repo, &["worktree", "add", "--detach", detached.to_str().unwrap()]));
     let found = list(&[], &[repo]);
-    assert!(found.iter().any(|row| row.path == ordinary.canonicalize().unwrap()
+    assert!(found.iter().any(|row| row.path == aether_core::canonicalize(&ordinary).unwrap()
         && row.branch.as_deref() == Some("review")));
-    assert!(
-        found
-            .iter()
-            .any(|row| row.path == detached.canonicalize().unwrap() && row.branch.is_none())
-    );
+    assert!(found.iter().any(
+        |row| row.path == aether_core::canonicalize(&detached).unwrap() && row.branch.is_none()
+    ));
     std::fs::remove_dir_all(base).unwrap();
 }
 
@@ -33,13 +31,16 @@ fn review_resolves_repository_identity_for_nested_and_linked_folders() {
         assert!(sh(repo, &["init", "-q", "-b", "main"]));
         assert!(sh(repo, &["commit", "-q", "--allow-empty", "-m", "init"]));
     }
-    let parent = parent.canonicalize().unwrap();
-    let nested = nested.canonicalize().unwrap();
+    let parent = aether_core::canonicalize(&parent).unwrap();
+    let nested = aether_core::canonicalize(&nested).unwrap();
     let linked = base.join("linked");
     assert!(sh(&nested, &["worktree", "add", "-b", "review", linked.to_str().unwrap()]));
-    assert_eq!(bases(&parent).unwrap().repo, parent.canonicalize().unwrap());
-    assert_eq!(bases(&nested.join("sub")).unwrap().repo, nested.canonicalize().unwrap());
-    assert_eq!(bases(&linked).unwrap().repo, nested.canonicalize().unwrap());
+    assert_eq!(bases(&parent).unwrap().repo, aether_core::canonicalize(&parent).unwrap());
+    assert_eq!(
+        bases(&nested.join("sub")).unwrap().repo,
+        aether_core::canonicalize(&nested).unwrap()
+    );
+    assert_eq!(bases(&linked).unwrap().repo, aether_core::canonicalize(&nested).unwrap());
     let listed = list(&[], &[parent, nested]);
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].repo, bases(&linked).unwrap().repo);
@@ -289,7 +290,7 @@ fn worktrees_round_trip_in_a_temp_repo() {
     assert_eq!(create(&root, &repo, "x", "main", &stopped), Err(CANCELED.to_string()));
     let made = create(&root, &repo.join("sub/deep"), "Fix the login bug", "main", &go).unwrap();
     assert_eq!(made.branch, "aether/fix-the-login-bug");
-    assert!(made.path.starts_with(root.canonicalize().unwrap()), "{made:?}");
+    assert!(made.path.starts_with(aether_core::canonicalize(&root).unwrap()), "{made:?}");
     assert_eq!((made.cwd.clone(), made.missing_subdir.clone()), (made.path.join("sub/deep"), None));
     let again = create(&root, &repo, "Fix the login bug", "dev", &go).unwrap();
     assert_eq!(again.branch, "aether/fix-the-login-bug-2");
@@ -327,11 +328,9 @@ fn worktrees_round_trip_in_a_temp_repo() {
     assert!(
         paths.contains(&&made.path) && paths.contains(&&again.path) && paths.contains(&&loose.path)
     );
-    assert!(
-        listed
-            .iter()
-            .all(|l| l.repo == repo.canonicalize().unwrap() && !l.missing && l.locked.is_none())
-    );
+    assert!(listed.iter().all(|l| l.repo == aether_core::canonicalize(&repo).unwrap()
+        && !l.missing
+        && l.locked.is_none()));
 
     assert!(sh(
         &repo,
@@ -414,7 +413,11 @@ fn temp_repo(name: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
     }
     std::fs::write(repo.join("f.txt"), "x").unwrap();
     assert!(sh(&repo, &["add", "f.txt"]) && sh(&repo, &["commit", "-qm", "init"]));
-    Some((base.canonicalize().unwrap(), repo.canonicalize().unwrap(), root))
+    Some((
+        aether_core::canonicalize(&base).unwrap(),
+        aether_core::canonicalize(&repo).unwrap(),
+        root,
+    ))
 }
 
 #[test]
@@ -455,7 +458,7 @@ fn add_checks_out_local_remote_and_new_branches() {
         return;
     };
     let roots = [root.clone()];
-    let slot = root.canonicalize().unwrap().join(repo_dir(&repo));
+    let slot = aether_core::canonicalize(&root).unwrap().join(repo_dir(&repo));
     let branch_of = |path: &Path| git::branch_info(path).unwrap().branch;
     assert!(sh(&repo, &["branch", "dev"]));
     assert!(sh(&repo, &["remote", "add", "origin", "/nowhere"]));

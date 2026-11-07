@@ -14,6 +14,7 @@ fn drawer_height_stays_between_the_grid_floor_and_three_quarters() {
     assert!(min_height(px(16.)) > min);
 }
 
+#[cfg(unix)]
 #[test]
 fn global_folder_falls_back_to_home_when_workspace_empty() {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
@@ -21,6 +22,7 @@ fn global_folder_falls_back_to_home_when_workspace_empty() {
     assert_eq!(folder, home);
 }
 
+#[cfg(unix)]
 #[test]
 fn global_folder_falls_back_to_home_when_workspace_nonexistent() {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();

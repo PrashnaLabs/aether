@@ -637,7 +637,7 @@ fn untrusted_projects_offer_trust() {
     assert!(!untrusted_project(&dir, &json!({}), "ask"), "a bare .pi needs no trust");
     std::fs::create_dir_all(dir.join(".pi/extensions")).unwrap();
     assert!(untrusted_project(&dir, &json!({}), "ask"));
-    let canonical = std::fs::canonicalize(&dir).unwrap().to_string_lossy().into_owned();
+    let canonical = aether_core::canonicalize(&dir).unwrap().to_string_lossy().into_owned();
     assert!(!untrusted_project(&dir, &json!({ canonical: true }), "ask"));
     assert!(!untrusted_project(&dir, &json!({}), "always"));
     std::fs::remove_dir_all(dir).unwrap();
