@@ -321,7 +321,7 @@ impl ChatApp {
                 format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
             })?,
         };
-        let id = self.board_add(title.clone(), text("body"), col, self.lead_project(lead_ix), None);
+        let id = self.board_add(title.clone(), text("body"), col, self.lead_project(lead_ix), None, true);
         Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
     }
 
@@ -640,7 +640,14 @@ impl ChatApp {
                 id
             }
             None => {
-                self.board_add(a.title.clone(), a.task.clone(), Col::Doing, project, Some(child_id))
+                self.board_add(
+                a.title.clone(),
+                a.task.clone(),
+                Col::Doing,
+                project,
+                Some(child_id),
+                true,
+            )
             }
         };
         let mut reply = json!({

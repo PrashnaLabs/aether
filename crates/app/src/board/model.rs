@@ -50,6 +50,7 @@ pub(crate) struct BoardCard {
     pub chat: Option<i64>,
     pub project: String,
     pub updated_at: i64,
+    pub by_agent: bool,
 }
 
 impl From<SavedCard> for BoardCard {
@@ -63,6 +64,7 @@ impl From<SavedCard> for BoardCard {
             chat: c.chat,
             project: c.project,
             updated_at: c.updated_at,
+            by_agent: c.by_agent,
         }
     }
 }
@@ -78,6 +80,7 @@ impl From<&BoardCard> for SavedCard {
             chat: c.chat,
             project: c.project.clone(),
             updated_at: c.updated_at,
+            by_agent: c.by_agent,
         }
     }
 }
@@ -179,6 +182,13 @@ pub(crate) fn open_lines(cards: &[BoardCard]) -> String {
     if lines.is_empty() { "No open cards.".into() } else { lines.join("\n") }
 }
 
+/// Every search word is in the title or body (any case), and the author matches `by`.
+pub(crate) fn shown(card: &BoardCard, query: &str, by: Option<bool>) -> bool {
+    let text = format!("{}\n{}", card.title, card.body).to_lowercase();
+    by.is_none_or(|agent| card.by_agent == agent)
+        && query.to_lowercase().split_whitespace().all(|w| text.contains(w))
+}
+
 /// First `max` lines of `body`, with "…" when more follow.
 pub(crate) fn preview(body: &str, max: usize) -> String {
     let lines: Vec<&str> = body.trim().lines().collect();
@@ -211,6 +221,7 @@ mod tests {
             chat,
             project: "p".into(),
             updated_at: 0,
+            by_agent: false,
         }
     }
 
@@ -258,6 +269,19 @@ mod tests {
             cards.map(|c| (c.id, c.project)),
             [(3, "/proj".into()), (2, "p".into()), (1, "p".into())]
         );
+    }
+
+    #[test]
+    fn shown_matches_words_and_author() {
+        let mut c = card(Col::Todo, None);
+        c.body = "Handles the Parser edge case".into();
+        assert!(shown(&c, "", None));
+        assert!(shown(&c, "fix EDGE", None));
+        assert!(!shown(&c, "fix lexer", None));
+        assert!(shown(&c, "", Some(false)));
+        assert!(!shown(&c, "", Some(true)));
+        c.by_agent = true;
+        assert!(shown(&c, "parser", Some(true)));
     }
 
     #[test]

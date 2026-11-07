@@ -645,6 +645,9 @@ pub(crate) struct ChatApp {
     pub(crate) right_browser_open: bool,
     pub(crate) board_tab: bool,
     pub(crate) board_all: bool,
+    pub(crate) board_search: Entity<InputState>,
+    /// Author filter: `None` all, `Some(true)` agent-added, `Some(false)` user-added.
+    pub(crate) board_by: Option<bool>,
     pub(crate) archive_picks: HashSet<i64>,
     pub(crate) project_picks: HashSet<i64>,
     pub(crate) right_panel_resizing: bool,

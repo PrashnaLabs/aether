@@ -23,6 +23,7 @@ impl ChatApp {
         col: Col,
         project: String,
         chat: Option<i64>,
+        by_agent: bool,
     ) -> i64 {
         let id = next_id(&self.cards);
         let position = slot(&self.cards, id, col, None);
@@ -35,6 +36,7 @@ impl ChatApp {
             chat,
             project,
             updated_at: now_ms(),
+            by_agent,
         });
         self.board_save(id);
         id
@@ -194,7 +196,7 @@ impl ChatApp {
     pub(crate) fn board_new_card(&mut self, col: Col, window: &mut Window, cx: &mut Context<Self>) {
         let project =
             self.current_project_folder().map(|p| p.display().to_string()).unwrap_or_default();
-        let id = self.board_add("New card".into(), String::new(), col, project, None);
+        let id = self.board_add("New card".into(), String::new(), col, project, None, false);
         self.board_pick(id, window, cx);
         self.board_title.update(cx, |s, cx| {
             s.focus(window, cx);

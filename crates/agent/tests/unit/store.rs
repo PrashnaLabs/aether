@@ -383,6 +383,7 @@ fn card(id: i64, col: &str, position: f64) -> SavedCard {
         chat: Some(7),
         project: "/code/p".into(),
         updated_at: 99,
+        by_agent: false,
     }
 }
 
@@ -393,7 +394,7 @@ fn cards_round_trip() {
     let rt = Runtime::new().unwrap();
     let store = Store::open(&path, rt.handle().clone()).unwrap();
     let mut a = card(1, "todo", 2.0);
-    let b = SavedCard { chat: None, ..card(2, "doing", 0.5) };
+    let b = SavedCard { chat: None, by_agent: true, ..card(2, "doing", 0.5) };
     store.save_card(a.clone());
     store.save_card(b.clone());
     a.title = "Renamed".into();

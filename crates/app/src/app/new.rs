@@ -123,6 +123,7 @@ impl ChatApp {
         let hn_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search stories..."));
         let skill_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
+        let board_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search cards"));
         let explorer_quick_open_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search files by name..."));
         let grep_tip = key_hint(&SearchWorkspace, cx)
@@ -305,6 +306,11 @@ impl ChatApp {
                 },
             ),
             cx.subscribe_in(&skill_search, window, |_, _, ev: &InputEvent, _, cx| {
+                if let InputEvent::Change = ev {
+                    cx.notify();
+                }
+            }),
+            cx.subscribe_in(&board_search, window, |_, _, ev: &InputEvent, _, cx| {
                 if let InputEvent::Change = ev {
                     cx.notify();
                 }
@@ -610,6 +616,8 @@ impl ChatApp {
             right_browser_open: false,
             board_tab: false,
             board_all: false,
+            board_search,
+            board_by: None,
             archive_picks: Default::default(),
             project_picks: Default::default(),
             right_panel_resizing: false,

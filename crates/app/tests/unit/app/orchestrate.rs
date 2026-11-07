@@ -1661,8 +1661,14 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
     window
         .update(cx, |app, window, cx| {
             app.chats[1].cwd = "/tmp/proj-wt/feat".into();
-            let other =
-                app.board_add("Other".into(), String::new(), Col::Todo, "/tmp/x".into(), None);
+            let other = app.board_add(
+                "Other".into(),
+                String::new(),
+                Col::Todo,
+                "/tmp/x".into(),
+                None,
+                false,
+            );
             let mut call = |tool: &str, args: Value| {
                 let (reply, answer) = std::sync::mpsc::channel();
                 app.orchestrate(
@@ -1681,7 +1687,8 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
                 call("move_card", json!({"id": other, "col": "review"})),
                 Err(format!("card #{other} not found"))
             );
-            assert_eq!(app.cards.iter().find(|c| c.id == 2).unwrap().project, "/tmp/proj");
+            let mine = app.cards.iter().find(|c| c.id == 2).unwrap();
+            assert_eq!((mine.project.as_str(), mine.by_agent), ("/tmp/proj", true));
         })
         .unwrap();
 }
@@ -1701,6 +1708,7 @@ fn deleting_a_lead_unlinks_its_children_cards_and_handoffs(cx: &mut TestAppConte
                 Col::Doing,
                 "/tmp/proj".into(),
                 Some(10),
+                false,
             );
             app.delete_chat(1, window, cx);
             let kid = &app.chats[child_ix(app, kid)];

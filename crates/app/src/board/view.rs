@@ -9,7 +9,7 @@ use gpui_kit::{
     AnyElement, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*, px,
 };
 
-use super::model::{BoardCard, Col, preview};
+use super::model::{BoardCard, Col, preview, shown};
 use crate::app::{Chat, ChatApp, now_ms};
 use crate::project_page::model::{CardStatus, badge};
 use crate::project_page::view::{pill, status_tint};
@@ -89,8 +89,13 @@ impl ChatApp {
         let theme = cx.theme();
         let muted = theme.muted_foreground;
         let scope = project.as_ref().filter(|_| !self.board_all).map(|d| d.display().to_string());
-        let visible: Vec<&BoardCard> =
-            self.cards.iter().filter(|c| scope.as_ref().is_none_or(|p| c.project == *p)).collect();
+        let query = self.board_search.read(cx).value().to_string();
+        let visible: Vec<&BoardCard> = self
+            .cards
+            .iter()
+            .filter(|c| scope.as_ref().is_none_or(|p| c.project == *p))
+            .filter(|c| shown(c, &query, self.board_by))
+            .collect();
         let open = visible.iter().filter(|c| c.col != Col::Done).count();
         let (mut running, mut waiting) = (0, 0);
         for card in &visible {
@@ -132,6 +137,32 @@ impl ChatApp {
                 .child(tab("board-scope-project", "This project", !all, false))
                 .child(tab("board-scope-all", "All projects", all, true))
         });
+        let by = self.board_by;
+        let author_tab = |id: &'static str, label: &'static str, value: Option<bool>| {
+            aether_ui::button(id).ghost().xsmall().label(label).selected(by == value).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.board_by = value;
+                    cx.notify();
+                }),
+            )
+        };
+        let authors = h_flex()
+            .id("board-author")
+            .role(Role::TabList)
+            .aria_label("Cards added by")
+            .gap(px(2.))
+            .p(px(2.))
+            .corner(px(8.))
+            .bg(overlay(cx))
+            .child(author_tab("board-author-all", "All", None))
+            .child(author_tab("board-author-user", "Mine", Some(false)))
+            .child(author_tab("board-author-agent", "Agents", Some(true)));
+        let search = div().w(px(200.)).child(
+            field(&self.board_search)
+                .small()
+                .icon(gpui_kit::component::IconName::Search)
+                .aria_label("Search cards"),
+        );
         let header = h_flex()
             .px(px(20.))
             .pt(px(16.))
@@ -160,6 +191,8 @@ impl ChatApp {
                             .child(summary.join(" · ")),
                     ),
             )
+            .child(search)
+            .child(authors)
             .children(switch)
             .child(
                 aether_ui::button("board-new-card")
@@ -214,6 +247,7 @@ impl ChatApp {
         now: i64,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let query = self.board_search.read(cx).value().to_string();
         let theme = cx.theme();
         let (fg, muted, ring) = (theme.foreground, theme.muted_foreground, theme.ring);
         let (lane, hover) = (overlay(cx), overlay_strong(cx));
@@ -228,6 +262,7 @@ impl ChatApp {
             .cards
             .iter()
             .filter(|c| c.col == col && scope.is_none_or(|p| c.project == p))
+            .filter(|c| shown(c, &query, self.board_by))
             .collect();
         list.sort_by(|a, b| a.position.total_cmp(&b.position));
         let n = list.len();
