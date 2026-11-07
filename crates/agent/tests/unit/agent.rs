@@ -201,6 +201,49 @@ fn resumed_session_is_not_seeded() {
     assert_eq!(log.lock().unwrap()[0], "prompt:hi");
 }
 
+/// A CLI that loads history natively, like Codex's thread/inject_items.
+struct Native(UnboundedSender<Update>, Arc<StdMutex<Vec<String>>>);
+
+impl Driver for Native {
+    fn prompt(&mut self, text: String, _: Vec<Attachment>) {
+        self.1.lock().unwrap().push(format!("prompt:{text}"));
+        let _ = self.0.unbounded_send(Update::Final(text));
+    }
+    fn steer(&mut self, _: String, _: Vec<Attachment>) -> bool {
+        false
+    }
+    fn cancel(&mut self) {}
+    fn resumed(&self) -> bool {
+        false
+    }
+    fn seed_history(&mut self, context: &str, messages: &[(Role, String)]) -> bool {
+        let lines: Vec<&str> = messages.iter().map(|(_, t)| t.as_str()).collect();
+        self.1.lock().unwrap().push(format!("seed:{context}|{}", lines.join("|")));
+        true
+    }
+}
+
+#[test]
+fn a_cli_that_loads_history_gets_it_natively_and_a_bare_prompt() {
+    let log = Arc::new(StdMutex::new(Vec::new()));
+    let l = log.clone();
+    let factory: Factory = Arc::new(move |_, _, tx| Box::new(Native(tx, l.clone())));
+    let agent = Agent::with_factory(factory, Duration::from_secs(600)).unwrap();
+    let history = [(Role::User, "earlier".to_string()), (Role::Assistant, "sure".to_string())];
+    drain(
+        &agent,
+        agent.send("x", "hi".into(), vec![], &cli_settings(), "", vec![], &history, &chat("")),
+    );
+    let log = log.lock().unwrap();
+    assert!(
+        log[0].starts_with("seed:Earlier conversation in this chat: messages 0-1."),
+        "{}",
+        log[0]
+    );
+    assert!(log[0].ends_with("|[0] earlier|[1] sure"), "{}", log[0]);
+    assert_eq!(log[1], "prompt:hi");
+}
+
 #[test]
 fn access_change_respawns() {
     let (agent, _, spawns) = fake_agent(true, Duration::from_secs(600));

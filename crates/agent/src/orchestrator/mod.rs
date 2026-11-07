@@ -187,7 +187,7 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "read_history",
-            "description": "Read earlier messages of this chat in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context.",
+            "description": "Read earlier messages of this chat in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

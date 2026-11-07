@@ -222,7 +222,7 @@ impl CodexDriver {
         Ok(())
     }
 
-    fn request(&self, method: &str, params: Value, deadline: Instant) -> Result<Value, String> {
+    pub(super) fn request(&self, method: &str, params: Value, deadline: Instant) -> Result<Value, String> {
         let (tx, rx) = channel();
         let line = self.state.guard().rpc(method, params, Some(Call::Wait(tx)));
         self.write(&line);

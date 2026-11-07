@@ -135,6 +135,12 @@ pub trait Driver: Send {
     /// Asks `question` natively, off the main turn: the answer comes on `reply` as one
     /// `Update::Final` or an `Update::Error`, never on the driver's own stream. False,
     /// sending nothing, when the CLI can't.
+    /// Loads earlier messages as native history before the first prompt; `false` when the CLI
+    /// can't, and the caller puts them in the prompt instead.
+    fn seed_history(&mut self, _context: &str, _messages: &[(aether_core::Role, String)]) -> bool {
+        false
+    }
+
     fn side_question(&mut self, _question: &str, _reply: UnboundedSender<Update>) -> bool {
         false
     }

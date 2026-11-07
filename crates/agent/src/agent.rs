@@ -532,7 +532,7 @@ impl Agent {
     pub fn transcript(
         &self,
         agent: ExternalAgent,
-    ) -> impl Future<Output = Vec<(Role, String)>> + 'static {
+    ) -> impl Future<Output = Vec<external::Turn>> + 'static {
         let task = self.rt.spawn_blocking(move || external::transcript(&agent));
         async move { task.await.unwrap_or_default() }
     }
@@ -708,7 +708,14 @@ impl Agent {
                         let text = if seeded || history.is_empty() {
                             text
                         } else {
-                            context_prompt(&history, &text, opts.lead.is_some())
+                            let tool = opts.lead.is_some()
+                                && (provider != Provider::Antigravity || agy_has_aether());
+                            let (note, kept) = seed_parts(&history, tool);
+                            if driver.seed_history(&note, &kept) {
+                                text
+                            } else {
+                                context_prompt(&history, &text, tool)
+                            }
                         } + &attached_files_block(&by_path);
                         seeded = true;
                         orphan.store(false, Ordering::SeqCst);
@@ -1091,36 +1098,60 @@ pub fn budget_history(history: &[(Role, String)], limit: usize) -> (Vec<(Role, S
     (kept, omitted)
 }
 
-/// The transcript joined with the new message, so a fresh CLI session still sees the
-/// conversation. Messages keep their numbers; `read_history` (when `tool`) returns them in full.
+/// What a fresh CLI session gets of the earlier conversation: a note on what it covers and
+/// the kept messages, each prefixed with its number so read_history (when `tool`) can fetch it.
+fn seed_parts(history: &[(Role, String)], tool: bool) -> (String, Vec<(Role, String)>) {
+    let n = history.len();
+    let keep = budget_mask(history, HISTORY_BUDGET);
+    let omitted = keep.iter().filter(|k| !**k).count();
+    let mut note = format!("Earlier conversation in this chat: messages 0-{}", n.saturating_sub(1));
+    if omitted > 0 {
+        note.push_str(&format!(", {omitted} omitted to save space"));
+    }
+    note.push_str(". Tool calls and their output aren't included");
+    if tool {
+        note.push_str(
+            "; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls",
+        );
+    }
+    note.push_str(
+        ". Treat it as context only, not a new request; files on disk are the source of truth.",
+    );
+    let kept = history
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(i, (role, line))| (*role, format!("[{i}] {line}")))
+        .collect();
+    (note, kept)
+}
+
+/// The earlier conversation joined with the new message, for a CLI that can't load history.
 fn context_prompt(history: &[(Role, String)], text: &str, tool: bool) -> String {
     if history.is_empty() {
         return text.to_string();
     }
-    let n = history.len();
-    let keep = budget_mask(history, HISTORY_BUDGET);
-    let omitted = keep.iter().filter(|k| !**k).count();
-    let mut out = format!("Earlier conversation in this chat: messages 0-{}", n - 1);
-    if omitted > 0 {
-        out.push_str(&format!(", {omitted} omitted to save space"));
-    }
-    out.push_str(". Tool calls and their output aren't included");
-    if tool {
-        out.push_str(
-            "; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls",
-        );
-    }
-    out.push_str(". Treat it as context only, not a new request; files on disk are the source of truth.\n\n<conversation_so_far>\n");
-    for (i, (role, line)) in history.iter().enumerate().filter(|(i, _)| keep[*i]) {
+    let (note, kept) = seed_parts(history, tool);
+    let mut out = format!("{note}\n\n<conversation_so_far>\n");
+    for (role, line) in kept {
+        let (n, rest) = line.split_once(' ').unwrap_or(("", &line));
         let who = match role {
             Role::User => "User",
             Role::Assistant => "Assistant",
         };
-        out.push_str(&format!("[{i}] {who}: {line}\n"));
+        out.push_str(&format!("{n} {who}: {rest}\n"));
     }
     out.push_str("</conversation_so_far>\n\nYour task now:\n");
     out.push_str(text);
     out
+}
+
+/// Whether agy's global MCP config runs this Aether, so its sessions can reach read_history.
+fn agy_has_aether() -> bool {
+    use aether_driver::antigravity::{agy_aether_entry, agy_mcp_config};
+    let exe = std::env::current_exe().ok();
+    agy_aether_entry(&agy_mcp_config())
+        .is_some_and(|e| !e.disabled && exe.as_deref() == Some(Path::new(&e.command)))
 }
 
 /// Pre-flight check so a missing CLI binary surfaces as `Update::Error`

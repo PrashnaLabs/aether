@@ -2994,3 +2994,22 @@ fn fork_failures_are_errors_on_the_reply() {
     on_death(&mut s, "gone".into());
     assert_eq!(rx.try_recv().unwrap(), Update::Error("gone".into()));
 }
+
+#[test]
+fn injected_history_is_responses_api_messages() {
+    let items = super::inject_items(
+        "Earlier conversation",
+        &[
+            (aether_core::Role::User, "[0] hi".into()),
+            (aether_core::Role::Assistant, "[1] yo".into()),
+        ],
+    );
+    assert_eq!(
+        items,
+        json!([
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Earlier conversation"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "[0] hi"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "[1] yo"}]}
+        ])
+    );
+}

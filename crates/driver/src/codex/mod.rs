@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::channel::mpsc::UnboundedSender;
 use serde_json::{Value, json};
@@ -56,9 +56,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
 #[allow(unused_imports)]
 use std::sync::mpsc::channel;
-#[cfg(test)]
-#[allow(unused_imports)]
-use std::time::Instant;
 
 mod approve;
 mod events;
@@ -262,6 +259,21 @@ impl State {
     }
 }
 
+/// Responses API messages for thread/inject_items: the context note, then each message.
+pub(crate) fn inject_items(context: &str, messages: &[(aether_core::Role, String)]) -> Value {
+    let item = |role: &str, kind: &str, text: &str| {
+        json!({"type": "message", "role": role, "content": [{"type": kind, "text": text}]})
+    };
+    let mut items = vec![item("user", "input_text", context)];
+    for (role, text) in messages {
+        items.push(match role {
+            aether_core::Role::User => item("user", "input_text", text),
+            aether_core::Role::Assistant => item("assistant", "output_text", text),
+        });
+    }
+    items.into()
+}
+
 impl Driver for CodexDriver {
     fn prompt(&mut self, text: String, images: Vec<Attachment>) {
         let mut s = self.state.guard();
@@ -314,6 +326,16 @@ impl Driver for CodexDriver {
         let mut s = self.state.guard();
         (s.model, s.effort) = (model.to_string(), effort.to_string());
         true
+    }
+
+    fn seed_history(&mut self, context: &str, messages: &[(aether_core::Role, String)]) -> bool {
+        let thread = self.state.guard().thread.clone();
+        if thread.is_empty() {
+            return false;
+        }
+        let params = json!({"threadId": thread, "items": inject_items(context, messages)});
+        let deadline = Instant::now() + Duration::from_secs(10);
+        self.request("thread/inject_items", params, deadline).is_ok()
     }
 
     fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
