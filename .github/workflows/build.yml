@@ -81,4 +81,4 @@ jobs:
       - name: Check
         run: cargo check --locked --workspace
       - name: Test
-        run: cargo test --locked --workspace -- --skip hackernews::client
+        run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
