@@ -1685,3 +1685,29 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn deleting_a_lead_unlinks_its_children_cards_and_handoffs(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let kid = with_child(app, 10);
+            let kid_ix = child_ix(app, kid);
+            app.chats[kid_ix].lead_seen = Some(1);
+            app.chats[0].handoff_from = Some(10);
+            let card = app.board_add(
+                "Lead work".into(),
+                String::new(),
+                Col::Doing,
+                "/tmp/proj".into(),
+                Some(10),
+            );
+            app.delete_chat(1, window, cx);
+            let kid = &app.chats[child_ix(app, kid)];
+            assert_eq!((kid.parent, kid.lead_seen), (None, None));
+            assert_eq!(app.chats[0].handoff_from, None);
+            let card = app.cards.iter().find(|c| c.id == card).unwrap();
+            assert_eq!((card.chat, card.col), (None, Col::Doing));
+        })
+        .unwrap();
+}

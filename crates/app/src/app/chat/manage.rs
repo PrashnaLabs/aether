@@ -161,6 +161,21 @@ impl ChatApp {
         if let Some(store) = &self.store {
             store.delete(chat.id);
         }
+        self.board_unlink(chat.id);
+        for ix in 0..self.chats.len() {
+            let c = &mut self.chats[ix];
+            let parent = c.parent == Some(chat.id);
+            let source = c.handoff_from == Some(chat.id);
+            if parent || source {
+                if parent {
+                    (c.parent, c.lead_seen) = (None, None);
+                }
+                if source {
+                    c.handoff_from = None;
+                }
+                self.persist(ix);
+            }
+        }
         if let Some(root) = aether_core::attachments_dir() {
             let id = chat.id;
             cx.background_executor()

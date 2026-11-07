@@ -86,6 +86,19 @@ impl ChatApp {
         self.board_save(id);
     }
 
+    /// Keeps the cards of a deleted chat, without the link.
+    pub(crate) fn board_unlink(&mut self, chat: i64) {
+        let ids: Vec<i64> =
+            self.cards.iter().filter(|c| c.chat == Some(chat)).map(|c| c.id).collect();
+        for id in ids {
+            if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
+                card.chat = None;
+                card.updated_at = now_ms();
+            }
+            self.board_save(id);
+        }
+    }
+
     pub(crate) fn board_on_turn(&mut self, chat: i64, turn: Turn) {
         let moves: Vec<(i64, Col)> = self
             .cards
