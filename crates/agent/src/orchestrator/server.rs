@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,7 +10,7 @@ use aether_core::MutexExt;
 use futures::channel::mpsc::UnboundedSender;
 use serde_json::{Value, json};
 
-use super::{OrchCall, OrchPending, done_pending, try_queue};
+use super::{OrchCall, OrchPending, Stream, connect, done_pending, try_queue};
 
 const MAX_LINE: u64 = 64 * 1024;
 const MAX_CONNS: usize = 32;
@@ -25,12 +23,23 @@ pub(crate) fn listen(
     calls: UnboundedSender<OrchCall>,
     pending: OrchPending,
 ) -> std::io::Result<()> {
-    if UnixStream::connect(path).is_ok() {
+    if connect(path).is_ok() {
         return Err(std::io::Error::other("another Aether owns the socket"));
     }
     let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    #[cfg(unix)]
+    let listener = {
+        use std::os::unix::fs::PermissionsExt;
+        let listener = std::os::unix::net::UnixListener::bind(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        listener
+    };
+    #[cfg(windows)]
+    let listener = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        std::fs::write(path, listener.local_addr()?.to_string())?;
+        listener
+    };
     let conns = Arc::new(AtomicUsize::new(0));
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -50,7 +59,7 @@ pub(crate) fn listen(
 }
 
 fn serve(
-    mut stream: UnixStream,
+    mut stream: Stream,
     leads: &Leads,
     calls: &UnboundedSender<OrchCall>,
     pending: &OrchPending,
