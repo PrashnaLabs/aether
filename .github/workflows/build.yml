@@ -80,3 +80,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check
         run: cargo check --locked --workspace
+      - name: Test
+        run: cargo test --locked --workspace -- --skip hackernews::client
