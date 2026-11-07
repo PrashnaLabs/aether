@@ -414,6 +414,45 @@ fn codex_file_finds_rollout_by_thread_id() {
 }
 
 #[test]
+fn agy_transcript_decodes_user_and_planner_steps() {
+    let rows = [
+        // type 14, a fixed64 to skip, then 19 { 2: "hi" }
+        "14|080E1901020304050607089A010412026869",
+        // 19 { 3 { 1: "yo" } } fallback
+        "14|080E9A01061A040A02796F",
+        // planner 20 { 1: "hello" }
+        "15|080FA201070A0568656C6C6F",
+        // tool-only planner placeholder, and a truncated blob
+        "15|080F",
+        "15|A20107",
+    ]
+    .join("\n");
+    assert_eq!(
+        agy_transcript(&rows),
+        [
+            (Role::User, "hi".to_string()),
+            (Role::User, "yo".to_string()),
+            (Role::Assistant, "hello".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn agy_rows_reads_with_and_without_a_wal() {
+    let dir = std::env::temp_dir().join(format!("aether-agy-rows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("c2f4e33d.db");
+    let sql = "CREATE TABLE steps (idx INTEGER, step_type INTEGER, step_payload BLOB); \
+               INSERT INTO steps VALUES (0, 14, X'9A010412026869'), (1, 132, X'00');";
+    let made = std::process::Command::new("/usr/bin/sqlite3").arg(&db).arg(&sql).status();
+    assert!(made.unwrap().success());
+    assert_eq!(agy_rows(&db).as_deref(), Some("14|9A010412026869\n"));
+    std::fs::write(db.with_extension("db-wal"), "not a wal").unwrap();
+    assert_eq!(agy_transcript(&agy_rows(&db).unwrap()), [(Role::User, "hi".to_string())]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn opencode_transcript_keeps_text_parts() {
     let body = r#"{"data":[
             {"type":"assistant","id":"msg_3","content":[{"type":"tool","id":"d","name":"bash"}]},

@@ -603,10 +603,106 @@ pub fn transcript(a: &ExternalAgent) -> Vec<(Role, String)> {
                 }
             })
             .unwrap_or_default(),
+        Provider::Antigravity
+            if !a.session.is_empty()
+                && a.session.chars().all(|c| c.is_ascii_hexdigit() || c == '-') =>
+        {
+            let db = home_dir()
+                .join(".gemini/antigravity-cli/conversations")
+                .join(format!("{}.db", a.session));
+            agy_rows(&db).map(|rows| agy_transcript(&rows)).unwrap_or_default()
+        }
         _ => Vec::new(),
     };
     out.drain(..out.len().saturating_sub(200));
     out
+}
+
+/// mode=ro can't open these WAL dbs and immutable skips the WAL, so a live one is read from a copy.
+fn agy_rows(db: &Path) -> Option<String> {
+    let sql =
+        "SELECT step_type, hex(step_payload) FROM steps WHERE step_type IN (14, 15) ORDER BY idx";
+    let wal = db.with_extension("db-wal");
+    if !wal.exists() {
+        return run("/usr/bin/sqlite3", &[&format!("file:{}?immutable=1", db.display()), sql]);
+    }
+    let dir = std::env::temp_dir().join(format!("aether-agy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let copy = dir.join(db.file_name()?);
+    let rows = std::fs::copy(db, &copy)
+        .and_then(|_| std::fs::copy(&wal, copy.with_extension("db-wal")))
+        .ok()
+        .and_then(|_| run("/usr/bin/sqlite3", &[&copy.to_string_lossy(), sql]));
+    for ext in ["db", "db-wal", "db-shm"] {
+        let _ = std::fs::remove_file(copy.with_extension(ext));
+    }
+    rows
+}
+
+/// `step_type|hex(step_payload)` rows: 14 is the user (field 19.2, else 19.3.1), 15 the planner (20.1).
+fn agy_transcript(rows: &str) -> Vec<(Role, String)> {
+    rows.lines()
+        .filter_map(|line| {
+            let (kind, hex) = line.split_once('|')?;
+            let step = unhex(hex.trim())?;
+            let (role, text) = match kind {
+                "14" => {
+                    (Role::User, pb_path(&step, &[19, 2]).or_else(|| pb_path(&step, &[19, 3, 1]))?)
+                }
+                "15" => (Role::Assistant, pb_path(&step, &[20, 1])?),
+                _ => return None,
+            };
+            let text = String::from_utf8_lossy(text).trim().to_string();
+            (!text.is_empty()).then_some((role, text))
+        })
+        .collect()
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// First length-delimited protobuf field along `path`.
+fn pb_path<'a>(mut buf: &'a [u8], path: &[u64]) -> Option<&'a [u8]> {
+    for &want in path {
+        buf = pb_field(buf, want)?;
+    }
+    Some(buf)
+}
+
+fn pb_field(mut buf: &[u8], want: u64) -> Option<&[u8]> {
+    while !buf.is_empty() {
+        let key = varint(&mut buf)?;
+        let len = match key & 7 {
+            0 => {
+                varint(&mut buf)?;
+                continue;
+            }
+            1 => 8,
+            2 => usize::try_from(varint(&mut buf)?).ok()?,
+            5 => 4,
+            _ => return None,
+        };
+        let value = buf.get(..len)?;
+        buf = &buf[len..];
+        if key == (want << 3 | 2) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn varint(buf: &mut &[u8]) -> Option<u64> {
+    let mut v = 0;
+    for shift in (0..64).step_by(7) {
+        let (&b, rest) = buf.split_first()?;
+        *buf = rest;
+        v |= u64::from(b & 0x7f) << shift;
+        if b < 0x80 {
+            return Some(v);
+        }
+    }
+    None
 }
 
 fn claude_file(session: &str) -> Option<String> {
