@@ -469,9 +469,20 @@ pub enum Step {
     Unknown,
 }
 
+/// The chat continued in another agent after this message; labels are the models' display names.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Handoff {
+    pub from: Provider,
+    pub from_model: String,
+    pub to: Provider,
+    pub to_model: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<Handoff>,
     pub text: String,
     #[serde(deserialize_with = "lenient_steps")]
     pub steps: Vec<Step>,
@@ -529,6 +540,7 @@ impl Message {
         let text = text.into();
         Self {
             role: Role::User,
+            handoff: None,
             turn_start: text.len(),
             text,
             steps: Vec::new(),
@@ -558,6 +570,7 @@ impl Message {
     pub fn assistant() -> Self {
         Self {
             role: Role::Assistant,
+            handoff: None,
             text: String::new(),
             steps: Vec::new(),
             step_positions: Vec::new(),

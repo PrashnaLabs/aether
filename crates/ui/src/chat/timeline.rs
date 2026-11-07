@@ -44,6 +44,8 @@ pub enum Block {
     Request(usize),
     Fatal,
     Stopped,
+    /// After a message the chat was handed off from: the "Context handoff" divider.
+    Handoff,
     Fold,
     Changes,
     Live,
@@ -80,10 +82,13 @@ pub fn transcript_rows<'a>(
         .iter()
         .enumerate()
         .flat_map(|(message, m)| {
-            let blocks = match m.role {
+            let mut blocks = match m.role {
                 Role::User => vec![Block::User],
                 Role::Assistant => reply_blocks(m, &view(message)),
             };
+            if m.handoff.is_some() {
+                blocks.push(Block::Handoff);
+            }
             blocks.into_iter().map(move |block| TranscriptRow { message, block })
         })
         .collect()

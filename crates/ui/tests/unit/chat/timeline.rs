@@ -321,6 +321,22 @@ fn a_long_reply_becomes_one_row_per_block() {
 }
 
 #[test]
+fn handoff_divider_follows_the_last_handed_off_message() {
+    let mut first = Message::user("go");
+    first.handoff = Some(aether_core::Handoff {
+        from: aether_core::Provider::Claude,
+        from_model: "Sonnet".into(),
+        to: aether_core::Provider::Pi,
+        to_model: "Crouton Alpha".into(),
+    });
+    let never = |_: &str| false;
+    let rows =
+        transcript_rows(&[first, Message::user("hello")], &|_| view(false, false, false, &never));
+    let blocks: Vec<_> = rows.into_iter().map(|r| (r.message, r.block)).collect();
+    assert_eq!(blocks, [(0, Block::User), (0, Block::Handoff), (1, Block::User)]);
+}
+
+#[test]
 fn gaps_separate_messages_more_than_steps() {
     let at = |message, block| TranscriptRow { message, block };
     assert_eq!(gap_before(None, &at(0, Block::User)), 0.);

@@ -533,6 +533,49 @@ impl RenderOnce for StoppedMarker {
     }
 }
 
+/// Divider where a chat continued in another agent: "Context handoff · from → to".
+#[derive(IntoElement)]
+pub struct HandoffMarker(aether_core::Handoff);
+
+impl HandoffMarker {
+    pub fn new(handoff: aether_core::Handoff) -> Self {
+        Self(handoff)
+    }
+}
+
+impl RenderOnce for HandoffMarker {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let h = self.0;
+        let (muted, line) = (cx.theme().muted_foreground, cx.theme().border);
+        let rule = || div().flex_1().min_w(px(16.)).h(px(1.)).bg(line);
+        let agent = |p: Provider, model: String| {
+            h_flex()
+                .flex_none()
+                .gap(px(5.))
+                .items_center()
+                .child(crate::provider_icon(p).size(px(13.)))
+                .child(if model.is_empty() { p.label().to_string() } else { model })
+        };
+        quiet_row(cx)
+            .id("handoff-marker")
+            .role(gpui_kit::Role::Group)
+            .aria_label(SharedString::from(format!(
+                "Context handoff from {} to {}",
+                h.from.label(),
+                h.to.label()
+            )))
+            .py(px(10.))
+            .gap(px(10.))
+            .child(rule())
+            .child(Icon::new(Lucide::ArrowLeftRight).xsmall().text_color(muted))
+            .child(div().flex_none().child("Context handoff"))
+            .child(agent(h.from, h.from_model))
+            .child(Icon::new(Lucide::ArrowRight).xsmall().text_color(muted))
+            .child(agent(h.to, h.to_model))
+            .child(rule())
+    }
+}
+
 pub type OnHandoff = Rc<dyn Fn(Provider, &mut Window, &mut App)>;
 
 /// One "Continue in X" item per target, for the failed-reply card.

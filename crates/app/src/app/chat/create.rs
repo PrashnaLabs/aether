@@ -18,8 +18,6 @@ use crate::app::providers::initial_model;
 use crate::app::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued};
 use crate::attachments;
 
-const HANDOFF_DRAFT: &str = "Continue where the previous agent left off. You're in the same folder, so check the working tree for changes it already made.";
-
 const LIMIT_PHRASES: [&str; 15] = [
     "usage limit",
     "rate limit",
@@ -174,7 +172,7 @@ impl ChatApp {
             m.finish();
         }
         let handoff_from = handoff.is_some().then_some(source.id);
-        let (provider, provider_model, access, effort, title, draft) = match handoff {
+        let (provider, provider_model, access, effort, title) = match handoff {
             Some((target, model)) => {
                 if CLIS.contains(&target) && cwd.is_empty() {
                     cwd = self.settings.workspace_root.clone();
@@ -194,13 +192,22 @@ impl ChatApp {
                     fit_access(target, access),
                     String::new(),
                     format!("{title} \u{2192} {}", target.label()),
-                    HANDOFF_DRAFT.to_string(),
                 )
             }
-            None => {
-                (provider, provider_model, access, effort, format!("{title} copy"), String::new())
-            }
+            None => (provider, provider_model, access, effort, format!("{title} copy")),
         };
+        let label = |p: Provider, model: &str| {
+            let models = self.probes.get(&p).map_or(&[][..], |probe| &probe.models);
+            crate::app::sidebar::model_label(models, model)
+        };
+        if let Some(last) = messages.last_mut().filter(|_| handoff_from.is_some()) {
+            last.handoff = Some(aether_core::Handoff {
+                from: source.provider,
+                from_model: label(source.provider, &source.provider_model),
+                to: provider,
+                to_model: label(provider, &provider_model),
+            });
+        }
         let (project, worktree_path, worktree_branch) =
             (source.project.clone(), source.worktree_path.clone(), source.worktree_branch.clone());
         if let Some(r) = self.renaming
@@ -256,7 +263,7 @@ impl ChatApp {
                 worktree_info: None,
                 setup: None,
                 fresh_worktree: None,
-                draft,
+                draft: String::new(),
                 pending: Vec::new(),
                 edit_stash: None,
                 last_event_ms: 0,

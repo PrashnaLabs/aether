@@ -253,8 +253,13 @@ fn handoff_copies_the_transcript_to_a_fresh_chat_on_the_target(cx: &mut gpui_kit
             assert!(aether_core::AccessMode::for_provider(Provider::Codex).contains(&new.access));
             assert_ne!(new.id, source.id);
             assert_eq!(app.active, 1);
-            assert!(new.draft.starts_with("Continue where the previous agent left off."));
-            assert_eq!(app.composer.read(cx).value().as_ref(), new.draft);
+            assert!(new.draft.is_empty());
+            let marker = new.messages[1].handoff.as_ref().unwrap();
+            assert_eq!((marker.from, marker.to), (Provider::Claude, Provider::Codex));
+            assert_eq!(marker.to_model, "gpt-x");
+            assert!(
+                new.messages[0].handoff.is_none() && app.chats[0].messages[1].handoff.is_none()
+            );
         })
         .unwrap();
 }
