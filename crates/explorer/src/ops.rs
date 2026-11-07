@@ -45,8 +45,8 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 #[cfg(not(unix))]
-fn same_file(_: &Path, _: &Path) -> bool {
-    false
+fn same_file(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 /// Moves `path` to the Trash with `/usr/bin/trash` on macOS or `gio trash`
