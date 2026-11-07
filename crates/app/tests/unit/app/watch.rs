@@ -278,6 +278,7 @@ fn peek_scopes_session_actions_to_its_chat(cx: &mut TestAppContext) {
     visual.read(|cx| assert_eq!(app.read(cx).side_tab, tab));
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn peeked_terminal_is_skipped_by_the_drawer(cx: &mut TestAppContext) {
     let window = app_with_two_chats(cx);
@@ -325,6 +326,7 @@ fn fab_lifts_over_an_agent_chat_composer(cx: &mut TestAppContext) {
         .unwrap();
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn fullscreen_toggle_fills_the_window_with_the_tab_terminal(cx: &mut TestAppContext) {
     cx.background_executor.allow_parking();
@@ -364,6 +366,7 @@ fn fullscreen_toggle_fills_the_window_with_the_tab_terminal(cx: &mut TestAppCont
         .unwrap();
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn a_bang_message_runs_in_the_terminal_instead_of_the_chat(cx: &mut TestAppContext) {
     cx.background_executor.allow_parking();
@@ -1014,6 +1017,7 @@ fn the_banner_buttons_work_from_any_chat(cx: &mut TestAppContext) {
     window.update(&mut visual, |app, _, _| assert!(app.voice_note.is_none())).unwrap();
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn a_bang_draft_is_command_mode_only_where_it_can_run(cx: &mut TestAppContext) {
     let window = app_with_two_chats(cx);
@@ -1039,6 +1043,7 @@ fn a_bang_draft_is_command_mode_only_where_it_can_run(cx: &mut TestAppContext) {
         .unwrap();
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn a_bare_bang_waits_for_a_command_and_offers_no_suggestions(cx: &mut TestAppContext) {
     let window = app_with_two_chats(cx);
@@ -1057,6 +1062,7 @@ fn a_bare_bang_waits_for_a_command_and_offers_no_suggestions(cx: &mut TestAppCon
         .unwrap();
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn a_tool_tab_opens_in_the_agent_chats_terminal_only(cx: &mut TestAppContext) {
     cx.background_executor.allow_parking();
@@ -1220,6 +1226,7 @@ fn open_on_a_detached_chat_leaves_the_main_page(cx: &mut TestAppContext) {
         .unwrap();
 }
 
+#[cfg(unix)]
 #[gpui_kit::test]
 fn open_on_a_watched_terminal_shows_it(cx: &mut TestAppContext) {
     cx.background_executor.allow_parking();

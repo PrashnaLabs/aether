@@ -55,9 +55,18 @@ fn search_settings_matches_title_description_and_keywords() {
 
 #[test]
 fn search_settings_requires_all_tokens_and_ignores_whitespace() {
-    let matches = search_settings("  TERMINAL   font  ");
-    assert_eq!(matches.len(), 2);
-    assert!(matches.iter().all(|item| item.id.starts_with("terminal-font")));
+    #[cfg(unix)]
+    {
+        let matches = search_settings("  TERMINAL   font  ");
+        assert_eq!(matches.len(), 2);
+        assert!(matches.iter().all(|item| item.id.starts_with("terminal-font")));
+    }
+    #[cfg(not(unix))]
+    {
+        let matches = search_settings("  CHAT   layout  ");
+        assert_eq!(matches.len(), 1);
+        assert!(matches.iter().all(|item| item.id == "chat-layout"));
+    }
     assert!(search_settings("terminal keychain").is_empty());
     assert_eq!(search_settings("  ").len(), all_setting_items().len());
 }
@@ -66,7 +75,10 @@ fn search_settings_requires_all_tokens_and_ignores_whitespace() {
 fn tab_match_count_aggregates_per_category() {
     let matches = search_settings("font");
     assert_eq!(tab_match_count(SettingsTab::Appearance, &matches), 2);
+    #[cfg(unix)]
     assert_eq!(tab_match_count(SettingsTab::Terminal, &matches), 2);
+    #[cfg(not(unix))]
+    assert_eq!(tab_match_count(SettingsTab::Terminal, &matches), 0);
     assert_eq!(tab_match_count(SettingsTab::Account, &matches), 0);
 }
 

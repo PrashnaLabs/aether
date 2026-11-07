@@ -17,7 +17,7 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let dir = std::fs::canonicalize(dir).unwrap();
+        let dir = aether_core::canonicalize(&dir).unwrap();
         let project = dir.join("project");
         let notes = dir.join("notes");
         std::fs::create_dir_all(&project).unwrap();

@@ -8,7 +8,7 @@ fn ids(apps: &[OpenApp]) -> Vec<&str> {
 fn only_installed_apps_in_brief_order() {
     let dirs = [PathBuf::from("/A"), PathBuf::from("/B")];
     let have = ["/A/Zed.app", "/B/Cursor.app", "/B/Nova.app", "/A/Terminal.app", FINDER_PATH];
-    let apps = installed(&KNOWN, &dirs, |p| have.contains(&p.to_str().unwrap()));
+    let apps = installed(&KNOWN, &dirs, |p| have.iter().any(|h| Path::new(*h) == p));
     assert_eq!(ids(&apps), ["finder", "terminal", "cursor", "zed", "nova"]);
     assert_eq!(apps[2].bundle, PathBuf::from("/B/Cursor.app"));
 }
@@ -59,14 +59,38 @@ fn cache_goes_stale_when_icns_is_newer_or_png_empty() {
 
 #[test]
 fn hung_command_is_killed_at_the_deadline() {
-    let mut cmd = Command::new("/bin/sleep");
-    cmd.arg("30");
+    #[cfg(windows)]
+    let cmd = {
+        let mut cmd = Command::new("ping");
+        cmd.args(["-n", "30", "127.0.0.1"]);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let cmd = {
+        let mut cmd = Command::new("/bin/sleep");
+        cmd.arg("30");
+        cmd
+    };
     let start = Instant::now();
     assert!(run_with_deadline(cmd, Duration::from_millis(100)).is_none());
     assert!(start.elapsed() < Duration::from_secs(5));
-    let mut cmd = Command::new("/bin/echo");
-    cmd.arg("hi");
-    assert_eq!(run_with_deadline(cmd, Duration::from_secs(5)).unwrap(), b"hi\n");
+    #[cfg(windows)]
+    let expected = b"hi\r\n";
+    #[cfg(not(windows))]
+    let expected = b"hi\n";
+    #[cfg(windows)]
+    let cmd = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "echo", "hi"]);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let cmd = {
+        let mut cmd = Command::new("/bin/echo");
+        cmd.arg("hi");
+        cmd
+    };
+    assert_eq!(run_with_deadline(cmd, Duration::from_secs(5)).unwrap(), expected);
 }
 
 #[test]
@@ -111,7 +135,7 @@ fn aether_terminal_follows_finder_and_can_be_picked() {
 fn browsers_in_list_order_with_ids_apart_from_apps() {
     let dirs = [PathBuf::from("/A"), PathBuf::from("/B")];
     let have = ["/B/Zen.app", "/A/Safari.app", "/A/Arc.app", "/B/Google Chrome.app", FINDER_PATH];
-    let apps = installed(&BROWSERS, &dirs, |p| have.contains(&p.to_str().unwrap()));
+    let apps = installed(&BROWSERS, &dirs, |p| have.iter().any(|h| Path::new(*h) == p));
     assert_eq!(ids(&apps), ["safari", "chrome", "arc", "zen"]);
     // ids name the shared icon cache files
     assert!(BROWSERS.iter().all(|b| KNOWN.iter().all(|k| k.id != b.id)));
