@@ -114,7 +114,24 @@ impl ChatApp {
         self.fork_chat(ix, None, window, cx);
     }
 
+    /// Continues the chat in `provider` in place, from the error card, limit banner or /handoff.
     pub(crate) fn handoff_to(
+        &mut self,
+        ix: usize,
+        provider: Provider,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let model = initial_model(&self.settings, provider);
+        self.switch_agent(ix, provider, model, window, cx);
+        if ix == self.active {
+            self.sync_placeholder(window, cx);
+            self.focus_composer(window, cx);
+        }
+    }
+
+    /// A copy of the chat on `provider`, leaving the original as it is.
+    pub(crate) fn continue_in_new_chat(
         &mut self,
         ix: usize,
         provider: Provider,

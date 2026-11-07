@@ -152,7 +152,7 @@ pub(super) fn chat_menu(
         Some((targets, on_pick)) => {
             let id = chat.id;
             let icon = Some(Icon::new(Lucide::Forward));
-            menu.submenu_with_icon(icon, "Hand off to", window, cx, move |mut menu, _, _| {
+            menu.submenu_with_icon(icon, "Continue in new chat", window, cx, move |mut menu, _, _| {
                 for &target in &targets {
                     let on_pick = on_pick.clone();
                     menu = menu.item(

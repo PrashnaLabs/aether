@@ -763,7 +763,7 @@ impl ChatApp {
                 move |id, target, window, cx| {
                     handoff.update(cx, |this, cx| {
                         if let Some(ix) = this.chats.iter().position(|c| c.id == id) {
-                            this.handoff_to(ix, target, window, cx);
+                            this.continue_in_new_chat(ix, target, window, cx);
                         }
                     })
                 },

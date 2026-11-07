@@ -38,7 +38,7 @@ pub(super) fn fit_access(provider: Provider, current: AccessMode) -> AccessMode 
 }
 
 /// The visible transcript, which seeds a fresh model session.
-fn history(messages: &[Message]) -> Vec<(Role, String)> {
+pub(super) fn history(messages: &[Message]) -> Vec<(Role, String)> {
     messages.iter().map(|m| (m.role, plain_text(m))).filter(|(_, text)| !text.is_empty()).collect()
 }
 

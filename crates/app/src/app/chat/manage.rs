@@ -379,7 +379,19 @@ impl ChatApp {
         if chat.lead || chat.provider != Provider::Antigravity {
             return self.set_lead(ix, !chat.lead, window, cx);
         }
-        let (id, provider) = (chat.id, chat.provider);
+        self.agy_lead_check(chat.id, true, window, cx);
+    }
+
+    /// For an Antigravity lead: asks to register Aether in agy's MCP config when it isn't,
+    /// else turns lead on when `turn_on`.
+    pub(crate) fn agy_lead_check(
+        &mut self,
+        id: i64,
+        turn_on: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let provider = Provider::Antigravity;
         let check = cx.background_spawn(async move {
             let exe = std::env::current_exe().ok();
             needs_agy_registration(
@@ -396,7 +408,7 @@ impl ChatApp {
                 };
                 if needs {
                     this.confirm_agy_registration(id, window, cx);
-                } else {
+                } else if turn_on {
                     this.set_lead(ix, true, window, cx);
                 }
             })
@@ -669,6 +681,8 @@ impl ChatApp {
             return div().into_any_element();
         };
         let chat = &self.chats[self.active];
+        let targets =
+            if m.handoff.is_some() { vec![] } else { self.handoff_targets(Some(chat.provider)) };
         let (restart, retry, handoff) = (view.clone(), view.clone(), view.clone());
         let copy = error.clone();
         FatalCard::new(format!("{}-{msg}-fatal", chat.session), error)
@@ -688,7 +702,7 @@ impl ChatApp {
                 cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
             })))
             .handoff(
-                self.handoff_targets(Some(chat.provider)),
+                targets,
                 Rc::new(move |target, window, cx| {
                     handoff.update(cx, |this, cx| this.handoff_to(this.active, target, window, cx));
                 }),

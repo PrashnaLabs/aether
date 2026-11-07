@@ -551,7 +551,7 @@ impl ChatSidebar {
         self
     }
 
-    /// Adds "Hand off to" to the menus of chats in `chats` (id, agent), listing `targets` but that agent.
+    /// Adds "Continue in new chat" to the menus of chats in `chats` (id, agent), listing `targets` but that agent.
     pub fn handoff(
         mut self,
         targets: Vec<Provider>,

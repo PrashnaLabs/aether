@@ -330,11 +330,92 @@ impl ChatApp {
         {
             return;
         }
-        self.pick_provider(provider, cx);
-        if self.chats[self.active].provider == provider {
+        let ix = self.active;
+        if !self.chats[ix].messages.is_empty() && self.chats[ix].provider != provider {
+            self.switch_agent(ix, provider, stored_model(provider, &model), window, cx);
+        } else {
+            self.pick_provider(provider, cx);
+        }
+        if self.chats[ix].provider == provider {
             self.pick_model(model, window, cx);
         }
         self.sync_placeholder(window, cx);
+    }
+
+    /// Moves a chat with history to another agent in place: the next message starts a fresh
+    /// session there, seeded with the conversation, after a "Context handoff" divider.
+    pub(crate) fn switch_agent(
+        &mut self,
+        ix: usize,
+        provider: Provider,
+        model: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let chat = &self.chats[ix];
+        if chat.provider == provider
+            || chat.busy()
+            || chat.worktree_job.is_some()
+            || self.locked(ix)
+        {
+            return;
+        }
+        if super::CLIS.contains(&provider) && chat.cwd.is_empty() {
+            if self.settings.workspace_root.is_empty() {
+                use gpui_kit::component::WindowExt;
+                let note = gpui_kit::component::notification::Notification::error(
+                    "Pick a project folder or set a workspace root first.",
+                );
+                return window.push_notification(note, cx);
+            }
+            self.chats[ix].cwd = self.settings.workspace_root.clone();
+        }
+        let label = |p: Provider, m: &str| {
+            let models = self.probes.get(&p).map_or(&[][..], |probe| &probe.models);
+            super::sidebar::model_label(models, m)
+        };
+        let chat = &self.chats[ix];
+        let (from, from_model) = match chat.messages.last().and_then(|m| m.handoff.clone()) {
+            Some(h) => (h.from, h.from_model),
+            None => (chat.provider, label(chat.provider, &chat.provider_model)),
+        };
+        let handoff = aether_core::Handoff {
+            from,
+            from_model,
+            to: provider,
+            to_model: label(provider, &model),
+        };
+        let id = chat.id;
+        self.agent.close_session(&id.to_string());
+        self.drop_side_cards(id);
+        let session = (provider == Provider::OpenRouter).then(|| self.next_session_id());
+        let chat = &mut self.chats[ix];
+        if let Some(last) = chat.messages.last_mut() {
+            last.handoff = Some(handoff);
+        }
+        chat.provider = provider;
+        chat.provider_model = model;
+        chat.access = super::chat::fit_access(provider, chat.access);
+        chat.effort.clear();
+        chat.cli_session.clear();
+        chat.external_pid = None;
+        if let Some(session) = session {
+            chat.session = session.clone();
+            let hist = super::chat::history(&chat.messages);
+            let seed = aether_agent::budget_history(&hist, aether_agent::HISTORY_BUDGET).0;
+            if let Err(e) = self.agent.fork_session(&session, &seed) {
+                eprintln!("aether: couldn't seed the OpenRouter session: {e}");
+            }
+        }
+        let lead = chat.lead;
+        self.persist(ix);
+        self.update_settings(cx, |s| s.provider = provider);
+        self.sync_selector(cx);
+        self.reset_rows(cx);
+        if lead && provider == Provider::Antigravity {
+            self.agy_lead_check(id, false, window, cx);
+        }
+        cx.notify();
     }
 
     /// Sets the active chat's model and makes it its provider's default.
@@ -375,7 +456,7 @@ impl ChatApp {
             return;
         }
         let chat = &mut self.chats[self.active];
-        if chat.provider_locked() || chat.provider == provider {
+        if !chat.messages.is_empty() || chat.provider == provider {
             return;
         }
         chat.provider = provider;

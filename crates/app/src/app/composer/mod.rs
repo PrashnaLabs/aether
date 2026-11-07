@@ -237,7 +237,8 @@ impl ChatApp {
                     ),
                 )
         });
-        let limit = (!busy && chat.messages.last().is_some_and(limit_hit))
+        let stuck = chat.messages.last().is_some_and(|m| limit_hit(m) && m.handoff.is_none());
+        let limit = (!busy && stuck)
             .then(|| self.handoff_targets(Some(chat.provider)))
             .filter(|targets| !targets.is_empty())
             .map(|targets| {
@@ -295,7 +296,6 @@ impl ChatApp {
             .map(|msg| self.live_row(msg, &self.session_handle(cx)));
         let switching = self.switching_folder(&chat_cwd(chat, &self.settings.workspace_root));
         let selector = AgentSelector::new(&self.selector)
-            .locked(chat.provider_locked())
             .resting(resting)
             .disabled(busy || chat.worktree_job.is_some() || chat.setup.is_some() || switching);
         let footer = FooterChips::for_provider(chat.provider);

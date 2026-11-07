@@ -412,3 +412,98 @@ fn limit_banner_shows_for_an_idle_chat_whose_last_reply_hit_a_limit(
     });
     assert!(visual.debug_bounds("composer-handoff-limit").is_none());
 }
+
+#[gpui_kit::test]
+fn switching_agents_keeps_the_chat_and_marks_the_handoff(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut chat = chat_with("Fix bug", &["hi", "done"]);
+            chat.provider = Provider::Claude;
+            chat.provider_model = "sonnet".into();
+            chat.cwd = "/w/a".into();
+            chat.access = aether_core::AccessMode::Full;
+            chat.effort = "high".into();
+            chat.cli_session = "claude-ses".into();
+            app.chats = vec![chat];
+            app.active = 0;
+            app.switch_agent(0, Provider::Codex, "gpt-x".into(), window, cx);
+            let chat = &app.chats[0];
+            assert_eq!(app.chats.len(), 1);
+            assert_eq!((chat.provider, chat.provider_model.as_str()), (Provider::Codex, "gpt-x"));
+            assert!(chat.cli_session.is_empty() && chat.effort.is_empty());
+            assert_eq!(chat.title, "Fix bug");
+            assert!(aether_core::AccessMode::for_provider(Provider::Codex).contains(&chat.access));
+            let h = chat.messages[1].handoff.clone().unwrap();
+            assert_eq!(
+                (h.from, h.from_model.as_str(), h.to, h.to_model.as_str()),
+                (Provider::Claude, "sonnet", Provider::Codex, "gpt-x")
+            );
+            let session = chat.session.clone();
+            app.switch_agent(0, Provider::OpenRouter, "x/y".into(), window, cx);
+            let h = app.chats[0].messages[1].handoff.clone().unwrap();
+            assert_eq!(
+                (h.from, h.to),
+                (Provider::Claude, Provider::OpenRouter),
+                "a switch with no new messages keeps the first source"
+            );
+            assert_ne!(
+                app.chats[0].session, session,
+                "OpenRouter gets a seeded session of its own"
+            );
+            app.chats[0].worktree_job = Some(crate::app::WorktreeJob::Switching);
+            app.switch_agent(0, Provider::Pi, String::new(), window, cx);
+            assert_eq!(
+                app.chats[0].provider,
+                Provider::OpenRouter,
+                "blocked while the worktree changes"
+            );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn handoff_switches_in_place_and_the_sidebar_copies(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut chat = chat_with("Fix bug", &["hi", "done"]);
+            chat.provider = Provider::Claude;
+            chat.cwd = "/w/a".into();
+            app.chats = vec![chat];
+            app.active = 0;
+            app.handoff_to(0, Provider::Codex, window, cx);
+            assert_eq!(app.chats.len(), 1);
+            assert_eq!(app.chats[0].provider, Provider::Codex);
+            assert!(app.chats[0].messages[1].handoff.is_some());
+            app.continue_in_new_chat(0, Provider::Pi, window, cx);
+            assert_eq!(app.chats.len(), 2);
+            assert_eq!(
+                (app.chats[0].provider, app.chats[1].provider),
+                (Provider::Codex, Provider::Pi)
+            );
+        })
+        .unwrap();
+}

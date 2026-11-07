@@ -310,11 +310,6 @@ impl Chat {
         self.cancel.is_some() || self.queue.iter().any(|q| q.delivering)
     }
 
-    /// Provider can change only before the first message.
-    fn provider_locked(&self) -> bool {
-        !self.messages.is_empty() || self.cancel.is_some()
-    }
-
     /// Kind of reply the pending request needs, for the project page.
     pub(crate) fn wait_label(&self) -> &'static str {
         match self.messages.last().and_then(Message::pending_request).map(|r| &r.ask) {
