@@ -152,3 +152,11 @@ fn only_http_urls_go_to_another_browser() {
     }
     assert!(open_url(Path::new("/Applications/Safari.app"), "-a").is_err());
 }
+
+#[cfg(windows)]
+#[test]
+fn explorer_is_always_listed_first_on_windows() {
+    let apps = discover(&KNOWN, Path::new("C:\\"));
+    assert_eq!((apps[0].id, apps[0].name), (FINDER_ID, "File Explorer"));
+    assert!(apps[0].bundle.exists(), "{:?}", apps[0].bundle);
+}
