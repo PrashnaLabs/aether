@@ -47,7 +47,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Test
-        run: cargo test --locked --workspace -- --skip hackernews::client
+        run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
       - name: Validate packaging
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Validate desktop entry
