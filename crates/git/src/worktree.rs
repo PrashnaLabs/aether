@@ -732,11 +732,12 @@ fn free_slug(slug: &str, taken: impl Fn(&str) -> bool) -> Option<String> {
 pub fn repo_dir(toplevel: &Path) -> String {
     let name = toplevel.file_name().map_or_else(|| "repo".into(), |n| n.to_string_lossy());
     // FNV-1a: stable across Rust releases, unlike DefaultHasher
-    let hash = toplevel
-        .as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193));
+    let bytes = toplevel.as_os_str().as_encoded_bytes();
+    // git prints C:/x, std prints C:\x: one repo must hash once
+    #[cfg(windows)]
+    let bytes: Vec<u8> = bytes.iter().map(|&b| if b == b'\\' { b'/' } else { b }).collect();
+    let hash =
+        bytes.iter().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193));
     format!("{name}-{hash:08x}")
 }
 
