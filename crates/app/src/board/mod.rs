@@ -69,6 +69,12 @@ impl ChatApp {
         self.board_save(id);
     }
 
+    pub(crate) fn board_toggle_pick(&mut self, id: i64) {
+        if !self.board_picks.remove(&id) {
+            self.board_picks.insert(id);
+        }
+    }
+
     pub(crate) fn board_delete(&mut self, id: i64) {
         self.cards.retain(|c| c.id != id);
         if let Some(store) = &self.store {

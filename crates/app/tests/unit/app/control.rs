@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::*;
 use crate::app::{Agent, Settings, WorktreeJob, chat_with};
+use crate::board::model::Col;
 
 #[test]
 fn ages_parse_and_reject_garbage() {
@@ -152,15 +153,6 @@ fn approved_archive_rechecks_then_tells_the_lead(cx: &mut TestAppContext) {
             assert!(
                 told.contains("changed since you asked (running, pinned or gone): “fresh” (24)")
             );
-            app.decline_bulk(10, Bulk::Delete, 3, window, cx);
-            assert!(
-                app.chats[0]
-                    .queue
-                    .last()
-                    .unwrap()
-                    .text
-                    .ends_with("declined to delete 3 chat(s). Nothing changed.")
-            );
             assert_eq!(app.chats.len(), 6);
         })
         .unwrap();
@@ -208,6 +200,58 @@ fn nothing_to_archive_answers_without_a_dialog(cx: &mut TestAppContext) {
                 .unwrap();
             assert_eq!(reply["status"], "nothing_to_do");
             assert_eq!(reply["skipped"].as_array().unwrap().len(), 2);
+        })
+        .unwrap();
+}
+
+#[test]
+fn card_filters_parse_and_name_bad_fields() {
+    let f = parse_card_filter(
+        &json!({"filter": {"ids": [3], "col": "Review", "project": "all", "added_by": "agent", "search": " parser "}}),
+    )
+    .unwrap();
+    assert_eq!(f.ids, Some(vec![3]));
+    assert_eq!(f.col, Some(Col::Review));
+    assert_eq!((f.by_agent, f.search.as_str()), (Some(true), "parser"));
+    let err = |args| parse_card_filter(&args).unwrap_err();
+    assert!(err(json!({"filter": {"col": "later"}})).contains("unknown \"col\""));
+    assert!(err(json!({"filter": {"added_by": "bot"}})).contains("unknown \"added_by\""));
+}
+
+#[gpui_kit::test]
+fn card_delete_scopes_to_the_lead_and_reports(cx: &mut TestAppContext) {
+    let window = app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let other = app.board_add(
+                "Other".into(),
+                String::new(),
+                Col::Todo,
+                "/tmp/other".into(),
+                None,
+                false,
+            );
+            let reply =
+                app.delete_cards(0, &json!({"filter": {"project": "proj"}}), window, cx).unwrap();
+            assert_eq!(reply["status"], "nothing_to_do");
+            let mine = app.board_add(
+                "Mine".into(),
+                String::new(),
+                Col::Review,
+                "/tmp/proj".into(),
+                None,
+                true,
+            );
+            app.board_picks.insert(mine);
+            app.board_selected = Some(mine);
+            app.finish_card_delete(&[mine, 999], Some(10), window, cx);
+            assert_eq!(app.cards.iter().map(|c| c.id).collect::<Vec<_>>(), [other]);
+            assert!(app.board_picks.is_empty() && app.board_selected.is_none());
+            let told = &app.chats[0].queue.last().unwrap().text;
+            assert_eq!(
+                told,
+                &format!("[Aether] The user approved. Deleted 1 card(s): #{mine} “Mine”")
+            );
         })
         .unwrap();
 }

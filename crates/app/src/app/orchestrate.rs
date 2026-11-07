@@ -272,6 +272,7 @@ impl ChatApp {
                 "update_chat" => self.update_chat(&call.args, cx),
                 "stop_chat" => self.stop_any_chat(ix, &call.args, cx),
                 "open_chat" => self.open_chat_tool(&call.args, window, cx),
+                "delete_cards" => self.delete_cards(ix, &call.args, window, cx),
                 tool => Err(format!(r#"unknown tool "{tool}""#)),
             },
         };

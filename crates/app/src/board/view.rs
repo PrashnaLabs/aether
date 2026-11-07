@@ -4,9 +4,12 @@ use std::path::{Path, PathBuf};
 use aether_ui::{field, field_area, overlay, overlay_strong, provider_icon};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
-use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme, Icon, Selectable, Sizable, checkbox::Checkbox, h_flex, v_flex,
+};
 use gpui_kit::{
-    AnyElement, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*, px,
+    AnyElement, ClickEvent, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*,
+    px,
 };
 
 use super::model::{BoardCard, Col, preview, shown};
@@ -206,6 +209,8 @@ impl ChatApp {
                         this.board_new_card(Col::Todo, window, cx)
                     })),
             );
+        let all: Vec<i64> = visible.iter().map(|c| c.id).collect();
+        let bulk = self.board_bulk_bar(all, cx);
         let empty = visible.is_empty();
         let columns = Col::ALL.map(|col| self.board_column(col, scope.as_deref(), empty, now, cx));
         let detail = self.board_detail(now, cx);
@@ -214,6 +219,7 @@ impl ChatApp {
             .flex_1()
             .min_h_0()
             .child(header)
+            .children(bulk)
             .child(
                 h_flex()
                     .flex_1()
@@ -361,6 +367,70 @@ impl ChatApp {
             )
     }
 
+    fn board_bulk_bar(&self, all: Vec<i64>, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let picked: Vec<i64> =
+            all.iter().copied().filter(|id| self.board_picks.contains(id)).collect();
+        if picked.is_empty() {
+            return None;
+        }
+        let n = picked.len();
+        let select_all = (n < all.len()).then(|| {
+            aether_ui::button("board-pick-all").ghost().xsmall().label("Select all").on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.board_picks.extend(all.iter().copied());
+                    cx.notify();
+                }),
+            )
+        });
+        let delete = aether_ui::button("board-pick-delete")
+            .small()
+            .h(px(28.))
+            .danger()
+            .icon(Lucide::Trash)
+            .label("Delete")
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.confirm_delete_cards(picked.clone(), None, window, cx)
+            }));
+        let clear = aether_ui::button("board-pick-clear")
+            .ghost()
+            .xsmall()
+            .icon(Lucide::X)
+            .accessibility_label("Clear selection")
+            .tooltip("Clear selection")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.board_picks.clear();
+                cx.notify();
+            }));
+        let theme = cx.theme();
+        Some(
+            h_flex()
+                .id("board-bulk")
+                .role(Role::Toolbar)
+                .aria_label("Selected cards")
+                .mx(px(16.))
+                .mb(px(10.))
+                .gap(px(6.))
+                .items_center()
+                .p(px(6.))
+                .corner(px(9.))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .child(
+                    div()
+                        .px(px(4.))
+                        .text_size(px(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(format!("{n} selected")),
+                )
+                .children(select_all)
+                .child(div().flex_1())
+                .child(delete)
+                .child(clear)
+                .into_any_element(),
+        )
+    }
+
     fn board_card(
         &self,
         card: &BoardCard,
@@ -371,7 +441,9 @@ impl ChatApp {
         let (fg, muted, ring) = (theme.foreground, theme.muted_foreground, theme.ring);
         let (hover, pressed) = (muted.opacity(0.35), overlay_strong(cx));
         let selected = self.board_selected == Some(card.id);
-        let border = if selected { ring } else { theme.border };
+        let picked = self.board_picks.contains(&card.id);
+        let picking = !self.board_picks.is_empty();
+        let border = if selected || picked { ring } else { theme.border };
         let done = card.col == Col::Done;
         let status = self.board_pill(card, now, cx);
         let chat = self.board_chat(card);
@@ -397,8 +469,28 @@ impl ChatApp {
                     .children(status)
                     .children(age.map(|a| div().flex_none().child(a)))
             });
+        let group = SharedString::from(format!("board-card-{id}"));
+        let pick = div()
+            .id(("board-card-pick-slot", id as u64))
+            .absolute()
+            .top(px(8.))
+            .right(px(8.))
+            .when(!picking, |d| d.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)))
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .child(
+                Checkbox::new(("board-card-pick", id as u64))
+                    .checked(picked)
+                    .tab_stop(false)
+                    .aria_label(SharedString::from(format!("Select {}", card.title)))
+                    .on_click(cx.listener(move |this, _: &bool, _, cx| {
+                        this.board_toggle_pick(id);
+                        cx.notify();
+                    })),
+            );
         v_flex()
             .id(("board-card", id as u64))
+            .group(group)
+            .relative()
             .role(Role::Button)
             .tab_index(0)
             .aria_label(card.title.clone())
@@ -429,6 +521,7 @@ impl ChatApp {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(if done { muted } else { fg })
                     .line_clamp(2)
+                    .pr(px(18.))
                     .child(card.title.clone()),
             )
             .when(!card.body.trim().is_empty() && !done, |d| {
@@ -442,7 +535,16 @@ impl ChatApp {
                 )
             })
             .children(footer)
-            .on_click(cx.listener(move |this, _, window, cx| this.board_pick(id, window, cx)))
+            .child(pick)
+            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                let m = ev.modifiers();
+                if m.platform || m.shift || !this.board_picks.is_empty() {
+                    this.board_toggle_pick(id);
+                    cx.notify();
+                } else {
+                    this.board_pick(id, window, cx);
+                }
+            }))
     }
 
     fn board_detail(&self, now: i64, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
@@ -546,10 +648,8 @@ impl ChatApp {
             .h(px(28.))
             .icon(Lucide::Trash)
             .label("Delete card")
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.board_delete(id);
-                this.board_selected = None;
-                cx.notify();
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.confirm_delete_cards(vec![id], None, window, cx)
             }));
         Some(
             v_flex()

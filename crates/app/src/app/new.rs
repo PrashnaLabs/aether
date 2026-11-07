@@ -618,6 +618,7 @@ impl ChatApp {
             board_all: false,
             board_search,
             board_by: None,
+            board_picks: HashSet::new(),
             archive_picks: Default::default(),
             project_picks: Default::default(),
             right_panel_resizing: false,

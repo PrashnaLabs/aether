@@ -9,6 +9,7 @@ use gpui_kit::{Context, SharedString, Window};
 use serde_json::{Value, json};
 
 use super::{Bulk, CLIS, Chat, ChatApp, Delivery, now_ms, project_dir};
+use crate::board::model::{Col, shown};
 
 /// Which chats a chat-control tool acts on.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -255,45 +256,20 @@ impl ChatApp {
             _ => ("Archive", "They move to the Archive. You can unarchive them any time."),
         };
         let text = format!("{}\n\n{note}", names.join("\n"));
-        let view = cx.entity();
-        let answered = Rc::new(Cell::new(false));
-        aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
-            let (ok_view, no_view, close_view) = (view.clone(), view.clone(), view.clone());
-            let (ok_seen, no_seen, close_seen) =
-                (answered.clone(), answered.clone(), answered.clone());
-            let (ids, f) = (ids.clone(), f.clone());
-            alert
-                .confirm()
-                .title(SharedString::from(format!(
-                    "“{lead_title}” wants to {} {n} {noun}",
-                    verb.to_lowercase()
-                )))
-                .description(SharedString::from(text.clone()))
-                .ok_text(SharedString::from(format!("{verb} {n}")))
-                .ok_variant(if bulk == Bulk::Delete {
-                    ButtonVariant::Danger
-                } else {
-                    ButtonVariant::Primary
-                })
-                .on_ok(move |_, window, cx| {
-                    ok_seen.set(true);
-                    let (ids, f) = (ids.clone(), f.clone());
-                    ok_view
-                        .update(cx, |this, cx| this.finish_bulk(lead_id, bulk, f, ids, window, cx));
-                    true
-                })
-                .on_cancel(move |_, window, cx| {
-                    no_seen.set(true);
-                    no_view.update(cx, |this, cx| this.decline_bulk(lead_id, bulk, n, window, cx));
-                    true
-                })
-                .on_close(move |_, window, cx| {
-                    if !close_seen.replace(true) {
-                        close_view
-                            .update(cx, |this, cx| this.decline_bulk(lead_id, bulk, n, window, cx));
-                    }
-                })
-        });
+        let title = format!("“{lead_title}” wants to {} {n} {noun}", verb.to_lowercase());
+        let declined = format!(
+            "[Aether] The user declined to {} {n} chat(s). Nothing changed.",
+            verb.to_lowercase()
+        );
+        self.ask_user(
+            (title, text, format!("{verb} {n}"), bulk == Bulk::Delete),
+            move |this, window, cx| {
+                this.finish_bulk(lead_id, bulk, f.clone(), ids.clone(), window, cx)
+            },
+            move |this, window, cx| this.tell_lead(lead_id, declined.clone(), window, cx),
+            window,
+            cx,
+        );
         Ok(reply)
     }
 
@@ -330,20 +306,48 @@ impl ChatApp {
         self.tell_lead(lead_id, text, window, cx);
     }
 
-    fn decline_bulk(
+    /// Confirm dialog (`title`, `text`, ok label, danger). Closing it counts as `no`.
+    pub(crate) fn ask_user(
         &mut self,
-        lead_id: i64,
-        bulk: Bulk,
-        n: usize,
+        (title, text, ok, danger): (String, String, String, bool),
+        yes: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        no: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let verb = if bulk == Bulk::Delete { "delete" } else { "archive" };
-        let text = format!("[Aether] The user declined to {verb} {n} chat(s). Nothing changed.");
-        self.tell_lead(lead_id, text, window, cx);
+        let view = cx.entity();
+        let (yes, no) = (Rc::new(yes), Rc::new(no));
+        let answered = Rc::new(Cell::new(false));
+        aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
+            let answer = |pick: Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>)>| {
+                let (view, answered) = (view.clone(), answered.clone());
+                move |window: &mut Window, cx: &mut gpui_kit::App| {
+                    if !answered.replace(true) {
+                        view.update(cx, |this, cx| pick(this, window, cx));
+                    }
+                }
+            };
+            let (on_yes, on_no, on_close) =
+                (answer(yes.clone()), answer(no.clone()), answer(no.clone()));
+            alert
+                .confirm()
+                .title(SharedString::from(title.clone()))
+                .description(SharedString::from(text.clone()))
+                .ok_text(SharedString::from(ok.clone()))
+                .ok_variant(if danger { ButtonVariant::Danger } else { ButtonVariant::Primary })
+                .on_ok(move |_, window, cx| {
+                    on_yes(window, cx);
+                    true
+                })
+                .on_cancel(move |_, window, cx| {
+                    on_no(window, cx);
+                    true
+                })
+                .on_close(move |_, window, cx| on_close(window, cx))
+        });
     }
 
-    fn tell_lead(
+    pub(crate) fn tell_lead(
         &mut self,
         lead_id: i64,
         text: String,
@@ -432,6 +436,169 @@ impl ChatApp {
         let id = self.chats[ix].id;
         self.board_open_chat(id, window, cx);
         Ok(json!({"opened": id}))
+    }
+}
+
+/// Which cards delete_cards takes; `project` `None` is the lead's own.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CardFilter {
+    pub ids: Option<Vec<i64>>,
+    pub col: Option<Col>,
+    pub project: Option<String>,
+    pub by_agent: Option<bool>,
+    pub search: String,
+}
+
+pub(crate) fn parse_card_filter(args: &Value) -> Result<CardFilter, String> {
+    let f = &args["filter"];
+    let text = |k: &str| f[k].as_str().map(str::trim).filter(|s| !s.is_empty());
+    let ids = match &f["ids"] {
+        Value::Null => None,
+        Value::Array(a) => Some(
+            a.iter()
+                .map(|v| v.as_i64().or_else(|| v.as_str()?.trim().parse().ok()))
+                .collect::<Option<Vec<i64>>>()
+                .ok_or(r#""ids" must be card ids"#)?,
+        ),
+        _ => return Err(r#""ids" must be a list of card ids"#.into()),
+    };
+    let col = match text("col") {
+        None => None,
+        Some(s) => Some(Col::parse(s).ok_or_else(|| {
+            format!(r#"unknown "col" "{s}"; use backlog, todo, doing, review or done"#)
+        })?),
+    };
+    let by_agent = match text("added_by") {
+        None => None,
+        Some("agent") => Some(true),
+        Some("user") => Some(false),
+        Some(s) => return Err(format!(r#"unknown "added_by" "{s}"; use agent or user"#)),
+    };
+    Ok(CardFilter {
+        ids,
+        col,
+        project: text("project").map(str::to_string),
+        by_agent,
+        search: text("search").unwrap_or_default().to_string(),
+    })
+}
+
+fn card_names(cards: &[(i64, String)]) -> String {
+    cards.iter().map(|(id, t)| format!("#{id} “{t}”")).collect::<Vec<_>>().join(", ")
+}
+
+impl ChatApp {
+    pub(super) fn delete_cards(
+        &mut self,
+        lead_ix: usize,
+        args: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Value, String> {
+        let f = parse_card_filter(args)?;
+        let home = self.lead_project(lead_ix);
+        let ids: Vec<i64> = self
+            .cards
+            .iter()
+            .filter(|c| match f.project.as_deref() {
+                Some("all") => true,
+                Some(p) => c.project == p || folder(Path::new(&c.project)).eq_ignore_ascii_case(p),
+                None => f.ids.is_some() || c.project == home,
+            })
+            .filter(|c| f.ids.as_ref().is_none_or(|ids| ids.contains(&c.id)))
+            .filter(|c| f.col.is_none_or(|col| c.col == col))
+            .filter(|c| shown(c, &f.search, f.by_agent))
+            .map(|c| c.id)
+            .collect();
+        if ids.is_empty() {
+            return Ok(json!({"status": "nothing_to_do", "action": "delete_cards"}));
+        }
+        let cards: Vec<Value> = ids
+            .iter()
+            .filter_map(|id| self.cards.iter().find(|c| c.id == *id))
+            .map(|c| json!({"id": c.id, "title": c.title, "col": c.col.key()}))
+            .collect();
+        let lead = &self.chats[lead_ix];
+        let lead = (lead.id, lead.title.to_string());
+        self.confirm_delete_cards(ids, Some(lead), window, cx);
+        Ok(json!({
+            "status": "waiting_for_user",
+            "action": "delete_cards",
+            "count": cards.len(),
+            "cards": cards,
+            "note": "The user confirms or declines in Aether; the outcome arrives as your next turn. Don't poll.",
+        }))
+    }
+
+    pub(crate) fn finish_card_delete(
+        &mut self,
+        ids: &[i64],
+        lead: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let gone: Vec<(i64, String)> = ids
+            .iter()
+            .filter_map(|id| self.cards.iter().find(|c| c.id == *id))
+            .map(|c| (c.id, c.title.clone()))
+            .collect();
+        for (id, _) in &gone {
+            self.board_delete(*id);
+            self.board_picks.remove(id);
+        }
+        if self.board_selected.is_some_and(|s| gone.iter().any(|(id, _)| *id == s)) {
+            self.board_selected = None;
+        }
+        cx.notify();
+        if let Some(lead) = lead {
+            let text = format!(
+                "[Aether] The user approved. Deleted {} card(s): {}",
+                gone.len(),
+                card_names(&gone)
+            );
+            self.tell_lead(lead, text, window, cx);
+        }
+    }
+
+    /// Asks, then deletes the cards still on the board; a `lead` (id, title) hears the outcome.
+    pub(crate) fn confirm_delete_cards(
+        &mut self,
+        ids: Vec<i64>,
+        lead: Option<(i64, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let n = ids.len();
+        let noun = if n == 1 { "card" } else { "cards" };
+        let mut lines: Vec<String> = ids
+            .iter()
+            .filter_map(|id| self.cards.iter().find(|c| c.id == *id))
+            .take(10)
+            .map(|c| format!("• {}", c.title))
+            .collect();
+        if n > 10 {
+            lines.push(format!("…and {} more", n - 10));
+        }
+        let text = format!("{}\n\nThis can't be undone. Linked chats stay.", lines.join("\n"));
+        let title = match &lead {
+            Some((_, who)) => format!("“{who}” wants to delete {n} {noun}"),
+            None => format!("Delete {n} {noun}?"),
+        };
+        let lead_id = lead.map(|(id, _)| id);
+        self.ask_user(
+            (title, text, format!("Delete {n}"), true),
+            move |this, window, cx| this.finish_card_delete(&ids, lead_id, window, cx),
+            move |this, window, cx| {
+                if let Some(lead) = lead_id {
+                    let text = format!(
+                        "[Aether] The user declined to delete {n} card(s). Nothing changed."
+                    );
+                    this.tell_lead(lead, text, window, cx);
+                }
+            },
+            window,
+            cx,
+        );
     }
 }
 

@@ -165,6 +165,27 @@ pub fn tool_specs() -> Value {
             }
         },
         {
+            "name": "delete_cards",
+            "description": "Permanently delete task-board cards matching a filter (linked chats stay). The user must confirm in Aether; this returns at once and the outcome arrives as your next turn, so don't poll.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "object",
+                        "description": "Which cards; all fields optional",
+                        "properties": {
+                            "ids": {"type": "array", "items": {"type": "integer"}, "description": "Only these card ids; then any project unless project is set"},
+                            "col": {"type": "string", "description": "One of: backlog, todo, doing, review, done"},
+                            "project": {"type": "string", "description": "Project folder name or path; \"all\" for every project. Default: your own project"},
+                            "added_by": {"type": "string", "description": "agent or user"},
+                            "search": {"type": "string", "description": "Words that must all appear in the title or body"}
+                        }
+                    }
+                },
+                "required": ["filter"]
+            }
+        },
+        {
             "name": "list_chats",
             "description": "List Aether chats matching a filter, with id, title, project, provider, state and last activity.",
             "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats; all fields optional")}}

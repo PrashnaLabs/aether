@@ -648,6 +648,8 @@ pub(crate) struct ChatApp {
     pub(crate) board_search: Entity<InputState>,
     /// Author filter: `None` all, `Some(true)` agent-added, `Some(false)` user-added.
     pub(crate) board_by: Option<bool>,
+    /// Cards picked for a bulk delete.
+    pub(crate) board_picks: HashSet<i64>,
     pub(crate) archive_picks: HashSet<i64>,
     pub(crate) project_picks: HashSet<i64>,
     pub(crate) right_panel_resizing: bool,

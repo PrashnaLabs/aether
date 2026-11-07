@@ -55,6 +55,7 @@ fn tools_list_is_empty_without_token() {
             "list_cards",
             "add_card",
             "move_card",
+            "delete_cards",
             "list_chats",
             "archive_chats",
             "delete_chats",
