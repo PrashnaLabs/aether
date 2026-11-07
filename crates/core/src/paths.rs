@@ -60,6 +60,22 @@ fn pick_macos_base(library: PathBuf, xdg: PathBuf) -> PathBuf {
     }
 }
 
+/// Drops the `\\?\` prefix Windows `canonicalize` adds; git, cwds and `starts_with` checks
+/// against user-typed paths all break on it.
+pub fn simplify(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(rest) = path.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        return PathBuf::from(rest);
+    }
+    path
+}
+
+pub fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    fs::canonicalize(path).map(simplify)
+}
+
 pub fn find_binary(name: &str, override_path: &str) -> Option<PathBuf> {
     if !override_path.is_empty() {
         let p = expand_tilde(override_path);
