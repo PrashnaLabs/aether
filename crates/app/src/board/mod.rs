@@ -1,6 +1,7 @@
 pub(crate) mod model;
 mod view;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use aether_agent::SavedCard;
@@ -12,7 +13,7 @@ use gpui_kit::{Context, Window};
 use crate::app::{ChatApp, Page, now_ms};
 use crate::project_page::model::{CardStatus, card_status};
 use crate::side_panel::{SideTab, Surface};
-use model::{BoardCard, Col, Turn, auto_move, slot};
+use model::{BoardCard, Col, Turn, auto_move, next_id, slot, tidy};
 
 impl ChatApp {
     pub(crate) fn board_add(
@@ -23,10 +24,7 @@ impl ChatApp {
         project: String,
         chat: Option<i64>,
     ) -> i64 {
-        let mut id = now_ms();
-        while self.cards.iter().any(|c| c.id == id) {
-            id += 1;
-        }
+        let id = next_id(&self.cards);
         let position = slot(&self.cards, id, col, None);
         self.cards.push(BoardCard {
             id,
@@ -40,6 +38,18 @@ impl ChatApp {
         });
         self.board_save(id);
         id
+    }
+
+    /// `homes`: worktree folder -> its project.
+    pub(crate) fn board_tidy(&mut self, homes: &HashMap<String, String>) {
+        let Some(retired) = tidy(&mut self.cards, homes) else { return };
+        let Some(store) = &self.store else { return };
+        for id in retired {
+            store.delete_card(id);
+        }
+        for card in &self.cards {
+            store.save_card(SavedCard::from(card));
+        }
     }
 
     pub(crate) fn board_save(&self, id: i64) {

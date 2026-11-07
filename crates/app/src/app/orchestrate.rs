@@ -9,7 +9,7 @@ use aether_ui::ChatStatus;
 use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
-use super::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms};
+use super::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir};
 use crate::board::model::{Col, lead_move, open_lines};
 use crate::session_workspace::SplitAxis;
 
@@ -257,9 +257,14 @@ impl ChatApp {
                 "read_agent" => self.read_agent(ix, &call.args),
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
-                "list_cards" => Ok(Value::String(open_lines(&self.cards))),
+                "list_cards" => {
+                    let project = self.lead_project(ix);
+                    let cards: Vec<_> =
+                        self.cards.iter().filter(|c| c.project == project).cloned().collect();
+                    Ok(Value::String(open_lines(&cards)))
+                }
                 "add_card" => self.add_card(ix, &call.args),
-                "move_card" => self.move_card(&call.args),
+                "move_card" => self.move_card(ix, &call.args),
                 tool => Err(format!(r#"unknown tool "{tool}""#)),
             },
         };
@@ -309,22 +314,26 @@ impl ChatApp {
                 format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
             })?,
         };
-        let folder = chat_cwd(&self.chats[lead_ix], &self.settings.workspace_root);
-        let id =
-            self.board_add(title.clone(), text("body"), col, folder.display().to_string(), None);
+        let id = self.board_add(title.clone(), text("body"), col, self.lead_project(lead_ix), None);
         Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
     }
 
-    fn move_card(&mut self, args: &Value) -> Result<Value, String> {
+    /// Board project of a lead: the folder it started in, even from a worktree.
+    pub(super) fn lead_project(&self, lead_ix: usize) -> String {
+        project_dir(&self.chats[lead_ix], &self.settings.workspace_root).display().to_string()
+    }
+
+    fn move_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
         let id = args["id"]
             .as_i64()
             .or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()))
             .ok_or_else(|| r#"missing "id""#.to_string())?;
         let to = args["col"].as_str().unwrap_or_default();
+        let project = self.lead_project(lead_ix);
         let card = self
             .cards
             .iter_mut()
-            .find(|c| c.id == id)
+            .find(|c| c.id == id && c.project == project)
             .ok_or_else(|| format!("card #{id} not found"))?;
         let msg = lead_move(card, to)?;
         let col = card.col;
@@ -605,8 +614,9 @@ impl ChatApp {
         } else {
             None
         };
+        let project = self.lead_project(lead_ix);
         if let Some(id) = a.card
-            && !self.cards.iter().any(|c| c.id == id)
+            && !self.cards.iter().any(|c| c.id == id && c.project == project)
         {
             return Err(format!("card #{id} not found"));
         }
@@ -623,9 +633,7 @@ impl ChatApp {
                 id
             }
             None => {
-                let lead = &self.chats[lead_ix];
-                let folder = chat_cwd(lead, &self.settings.workspace_root).display().to_string();
-                self.board_add(a.title.clone(), a.task.clone(), Col::Doing, folder, Some(child_id))
+                self.board_add(a.title.clone(), a.task.clone(), Col::Doing, project, Some(child_id))
             }
         };
         let mut reply = json!({

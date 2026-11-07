@@ -669,6 +669,13 @@ impl ChatApp {
         app.load_models(window, cx);
         if app.restore_chats() {
             app.prune_watchlist(cx);
+            let homes = app
+                .chats
+                .iter()
+                .filter(|c| !c.project.is_empty() && !c.cwd.is_empty() && c.cwd != c.project)
+                .map(|c| (c.cwd.clone(), c.project.clone()))
+                .collect();
+            app.board_tidy(&homes);
         }
         let restored_workspace = app.load_session_workspace(window, cx);
         app.refresh_missing_attachments(true, cx);

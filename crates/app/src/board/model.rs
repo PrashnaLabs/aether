@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use aether_agent::SavedCard;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +94,33 @@ pub(crate) fn auto_move(col: Col, turn: Turn) -> Option<Col> {
         (Col::Doing, Turn::Finished { failed: false }) => Some(Col::Review),
         _ => None,
     }
+}
+
+/// Legacy cards used millisecond timestamps as ids; new ones count up past the short ones.
+const LEGACY_ID: i64 = 1_000_000_000;
+
+pub(crate) fn next_id(cards: &[BoardCard]) -> i64 {
+    cards.iter().map(|c| c.id).filter(|&id| id < LEGACY_ID).max().unwrap_or(0) + 1
+}
+
+/// Files worktree-folder cards under their project (`homes`: worktree -> project) and gives
+/// timestamp ids short ones, oldest first. `Some(retired ids)` when anything changed.
+pub(crate) fn tidy(cards: &mut [BoardCard], homes: &HashMap<String, String>) -> Option<Vec<i64>> {
+    let mut changed = false;
+    for card in cards.iter_mut() {
+        if let Some(home) = homes.get(&card.project) {
+            card.project.clone_from(home);
+            changed = true;
+        }
+    }
+    let mut legacy: Vec<usize> = (0..cards.len()).filter(|&i| cards[i].id >= LEGACY_ID).collect();
+    legacy.sort_by_key(|&i| cards[i].id);
+    let mut retired = Vec::new();
+    for i in legacy {
+        retired.push(cards[i].id);
+        cards[i].id = next_id(cards);
+    }
+    (changed || !retired.is_empty()).then_some(retired)
 }
 
 pub(crate) fn position_between(prev: Option<f64>, next: Option<f64>) -> f64 {
@@ -203,6 +232,32 @@ mod tests {
         assert_eq!(auto_move(Doing, Turn::Finished { failed: false }), Some(Review));
         assert_eq!(auto_move(Doing, Turn::Finished { failed: true }), None);
         assert_eq!(auto_move(Done, Turn::Started), None);
+    }
+
+    #[test]
+    fn next_id_skips_legacy_timestamps() {
+        assert_eq!(next_id(&[]), 1);
+        let mut a = card(Col::Todo, None);
+        a.id = 1_794_014_642_857;
+        assert_eq!(next_id(std::slice::from_ref(&a)), 1);
+        let mut b = a.clone();
+        b.id = 4;
+        assert_eq!(next_id(&[a, b]), 5);
+    }
+
+    #[test]
+    fn tidy_rehomes_and_renumbers_oldest_first() {
+        let mut cards = [card(Col::Todo, None), card(Col::Todo, None), card(Col::Todo, None)];
+        (cards[0].id, cards[0].project) = (1_794_000_000_002, "/wt/feat".into());
+        cards[1].id = 1_794_000_000_001;
+        cards[2].id = 1;
+        let homes = HashMap::from([("/wt/feat".to_string(), "/proj".to_string())]);
+        assert_eq!(tidy(&mut cards, &homes), Some(vec![1_794_000_000_001, 1_794_000_000_002]));
+        assert_eq!(tidy(&mut cards.clone(), &homes), None);
+        assert_eq!(
+            cards.map(|c| (c.id, c.project)),
+            [(3, "/proj".into()), (2, "p".into()), (1, "p".into())]
+        );
     }
 
     #[test]

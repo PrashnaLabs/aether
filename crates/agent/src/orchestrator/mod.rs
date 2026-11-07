@@ -115,7 +115,7 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "list_cards",
-            "description": "List open task-board cards, one line each.",
+            "description": "List this project's open task-board cards, one line each.",
             "inputSchema": {"type": "object", "properties": {}}
         },
         {
