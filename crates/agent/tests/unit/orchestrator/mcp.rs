@@ -54,7 +54,14 @@ fn tools_list_is_empty_without_token() {
             "stop_agent",
             "list_cards",
             "add_card",
-            "move_card"
+            "move_card",
+            "list_chats",
+            "archive_chats",
+            "delete_chats",
+            "unarchive_chats",
+            "update_chat",
+            "stop_chat",
+            "open_chat"
         ]
     );
 }

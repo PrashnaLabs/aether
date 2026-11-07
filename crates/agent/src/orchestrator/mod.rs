@@ -53,7 +53,28 @@ pub fn socket_path() -> Option<PathBuf> {
     Some(aether_core::config_dir()?.join("orchestrator.sock"))
 }
 
+fn chat_filter(about: &str) -> Value {
+    json!({
+        "type": "object",
+        "description": about,
+        "properties": {
+            "ids": {"type": "array", "items": {"type": "integer"}, "description": "Only these chat ids (from list_chats); then any project unless project is set"},
+            "project": {"type": "string", "description": "Project folder name or path; \"all\" for every project. Default: your own project"},
+            "older_than": {"type": "string", "description": "Last activity at least this long ago: a number and m, h, d or w, like \"30m\", \"12h\", \"3d\""},
+            "state": {"type": "string", "description": "One of: running, done (last reply succeeded), failed (last reply errored), empty, not_running"},
+            "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity, openrouter"},
+            "archived": {"type": "boolean", "description": "Match archived chats instead of active ones"},
+            "include_pinned": {"type": "boolean", "description": "Also act on pinned chats (skipped by default)"}
+        }
+    })
+}
+
+fn chat_id() -> Value {
+    json!({"type": "integer", "description": "Chat id from the list_chats tool"})
+}
+
 pub fn tool_specs() -> Value {
+    let bulk_note = "Never touches you, running chats, or pinned chats unless include_pinned. The user must confirm in Aether; this returns at once and the outcome arrives as your next turn, so don't poll.";
     json!([
         {
             "name": "list_agents",
@@ -142,6 +163,49 @@ pub fn tool_specs() -> Value {
                 },
                 "required": ["id", "col"]
             }
+        },
+        {
+            "name": "list_chats",
+            "description": "List Aether chats matching a filter, with id, title, project, provider, state and last activity.",
+            "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats; all fields optional")}}
+        },
+        {
+            "name": "archive_chats",
+            "description": format!("Archive the chats matching a filter (undo with unarchive_chats). {bulk_note}"),
+            "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats to archive")}, "required": ["filter"]}
+        },
+        {
+            "name": "delete_chats",
+            "description": format!("Permanently delete the chats matching a filter, with their history. {bulk_note}"),
+            "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats to delete")}, "required": ["filter"]}
+        },
+        {
+            "name": "unarchive_chats",
+            "description": "Move archived chats matching a filter back to the sidebar.",
+            "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which archived chats; archived defaults to true here")}, "required": ["filter"]}
+        },
+        {
+            "name": "update_chat",
+            "description": "Rename a chat or pin/unpin it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": chat_id(),
+                    "title": {"type": "string", "description": "New title"},
+                    "pinned": {"type": "boolean", "description": "Pin (true) or unpin (false)"}
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "stop_chat",
+            "description": "Stop any chat's current turn (not your own).",
+            "inputSchema": {"type": "object", "properties": {"id": chat_id()}, "required": ["id"]}
+        },
+        {
+            "name": "open_chat",
+            "description": "Show a chat to the user in Aether.",
+            "inputSchema": {"type": "object", "properties": {"id": chat_id()}, "required": ["id"]}
         }
     ])
 }

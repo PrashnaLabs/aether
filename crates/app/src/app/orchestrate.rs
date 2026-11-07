@@ -9,7 +9,7 @@ use aether_ui::ChatStatus;
 use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
-use super::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir};
+use super::{Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir};
 use crate::board::model::{Col, lead_move, open_lines};
 use crate::session_workspace::SplitAxis;
 
@@ -265,6 +265,13 @@ impl ChatApp {
                 }
                 "add_card" => self.add_card(ix, &call.args),
                 "move_card" => self.move_card(ix, &call.args),
+                "list_chats" => self.list_chats(ix, &call.args),
+                "archive_chats" => self.ask_bulk(ix, Bulk::Archive, &call.args, window, cx),
+                "delete_chats" => self.ask_bulk(ix, Bulk::Delete, &call.args, window, cx),
+                "unarchive_chats" => self.unarchive_chats(ix, &call.args, window, cx),
+                "update_chat" => self.update_chat(&call.args, cx),
+                "stop_chat" => self.stop_any_chat(ix, &call.args, cx),
+                "open_chat" => self.open_chat_tool(&call.args, window, cx),
                 tool => Err(format!(r#"unknown tool "{tool}""#)),
             },
         };
@@ -551,7 +558,7 @@ impl ChatApp {
         self.hand_to_lead(lead_ix, delivery, window, cx);
     }
 
-    fn hand_to_lead(
+    pub(super) fn hand_to_lead(
         &mut self,
         lead_ix: usize,
         delivery: Delivery,

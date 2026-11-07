@@ -39,6 +39,7 @@ use gpui_kit::{App, Context, Entity, FocusHandle, SharedString, Subscription, Wi
 
 mod chat;
 mod composer;
+mod control;
 mod draft_editor;
 mod format;
 mod links;
