@@ -21,7 +21,7 @@ pub fn signal_process(pid: u32, sig: &str, tree: bool) -> bool {
     #[cfg(unix)]
     let mut cmd = {
         let mut cmd = command("/bin/kill");
-        cmd.args([format!("-{sig}"), if tree { format!("-{pid}") } else { pid }]);
+        cmd.args([format!("-{sig}"), "--".into(), if tree { format!("-{pid}") } else { pid }]);
         cmd
     };
     #[cfg(windows)]

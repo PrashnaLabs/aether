@@ -237,15 +237,6 @@ fn rpc_kills_the_probe_process_group() {
     let replies = sh_rpc(script, Duration::from_secs(5));
     let pid = replies[0]["pid"].as_u64().unwrap().to_string();
     let alive = || {
-        // orphan may sit as a zombie under a slow-reaping CI subreaper; kill -0 still succeeds
-        #[cfg(target_os = "linux")]
-        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Ok(stat) => {
-                return !stat.rsplit(')').next().unwrap_or("").trim_start().starts_with('Z');
-            }
-            Err(_) => return false,
-        }
-        #[cfg(not(target_os = "linux"))]
         Command::new("/bin/kill")
             .args(["-0", &pid])
             .stderr(Stdio::null())
