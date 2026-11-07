@@ -309,12 +309,14 @@ pub(crate) fn initial_window_bounds(cx: &gpui_kit::App) -> Option<Bounds<gpui_ki
 
 // GPUI's native window cannot be dropped on affected Touch Bar Macs. Keep it
 // alive and reusable. On Linux GPUI exposes minimization as the retention API.
+#[cfg_attr(test, allow(unused_variables))]
 fn retain_closed_window(window: &Window) {
     #[cfg(target_os = "macos")]
     {
         hide_macos_window(window);
     }
-    #[cfg(not(target_os = "macos"))]
+    // gpui test windows leave minimize unimplemented.
+    #[cfg(all(not(target_os = "macos"), not(test)))]
     window.minimize_window();
 }
 #[cfg(target_os = "macos")]
