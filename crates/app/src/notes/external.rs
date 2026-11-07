@@ -171,10 +171,11 @@ fn nvim_args(socket: &Path, path: &Path, line: Option<usize>) -> Vec<std::ffi::O
 }
 
 fn expand_home(value: &str) -> PathBuf {
-    if let Some(rest) = value.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest);
+    if let Some(rest) = value.strip_prefix("~/") {
+        let home = aether_core::home_dir();
+        if !home.as_os_str().is_empty() {
+            return home.join(rest);
+        }
     }
     PathBuf::from(value)
 }

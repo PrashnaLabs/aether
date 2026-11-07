@@ -9,6 +9,9 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[target.'cfg(windows)'.dependencies]
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+
 [dependencies]
 aether-core.workspace = true
 aether-ui.workspace = true

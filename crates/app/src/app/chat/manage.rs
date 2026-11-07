@@ -541,8 +541,10 @@ impl ChatApp {
         let chat = &self.chats[self.active];
         let md = chat_markdown(chat);
         let name = export_filename(&chat.title);
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        let rx = cx.prompt_for_new_path(std::path::Path::new(&home), Some(&name));
+        let home = Some(aether_core::home_dir())
+            .filter(|home| !home.as_os_str().is_empty())
+            .unwrap_or_else(std::env::temp_dir);
+        let rx = cx.prompt_for_new_path(&home, Some(&name));
         cx.spawn_in(window, async move |_, _| {
             let Ok(Ok(Some(path))) = rx.await else {
                 return;

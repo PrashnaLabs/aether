@@ -120,6 +120,8 @@ fn session_update_theme_updates_palette_and_flags_dirty() {
             cell_height: 10,
         }),
         palette: Mutex::new(initial_palette),
+        #[cfg(windows)]
+        job: Mutex::new(None),
     });
     let config = Config { scrolling_history: 100, ..Config::default() };
     let dims = TermSize::new(10, 10);
@@ -186,4 +188,24 @@ fn windows_shell_output_reaches_the_grid() {
     let frame = super::super::grid::snapshot(&session.term.lock(), &palette, false);
     let rows: Vec<_> = frame.rows.iter().map(|r| r.text.as_str()).collect();
     assert!(rows.iter().any(|r| r.contains("aether-ok")), "{rows:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_names_the_program_the_shell_is_running() {
+    let size = WindowSize { num_lines: 8, num_cols: 60, cell_width: 8, cell_height: 18 };
+    let palette = Palette::new(false, Rgb { r: 0, g: 0, b: 0 }, Rgb { r: 255, g: 255, b: 255 });
+    let session =
+        Session::spawn_command(&std::env::temp_dir(), "ping -n 20 127.0.0.1", size, palette)
+            .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let job = loop {
+        if let Some(job) = session.running_job() {
+            break job;
+        }
+        assert!(Instant::now() < deadline, "no running program was reported");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(job.to_lowercase(), "ping");
+    assert!(session.terminate());
 }

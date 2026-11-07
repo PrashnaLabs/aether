@@ -410,6 +410,7 @@ dependencies = [
  "aether-ui",
  "alacritty_terminal",
  "gpui-kit",
+ "sysinfo",
 ]
 
 [[package]]

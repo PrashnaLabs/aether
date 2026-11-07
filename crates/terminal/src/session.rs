@@ -44,6 +44,9 @@ struct Shared {
     pty: OnceLock<EventLoopSender>,
     size: Mutex<WindowSize>,
     palette: Mutex<Palette>,
+    /// What the shell has running in front of its prompt, refreshed by `watch_job`.
+    #[cfg(windows)]
+    job: Mutex<Option<String>>,
 }
 
 impl Shared {
@@ -180,7 +183,11 @@ impl Session {
             pty: OnceLock::new(),
             size: Mutex::new(size),
             palette: Mutex::new(palette),
+            #[cfg(windows)]
+            job: Mutex::new(None),
         });
+        #[cfg(windows)]
+        watch_job(Arc::downgrade(&shared), pid);
         let config = term_config(TerminalCursor::default());
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
         let term = Arc::new(FairMutex::new(Term::new(config, &dims, Listener(shared.clone()))));
@@ -251,9 +258,12 @@ impl Session {
         (group > 0 && group as u32 != self.pid).then(|| process_name(group).unwrap_or_default())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     pub fn running_job(&self) -> Option<String> {
-        None
+        if self.shared.exited.load(Ordering::Acquire) {
+            return None;
+        }
+        self.shared.job.guard().clone()
     }
 
     pub fn terminate(&self) -> bool {
@@ -304,6 +314,31 @@ impl Drop for Session {
             reaped.store(true, Ordering::Release);
         });
     }
+}
+
+/// Windows has no foreground process group to ask, so a thread lists the shell's
+/// children once a second; the UI reads the answer without touching the process table.
+#[cfg(windows)]
+fn watch_job(shared: std::sync::Weak<Shared>, shell: u32) {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let shell = Pid::from_u32(shell);
+    std::thread::spawn(move || {
+        let mut system = System::new();
+        while let Some(shared) = shared.upgrade() {
+            if shared.exited.load(Ordering::Acquire) {
+                break;
+            }
+            system.refresh_processes_specifics(ProcessesToUpdate::All, ProcessRefreshKind::new());
+            let job = system
+                .processes()
+                .values()
+                .find(|p| p.parent() == Some(shell) && p.name() != "conhost.exe")
+                .map(|p| p.name().to_string_lossy().trim_end_matches(".exe").to_string());
+            *shared.job.guard() = job;
+            drop(shared);
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    });
 }
 
 const SIGHUP: i32 = 1;

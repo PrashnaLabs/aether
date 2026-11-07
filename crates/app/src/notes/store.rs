@@ -68,10 +68,7 @@ impl Store {
         Self {
             scope: root.clone(),
             root,
-            last_note_file: std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_default()
-                .join(".last_note"),
+            last_note_file: aether_core::home_dir().join(".last_note"),
         }
     }
     #[cfg(test)]
