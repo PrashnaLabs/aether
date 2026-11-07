@@ -206,10 +206,14 @@ fn side_request(id: &str, question: &str) -> Value {
     })
 }
 
-/// The reply to a `side_question` request: its answer, or the CLI's refusal.
+/// The reply to a `side_question` request: its answer, or the CLI's refusal. A synthetic one
+/// is the CLI's "No answer available" stand-in, so it's an error the app retries emulated.
 fn side_answer(v: &Value) -> Update {
     let r = &v["response"];
     match (r["subtype"].as_str(), r["response"]["response"].as_str()) {
+        (Some("success"), Some(_)) if r["response"]["synthetic"] == true => {
+            Update::Error("claude had no answer for this side question".into())
+        }
         (Some("success"), Some(text)) => Update::Final(text.to_string()),
         _ => Update::Error(r["error"].as_str().unwrap_or("side question failed").to_string()),
     }

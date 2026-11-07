@@ -2231,6 +2231,19 @@ fn side_answer_routes_to_its_reply_only() {
 }
 
 #[test]
+fn synthetic_side_answer_is_an_error() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State::default();
+    s.sides.insert("aether-btw-3".into(), tx);
+    let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"aether-btw-3","response":{"response":"(No answer available for this side question.)","synthetic":true}}}"#;
+    assert!(map_line(&mut s, line).is_empty());
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        Update::Error("claude had no answer for this side question".into())
+    );
+}
+
+#[test]
 fn side_error_response_is_an_error() {
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let mut s = State::default();
