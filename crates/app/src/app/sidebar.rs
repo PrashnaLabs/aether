@@ -1261,6 +1261,10 @@ impl ChatApp {
     /// set keeps one worktree at 1 git call and the panel paints each
     /// result as it lands.
     pub(crate) fn refresh_sidebar_git(&mut self, folders: Vec<PathBuf>, cx: &mut Context<Self>) {
+        // gpui test scheduler aborts on wakeups from tokio git tasks
+        if cfg!(test) {
+            return;
+        }
         // Filter first: sidebar_missing claims its result in flight, and a
         // skipped folder would hold its claim forever with no read landing.
         let folders: Vec<PathBuf> =

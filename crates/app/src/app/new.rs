@@ -550,7 +550,8 @@ impl ChatApp {
             background_resizing: false,
             removing: HashSet::new(),
             worktrees: None,
-            listing_worktrees: false,
+            // tests: no real ~/.aether worktree scan; its tokio wakeup aborts gpui tests
+            listing_worktrees: cfg!(test),
             external: Vec::new(),
             scan_run: 0,
             scanning: false,
