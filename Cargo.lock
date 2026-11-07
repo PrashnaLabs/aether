@@ -340,6 +340,7 @@ dependencies = [
  "resvg 0.46.0",
  "serde",
  "serde_json",
+ "sysinfo",
  "tokio",
  "wry",
 ]

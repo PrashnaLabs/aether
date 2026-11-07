@@ -105,7 +105,21 @@ pub fn sample() -> Option<Sample> {
     Some(Sample { cpu_percent, mem_used, mem_total })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
+pub fn sample() -> Option<Sample> {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_cpu_usage();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
+    Some(Sample {
+        cpu_percent: sys.global_cpu_usage(),
+        mem_used: sys.used_memory(),
+        mem_total: sys.total_memory(),
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 pub fn sample() -> Option<Sample> {
     None
 }
