@@ -48,6 +48,22 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Test
         run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
+      - name: Backtrace test abort
+        if: failure() && runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y gdb >/dev/null
+          for bin in $(find target/debug/deps -maxdepth 1 -type f -executable -name 'aether-*' ! -name '*.so'); do
+            for try in 1 2 3 4 5 6; do
+              gdb -q -batch -ex 'set pagination off' -ex run -ex bt -ex 'thread apply all bt 25' \
+                --args "$bin" --skip hackernews::client > /tmp/gdb.log 2>&1
+              if grep -q SIGABRT /tmp/gdb.log; then
+                grep -vE '^test .* \.\.\. ok$|^\[New Thread|^\[Thread' /tmp/gdb.log
+                exit 0
+              fi
+            done
+          done
+          echo "no abort reproduced in 6 tries"
       - name: Validate packaging
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Validate desktop entry
