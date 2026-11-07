@@ -111,7 +111,8 @@ gpui_kit::assets::icon_assets!(
         Users,
         SquareCheck,
         ClockAlert,
-        Hash
+        Hash,
+        Forward
     ]
 );
 

@@ -296,6 +296,10 @@ impl ChatApp {
         if self.sidebar_view != SidebarView::Archived {
             return self.switch_sidebar_to_archive(cx);
         }
+        self.leave_sidebar_view(cx);
+    }
+
+    fn leave_sidebar_view(&mut self, cx: &mut Context<Self>) {
         self.sidebar_view = if self.chats[self.active].is_agent() {
             SidebarView::Projects
         } else {
@@ -307,6 +311,13 @@ impl ChatApp {
     pub(crate) fn switch_sidebar_to_outside(&mut self, cx: &mut Context<Self>) {
         self.sidebar_view = SidebarView::Outside;
         cx.notify();
+    }
+
+    pub(crate) fn toggle_outside(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_view != SidebarView::Outside {
+            return self.switch_sidebar_to_outside(cx);
+        }
+        self.leave_sidebar_view(cx);
     }
 
     /// Chats with an agent state: (chat index, title, provider, detail, state), newest first.
@@ -744,7 +755,11 @@ impl ChatApp {
             .now(now_ms())
             .handoff(
                 self.handoff_targets(None),
-                self.chats.iter().filter(|c| !c.messages.is_empty()).map(|c| c.id).collect(),
+                self.chats
+                    .iter()
+                    .filter(|c| !c.messages.is_empty())
+                    .map(|c| (c.id, c.provider))
+                    .collect(),
                 move |id, target, window, cx| {
                     handoff.update(cx, |this, cx| {
                         if let Some(ix) = this.chats.iter().position(|c| c.id == id) {

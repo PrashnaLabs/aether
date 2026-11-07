@@ -182,6 +182,8 @@ fn outside_button_follows_archive_and_opens_its_view(cx: &mut TestAppContext) {
     draw(&mut visual, &app, |_| {});
     assert!(visual.debug_bounds("nav-outside-active").is_some());
     assert!(visual.debug_bounds("nav-archive-active").is_none());
+    click(&mut visual, "nav-outside");
+    assert_ne!(app.read_with(&visual, |app, _| app.sidebar_view), SidebarView::Outside);
 }
 
 #[gpui_kit::test]

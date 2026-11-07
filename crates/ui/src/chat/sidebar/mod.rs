@@ -491,7 +491,7 @@ pub struct ChatSidebar {
     collapsed_crews: std::collections::HashSet<i64>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
-    handoff: Option<(Vec<Provider>, Vec<i64>, HandoffHandler)>,
+    handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
     picks: Option<(Vec<i64>, PickHandler)>,
     bulk_bar: Option<AnyElement>,
 }
@@ -551,14 +551,14 @@ impl ChatSidebar {
         self
     }
 
-    /// Adds "Hand off to" to the menus of chats in `ids`, listing `targets` but the row's own agent.
+    /// Adds "Hand off to" to the menus of chats in `chats` (id, agent), listing `targets` but that agent.
     pub fn handoff(
         mut self,
         targets: Vec<Provider>,
-        ids: Vec<i64>,
+        chats: Vec<(i64, Provider)>,
         on_pick: impl Fn(i64, Provider, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.handoff = Some((targets, ids, Rc::new(on_pick)));
+        self.handoff = Some((targets, chats, Rc::new(on_pick)));
         self
     }
 
@@ -738,9 +738,7 @@ impl ChatSidebar {
             child: self.children.contains(&id),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
-            handoff: self.handoff.as_ref().and_then(|(targets, ids, pick)| {
-                ids.contains(&id).then(|| (targets.clone(), pick.clone()))
-            }),
+            handoff: self.handoff_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),
@@ -873,6 +871,13 @@ impl ChatSidebar {
         self
     }
 
+    fn handoff_for(&self, id: i64) -> Option<(Vec<Provider>, HandoffHandler)> {
+        let (targets, chats, pick) = self.handoff.as_ref()?;
+        let &(_, own) = chats.iter().find(|(c, _)| *c == id)?;
+        let targets: Vec<Provider> = targets.iter().copied().filter(|&t| t != own).collect();
+        (!targets.is_empty()).then(|| (targets, pick.clone()))
+    }
+
     fn pick_for(&self, id: i64) -> Option<Pick> {
         let (picked, on_toggle) = self.picks.as_ref()?;
         Some(Pick {
@@ -943,9 +948,7 @@ impl ChatSidebar {
             child: self.children.contains(&id),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
-            handoff: self.handoff.as_ref().and_then(|(targets, ids, pick)| {
-                ids.contains(&id).then(|| (targets.clone(), pick.clone()))
-            }),
+            handoff: self.handoff_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),

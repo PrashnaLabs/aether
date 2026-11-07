@@ -165,7 +165,7 @@ impl ChatApp {
                     sidebar == SidebarView::Outside,
                     outside,
                     view,
-                    |this, _, cx| this.switch_sidebar_to_outside(cx),
+                    |this, _, cx| this.toggle_outside(cx),
                     cx,
                 ))
             })

@@ -6,8 +6,6 @@ use gpui_kit::component::{
 };
 use gpui_kit::{App, ClipboardItem, Context, Entity, SharedString, Window, div, prelude::*};
 
-use aether_core::Provider;
-
 use super::state::SidebarState;
 use super::{ChatItem, ChatLine, RowHandler};
 
@@ -150,15 +148,16 @@ pub(super) fn chat_menu(
                 .icon(IconName::Star)
                 .on_click(move |ev, window, cx| pin(ev, window, cx)),
         );
-    let current = chat.line.as_ref().map_or(Provider::OpenRouter, |line| line.provider);
     let menu = match chat.handoff.clone() {
-        Some((targets, on_pick)) if targets.iter().any(|&p| p != current) => {
+        Some((targets, on_pick)) => {
             let id = chat.id;
-            menu.submenu("Hand off to", window, cx, move |mut menu, _, _| {
-                for &target in targets.iter().filter(|&&p| p != current) {
+            let icon = Some(Icon::new(Lucide::Forward));
+            menu.submenu_with_icon(icon, "Hand off to", window, cx, move |mut menu, _, _| {
+                for &target in &targets {
                     let on_pick = on_pick.clone();
                     menu = menu.item(
                         PopupMenuItem::new(target.label())
+                            .icon(crate::provider_icon(target))
                             .on_click(move |_, window, cx| on_pick(id, target, window, cx)),
                     );
                 }

@@ -541,6 +541,7 @@ pub fn handoff_items(mut menu: PopupMenu, targets: &[Provider], on_pick: &OnHand
         let on_pick = on_pick.clone();
         menu = menu.item(
             PopupMenuItem::new(format!("Continue in {}", target.label()))
+                .icon(crate::provider_icon(target))
                 .on_click(move |_, window, cx| on_pick(target, window, cx)),
         );
     }
