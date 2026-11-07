@@ -60,6 +60,7 @@ fn live_opencode_smoke() {
     let dir = std::env::temp_dir().join(format!("aether-opencode-smoke-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: dir.clone(),
         model: std::env::var("AETHER_OPENCODE_SMOKE_MODEL").unwrap_or_default(),
@@ -98,4 +99,27 @@ fn live_opencode_smoke() {
     assert!(text(&turn(&mut d, &mut rx, false)).contains("ok"));
     drop(d);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn side_request_targets_generate_with_preamble() {
+    let (path, body) = side_request("ses_1", "why?");
+    assert_eq!(path, "/api/session/ses_1/generate");
+    assert_eq!(
+        body["prompt"],
+        "Answer this side question briefly from the conversation so far. Do not use tools.\n\nwhy?"
+    );
+}
+
+#[test]
+fn side_reply_reads_data_text() {
+    let ok = side_reply(Ok(json!({"data": {"text": "because"}})));
+    assert!(matches!(ok, Update::Final(t) if t == "because"));
+}
+
+#[test]
+fn side_reply_errors_on_malformed_or_http_failure() {
+    assert!(matches!(side_reply(Ok(json!({"data": {}}))), Update::Error(_)));
+    assert!(matches!(side_reply(Ok(Value::Null)), Update::Error(_)));
+    assert!(matches!(side_reply(Err("boom".into())), Update::Error(e) if e == "boom"));
 }

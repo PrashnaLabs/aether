@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use adk_rust::prelude::*;
-use adk_rust::session::{CreateRequest, SessionService};
+use adk_rust::session::{CreateRequest, DeleteRequest, SessionService};
 use aether_core::{
     AccessMode, Answer, Attachment, MutexExt, NoticeKind, Provider, Role, Settings, Skill,
     ToolStatus, Update, attached_files_block, attachments_dir, find_binary, mentioned_skills,
@@ -58,6 +58,7 @@ pub struct ChatSession {
     pub effort: String,
     pub resume: String,
     pub lead: bool,
+    pub ephemeral: bool,
 }
 
 /// What a live CLI session can't change without a restart; model and effort ride on each prompt.
@@ -88,7 +89,11 @@ enum Command {
     /// Stops a background task or terminal by tool row id.
     StopTool(String),
     NoticeAction(String),
+    /// A native side question and the reply its answer goes to.
+    Side(String, UnboundedSender<Update>),
 }
+
+pub const SIDE_UNSUPPORTED: &str = "native side questions are unsupported";
 
 type TurnTx = Arc<Mutex<Option<UnboundedSender<Update>>>>;
 
@@ -251,15 +256,18 @@ impl Agent {
         token
     }
 
-    fn lead_tools(&self, chat: &ChatSession) -> Option<LeadTools> {
-        if !chat.lead {
-            return None;
-        }
+    /// Aether tools for the chat's CLI: all for a lead, read_history for one `seeded` with history.
+    fn lead_tools(&self, chat: &ChatSession, seeded: bool) -> Option<LeadTools> {
+        let specs = match (chat.lead, seeded) {
+            (true, _) => crate::orchestrator::tool_specs(),
+            (false, true) => crate::orchestrator::history_specs(),
+            (false, false) => return None,
+        };
         Some(LeadTools {
             exe: std::env::current_exe().ok()?,
             sock: socket_path()?,
             token: self.lead_token(&chat.key),
-            specs: crate::orchestrator::tool_specs(),
+            specs,
         })
     }
 
@@ -524,7 +532,7 @@ impl Agent {
     pub fn transcript(
         &self,
         agent: ExternalAgent,
-    ) -> impl Future<Output = Vec<(Role, String)>> + 'static {
+    ) -> impl Future<Output = Vec<external::Turn>> + 'static {
         let task = self.rt.spawn_blocking(move || external::transcript(&agent));
         async move { task.await.unwrap_or_default() }
     }
@@ -604,7 +612,8 @@ impl Agent {
             let (done, _) = std::sync::mpsc::channel();
             return Reply { updates, cancel: Cancel(CancelInner::Cli(done)) };
         }
-        let (opts, key) = session_options(settings, chat, self.lead_tools(chat));
+        let (opts, key) =
+            session_options(settings, chat, self.lead_tools(chat, !history.is_empty()));
         let mut live = self.live.guard();
         let mut command = Command::Prompt {
             text,
@@ -644,7 +653,7 @@ impl Agent {
         if live.contains_key(&chat.key) {
             return;
         }
-        let (mut opts, key) = session_options(settings, chat, self.lead_tools(chat));
+        let (mut opts, key) = session_options(settings, chat, self.lead_tools(chat, false));
         opts.reattach = true;
         opts.background = background;
         let session = self.spawn_live(&chat.key, key, opts, None);
@@ -699,7 +708,14 @@ impl Agent {
                         let text = if seeded || history.is_empty() {
                             text
                         } else {
-                            context_prompt(&history, &text)
+                            let tool = opts.lead.is_some()
+                                && (provider != Provider::Antigravity || agy_has_aether());
+                            let (note, kept) = seed_parts(&history, tool);
+                            if driver.seed_history(&note, &kept) {
+                                text
+                            } else {
+                                context_prompt(&history, &text, tool)
+                            }
                         } + &attached_files_block(&by_path);
                         seeded = true;
                         orphan.store(false, Ordering::SeqCst);
@@ -740,6 +756,11 @@ impl Agent {
                         }
                     }
                     Command::NoticeAction(action) => driver.notice_action(&action),
+                    Command::Side(question, reply) => {
+                        if !driver.side_question(&question, reply.clone()) {
+                            let _ = reply.unbounded_send(Update::Error(SIDE_UNSUPPORTED.into()));
+                        }
+                    }
                 }
                 report(&*driver);
             }
@@ -898,7 +919,7 @@ impl Agent {
         chat: &ChatSession,
     ) -> Reply {
         let (tx, updates) = mpsc::unbounded();
-        let (_, key) = session_options(settings, chat, self.lead_tools(chat));
+        let (_, key) = session_options(settings, chat, self.lead_tools(chat, false));
         if let Some(session) = self.live.guard().get(&chat.key).filter(|s| s.key == key) {
             let turn = session.turn.guard();
             let steer =
@@ -928,6 +949,15 @@ impl Agent {
         }
     }
 
+    /// Asks `question` through the chat's live CLI without touching its turn. None when no
+    /// session is live. A CLI that can't take it answers with `Update::Error(SIDE_UNSUPPORTED)`.
+    pub fn side_question(&self, chat_key: &str, question: &str) -> Option<Reply> {
+        let commands = self.live.guard().get(chat_key)?.commands.clone();
+        let (tx, updates) = mpsc::unbounded();
+        commands.send(Command::Side(question.to_string(), tx)).ok()?;
+        Some(Reply { updates, cancel: Cancel::inert() })
+    }
+
     pub fn health(&self, chat_key: &str) -> Option<SessionHealth> {
         let health = *self.live.guard().get(chat_key)?.health.guard();
         Some(SessionHealth {
@@ -938,6 +968,16 @@ impl Agent {
 
     pub fn live_sessions(&self) -> std::collections::HashSet<String> {
         self.live.guard().keys().cloned().collect()
+    }
+
+    /// Drops the in-memory conversation behind `key` (OpenRouter only).
+    pub fn delete_session(&self, key: &str) {
+        let sessions = self.sessions.clone();
+        let req =
+            DeleteRequest { app_name: APP.into(), user_id: USER.into(), session_id: key.into() };
+        self.rt.spawn(async move {
+            let _ = sessions.delete(req).await;
+        });
     }
 
     pub fn close_session(&self, key: &str) {
@@ -962,6 +1002,7 @@ fn session_options(
         resume: chat.resume.clone(),
         attachments: attachments_dir().map(|d| d.join(&chat.key)),
         lead,
+        ephemeral: chat.ephemeral,
         ..DriverStartOptions::for_provider(settings, settings.provider, chat.cwd.clone())
     };
     let key = SessionKey {
@@ -1021,24 +1062,96 @@ fn answer_allows(answer: &Answer) -> bool {
     }
 }
 
-/// The visible transcript joined with the new message, so a stateless
-/// CLI prompt still sees the conversation.
-fn context_prompt(history: &[(Role, String)], text: &str) -> String {
+pub const HISTORY_BUDGET: usize = 16_000;
+
+/// Which messages fit `limit` chars: the first user message and the latest exchange always,
+/// then whole messages newest-first.
+fn budget_mask(history: &[(Role, String)], limit: usize) -> Vec<bool> {
+    let n = history.len();
+    let len = |i: usize| history[i].1.chars().count();
+    let mut keep = vec![false; n];
+    let mut used = 0;
+    let first = history.iter().position(|(r, _)| *r == Role::User);
+    let last_user = history.iter().rposition(|(r, _)| *r == Role::User);
+    let last_reply = history.iter().rposition(|(r, _)| *r == Role::Assistant);
+    for i in [first, last_user, last_reply].into_iter().flatten() {
+        if !keep[i] {
+            keep[i] = true;
+            used += len(i);
+        }
+    }
+    for i in (0..n).rev() {
+        if !keep[i] && used + len(i) <= limit {
+            keep[i] = true;
+            used += len(i);
+        }
+    }
+    keep
+}
+
+/// The messages `budget_mask` keeps, in order, and how many were left out.
+pub fn budget_history(history: &[(Role, String)], limit: usize) -> (Vec<(Role, String)>, usize) {
+    let keep = budget_mask(history, limit);
+    let kept: Vec<_> =
+        history.iter().zip(&keep).filter(|(_, k)| **k).map(|(h, _)| h.clone()).collect();
+    let omitted = history.len() - kept.len();
+    (kept, omitted)
+}
+
+/// What a fresh CLI session gets of the earlier conversation: a note on what it covers and
+/// the kept messages, each prefixed with its number so read_history (when `tool`) can fetch it.
+fn seed_parts(history: &[(Role, String)], tool: bool) -> (String, Vec<(Role, String)>) {
+    let n = history.len();
+    let keep = budget_mask(history, HISTORY_BUDGET);
+    let omitted = keep.iter().filter(|k| !**k).count();
+    let mut note = format!("Earlier conversation in this chat: messages 0-{}", n.saturating_sub(1));
+    if omitted > 0 {
+        note.push_str(&format!(", {omitted} omitted to save space"));
+    }
+    note.push_str(". Tool calls and their output aren't included");
+    if tool {
+        note.push_str(
+            "; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls",
+        );
+    }
+    note.push_str(
+        ". Treat it as context only, not a new request; files on disk are the source of truth.",
+    );
+    let kept = history
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(i, (role, line))| (*role, format!("[{i}] {line}")))
+        .collect();
+    (note, kept)
+}
+
+/// The earlier conversation joined with the new message, for a CLI that can't load history.
+fn context_prompt(history: &[(Role, String)], text: &str, tool: bool) -> String {
     if history.is_empty() {
         return text.to_string();
     }
-    let mut out = String::from("Conversation so far:\n");
-    for (role, line) in history {
-        out.push_str(match role {
-            Role::User => "User: ",
-            Role::Assistant => "Assistant: ",
-        });
-        out.push_str(line);
-        out.push('\n');
+    let (note, kept) = seed_parts(history, tool);
+    let mut out = format!("{note}\n\n<conversation_so_far>\n");
+    for (role, line) in kept {
+        let (n, rest) = line.split_once(' ').unwrap_or(("", &line));
+        let who = match role {
+            Role::User => "User",
+            Role::Assistant => "Assistant",
+        };
+        out.push_str(&format!("{n} {who}: {rest}\n"));
     }
-    out.push_str("New message:\n");
+    out.push_str("</conversation_so_far>\n\nYour task now:\n");
     out.push_str(text);
     out
+}
+
+/// Whether agy's global MCP config runs this Aether, so its sessions can reach read_history.
+fn agy_has_aether() -> bool {
+    use aether_driver::antigravity::{agy_aether_entry, agy_mcp_config};
+    let exe = std::env::current_exe().ok();
+    agy_aether_entry(&agy_mcp_config())
+        .is_some_and(|e| !e.disabled && exe.as_deref() == Some(Path::new(&e.command)))
 }
 
 /// Pre-flight check so a missing CLI binary surfaces as `Update::Error`

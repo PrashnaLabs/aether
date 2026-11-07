@@ -80,6 +80,7 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue((app / "Contents/Resources/LICENSE").is_file())
         self.assertTrue(os.access(app / "Contents/MacOS/aether", os.X_OK))
         self.assertIn("NSMicrophoneUsageDescription", info)
+        self.assertTrue(info["NSAppSleepDisabled"])
         entitlements = subprocess.run(["codesign", "-d", "--entitlements", "-", app],
                                       capture_output=True, text=True).stdout
         self.assertIn("com.apple.security.device.audio-input", entitlements)

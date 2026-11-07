@@ -24,6 +24,26 @@ fn parses_anthropic_usage_json() {
 }
 
 #[test]
+fn anthropic_model_scoped_weekly_limits_are_listed() {
+    let payload = r#"{
+            "five_hour": {"utilization": 20.0, "resets_at": "2026-10-17T15:00:00Z"},
+            "seven_day": {"utilization": 86.0, "resets_at": "2026-10-24T00:00:00Z"},
+            "limits": [
+                {"kind": "session", "percent": 20, "resets_at": "2026-10-17T15:00:00Z", "scope": null},
+                {"kind": "weekly_all", "percent": 86, "resets_at": "2026-10-24T00:00:00Z", "scope": null},
+                {"kind": "weekly_scoped", "percent": 30, "resets_at": "2026-10-24T00:00:00Z",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}}
+            ]
+        }"#;
+
+    let usage = PlanUsage::parse_anthropic(payload, Some("max")).expect("parses");
+    let labels: Vec<&str> = usage.limits.iter().map(|l| l.label.as_str()).collect();
+    assert_eq!(labels, ["Session", "Weekly", "Weekly (Fable)"]);
+    assert!((usage.limits[2].percent_left - 70.0).abs() < 1e-3);
+    assert!(usage.limits[2].reset_label.starts_with("resets"));
+}
+
+#[test]
 fn parses_codex_usage_json() {
     let payload = r#"{
             "plan_type": "plus",
@@ -82,6 +102,30 @@ fn parses_piped_antigravity_usage_lines() {
     assert_eq!(usage.limits[0].percent_left, 70.0);
     assert!(usage.limits[0].reset_label.starts_with("resets in"));
     assert_eq!(usage.limits[2].reset_label, "resets soon");
+}
+
+#[test]
+fn parses_opencode_usage_limits() {
+    let go = r#"{"data":{"workspace":{"id":"wrk_1","usageURL":"u"},
+        "go":{"rolling":{"percent":30,"limited":false,"resetsAt":32503680000000},
+              "weekly":{"percent":10,"limited":false,"resetsAt":32503680000000},
+              "monthly":{"percent":5,"limited":false,"resetsAt":0}},
+        "budgets":[{"id":"b","limit":50,"spent":12.5,"resetsAt":32503680000000}]}}"#;
+    let usage = PlanUsage::parse_opencode(go).expect("should parse opencode limits");
+    assert_eq!(usage.plan_name, "OpenCode Go");
+    let labels: Vec<_> = usage.limits.iter().map(|l| l.label.as_str()).collect();
+    assert_eq!(labels, ["Session", "Weekly", "Monthly", "Budget · $12.50 of $50.00"]);
+    assert_eq!(usage.limits[0].percent_left, 70.0);
+    assert_eq!(usage.limits[3].percent_left, 75.0);
+    assert!(usage.limits[0].reset_label.starts_with("resets in"));
+    assert_eq!(usage.limits[2].reset_label, "resets now");
+
+    let zen = r#"{"data":{"workspace":{"id":"wrk_1","usageURL":"u"},"budgets":[]}}"#;
+    let usage = PlanUsage::parse_opencode(zen).expect("signed in, no limits");
+    assert_eq!(usage.plan_name, "OpenCode Zen");
+    assert!(usage.limits.is_empty());
+
+    assert_eq!(PlanUsage::parse_opencode(r#"{"data":null}"#), None);
 }
 
 #[test]

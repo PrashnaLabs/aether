@@ -23,6 +23,7 @@ fn with(mut m: CliModel, context: Option<u64>, efforts: Option<&[&str]>) -> CliM
 
 fn sh_opts() -> DriverStartOptions {
     DriverStartOptions {
+        ephemeral: false,
         binary: "/bin/sh".into(),
         cwd: "/".into(),
         model: String::new(),

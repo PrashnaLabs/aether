@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use aether_agent::orchestrator::OrchCall;
+use aether_agent::orchestrator::{OrchCall, history_specs, tool_specs};
 use aether_core::{AccessMode, Message, Provider, Role, ToolDetail};
 use aether_driver::ProviderProbe;
 use aether_driver::antigravity::AgyEntry;
@@ -9,7 +9,8 @@ use aether_ui::ChatStatus;
 use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
-use super::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms};
+use super::{Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir};
+use crate::board::model::{Col, lead_move, open_lines};
 use crate::session_workspace::SplitAxis;
 
 pub(crate) fn lead_capable(provider: Provider) -> bool {
@@ -47,6 +48,7 @@ pub(super) struct SpawnArgs {
     pub(super) task: String,
     pub(super) worktree: bool,
     pub(super) nonce: String,
+    pub(super) card: Option<i64>,
 }
 
 impl SpawnArgs {
@@ -84,6 +86,7 @@ impl SpawnArgs {
             task: need("task")?,
             worktree,
             nonce: text("nonce"),
+            card: args["card"].as_i64(),
         })
     }
 }
@@ -246,14 +249,34 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = match self.chats.iter().position(|c| c.lead && c.id.to_string() == call.lead) {
+        let result = match self.chats.iter().position(|c| c.id.to_string() == call.lead) {
             None => Err("lead chat not found".to_string()),
             Some(ix) => match call.tool.as_str() {
+                "list_tools" if self.chats[ix].lead => Ok(tool_specs()),
+                "list_tools" => Ok(history_specs()),
+                "read_history" => self.read_history(ix, &call.args),
+                _ if !self.chats[ix].lead => Err("lead chat not found".to_string()),
                 "list_agents" => Ok(self.list_agents(ix)),
                 "spawn_agent" => self.spawn_agent(ix, &call.args, window, cx),
                 "read_agent" => self.read_agent(ix, &call.args),
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
+                "list_cards" => {
+                    let project = self.lead_project(ix);
+                    let cards: Vec<_> =
+                        self.cards.iter().filter(|c| c.project == project).cloned().collect();
+                    Ok(Value::String(open_lines(&cards)))
+                }
+                "add_card" => self.add_card(ix, &call.args),
+                "move_card" => self.move_card(ix, &call.args),
+                "list_chats" => self.list_chats(ix, &call.args),
+                "archive_chats" => self.ask_bulk(ix, Bulk::Archive, &call.args, window, cx),
+                "delete_chats" => self.ask_bulk(ix, Bulk::Delete, &call.args, window, cx),
+                "unarchive_chats" => self.unarchive_chats(ix, &call.args, window, cx),
+                "update_chat" => self.update_chat(&call.args, cx),
+                "stop_chat" => self.stop_any_chat(ix, &call.args, cx),
+                "open_chat" => self.open_chat_tool(&call.args, window, cx),
+                "delete_cards" => self.delete_cards(ix, &call.args, window, cx),
                 tool => Err(format!(r#"unknown tool "{tool}""#)),
             },
         };
@@ -289,6 +312,45 @@ impl ChatApp {
             })
             .collect();
         json!({"agents": agents, "children": children})
+    }
+
+    fn add_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
+        let text = |k: &str| args[k].as_str().unwrap_or_default().trim().to_string();
+        let title = text("title");
+        if title.is_empty() {
+            return Err(r#"missing "title""#.into());
+        }
+        let col = match text("col").as_str() {
+            "" => Col::Todo,
+            s => Col::parse(s).filter(|&c| c != Col::Done).ok_or_else(|| {
+                format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
+            })?,
+        };
+        let id = self.board_add(title.clone(), text("body"), col, self.lead_project(lead_ix), None, true);
+        Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
+    }
+
+    /// Board project of a lead: the folder it started in, even from a worktree.
+    pub(super) fn lead_project(&self, lead_ix: usize) -> String {
+        project_dir(&self.chats[lead_ix], &self.settings.workspace_root).display().to_string()
+    }
+
+    fn move_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_i64()
+            .or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()))
+            .ok_or_else(|| r#"missing "id""#.to_string())?;
+        let to = args["col"].as_str().unwrap_or_default();
+        let project = self.lead_project(lead_ix);
+        let card = self
+            .cards
+            .iter_mut()
+            .find(|c| c.id == id && c.project == project)
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        let msg = lead_move(card, to)?;
+        let col = card.col;
+        self.board_move(id, col, None);
+        Ok(Value::String(msg))
     }
 
     pub(super) fn own_child(&self, lead_ix: usize, args: &Value) -> Result<usize, String> {
@@ -501,7 +563,7 @@ impl ChatApp {
         self.hand_to_lead(lead_ix, delivery, window, cx);
     }
 
-    fn hand_to_lead(
+    pub(super) fn hand_to_lead(
         &mut self,
         lead_ix: usize,
         delivery: Delivery,
@@ -564,14 +626,38 @@ impl ChatApp {
         } else {
             None
         };
+        let project = self.lead_project(lead_ix);
+        if let Some(id) = a.card
+            && !self.cards.iter().any(|c| c.id == id && c.project == project)
+        {
+            return Err(format!("card #{id} not found"));
+        }
         let ix = self.create_child(lead_ix, &a)?;
         if let Some(reason) = self.worktree_blocks_send(ix) {
             self.chats.remove(ix);
             return Err(reason.to_string());
         }
         self.persist(ix);
+        let child_id = self.chats[ix].id;
+        let card = match a.card {
+            Some(id) => {
+                self.board_link(id, child_id);
+                id
+            }
+            None => {
+                self.board_add(
+                a.title.clone(),
+                a.task.clone(),
+                Col::Doing,
+                project,
+                Some(child_id),
+                true,
+            )
+            }
+        };
         let mut reply = json!({
-            "id": self.chats[ix].id,
+            "id": child_id,
+            "card": card,
             "title": a.title,
             "provider": a.provider.key(),
             "model": a.model,
@@ -685,6 +771,7 @@ impl ChatApp {
             parent: Some(parent),
             lead: false,
             lead_seen: None,
+            handoff_from: None,
         });
         Ok(self.chats.len() - 1)
     }

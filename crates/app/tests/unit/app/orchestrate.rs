@@ -10,6 +10,7 @@ use crate::app::orchestrate::{
     SpawnArgs, child_access, child_prompt, child_status, clip, delivery_text,
     needs_agy_registration, spawned_child, stranded_texts, unread,
 };
+use crate::board::model::Col;
 
 #[gpui_kit::test]
 fn toggle_lead_flips_and_persists_flag(cx: &mut TestAppContext) {
@@ -1650,6 +1651,71 @@ fn spawn_retry_with_same_nonce_returns_existing_child(cx: &mut TestAppContext) {
             let second = app.spawn_agent(1, &args, window, cx).unwrap();
             assert_eq!(first, second);
             assert_eq!(app.chats.len(), n, "retry must not create a second child");
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            app.chats[1].cwd = "/tmp/proj-wt/feat".into();
+            let other = app.board_add(
+                "Other".into(),
+                String::new(),
+                Col::Todo,
+                "/tmp/x".into(),
+                None,
+                false,
+            );
+            let mut call = |tool: &str, args: Value| {
+                let (reply, answer) = std::sync::mpsc::channel();
+                app.orchestrate(
+                    OrchCall { lead: "10".into(), tool: tool.into(), args, reply },
+                    window,
+                    cx,
+                );
+                answer.try_recv().unwrap()
+            };
+            assert_eq!(
+                call("add_card", json!({"title": "Mine"})),
+                Ok(Value::String("Created #2 in todo: Mine".into()))
+            );
+            assert_eq!(call("list_cards", json!({})), Ok(Value::String("#2 [todo] Mine".into())));
+            assert_eq!(
+                call("move_card", json!({"id": other, "col": "review"})),
+                Err(format!("card #{other} not found"))
+            );
+            let mine = app.cards.iter().find(|c| c.id == 2).unwrap();
+            assert_eq!((mine.project.as_str(), mine.by_agent), ("/tmp/proj", true));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn deleting_a_lead_unlinks_its_children_cards_and_handoffs(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let kid = with_child(app, 10);
+            let kid_ix = child_ix(app, kid);
+            app.chats[kid_ix].lead_seen = Some(1);
+            app.chats[0].handoff_from = Some(10);
+            let card = app.board_add(
+                "Lead work".into(),
+                String::new(),
+                Col::Doing,
+                "/tmp/proj".into(),
+                Some(10),
+                false,
+            );
+            app.delete_chat(1, window, cx);
+            let kid = &app.chats[child_ix(app, kid)];
+            assert_eq!((kid.parent, kid.lead_seen), (None, None));
+            assert_eq!(app.chats[0].handoff_from, None);
+            let card = app.cards.iter().find(|c| c.id == card).unwrap();
+            assert_eq!((card.chat, card.col), (None, Col::Doing));
         })
         .unwrap();
 }

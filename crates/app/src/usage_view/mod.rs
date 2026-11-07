@@ -205,6 +205,7 @@ impl ChatApp {
                 lead: c.lead,
                 lead_seen: c.lead_seen,
                 pending_deliveries: vec![],
+                handoff_from: c.handoff_from,
             })
             .collect()
     }

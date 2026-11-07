@@ -212,6 +212,9 @@ impl RenderOnce for ChatSidebar {
                         )
                     }),
             )
+            .when_some(self.bulk_bar, |sidebar, bar| {
+                sidebar.child(div().flex_none().w_full().px_3().pt_2().child(bar))
+            })
             .when_some(self.on_back, |sidebar, handler| {
                 sidebar.child(
                     h_flex().flex_none().w_full().px_3().pt_2().pb_3().child(

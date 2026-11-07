@@ -878,6 +878,7 @@ fn cancelled_error_result_only_settles() {
 #[test]
 fn full_access_args_start_fresh_session() {
     let opts = DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: "opus".into(),
@@ -889,7 +890,7 @@ fn full_access_args_start_fresh_session() {
         background: Vec::new(),
         lead: None,
     };
-    let (args, id, resumed) = launch_args(&opts);
+    let (args, id, resumed, _) = launch_args(&opts);
     let has = |pair: [&str; 2]| args.windows(2).any(|w| w == pair);
     assert!(has(["--permission-mode", "bypassPermissions"]));
     assert!(args.iter().any(|a| a == "--dangerously-skip-permissions"));
@@ -904,6 +905,7 @@ fn full_access_args_start_fresh_session() {
 #[test]
 fn launch_args_let_claude_read_attachments() {
     let opts = DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: "opus".into(),
@@ -941,6 +943,7 @@ fn user_message_puts_images_after_the_text() {
 #[test]
 fn auto_access_uses_auto_permission_mode_without_bypass() {
     let opts = DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: String::new(),
@@ -952,7 +955,7 @@ fn auto_access_uses_auto_permission_mode_without_bypass() {
         background: Vec::new(),
         lead: None,
     };
-    let (args, _, _) = launch_args(&opts);
+    let (args, ..) = launch_args(&opts);
     assert!(args.windows(2).any(|w| w == ["--permission-mode", "auto"]));
     assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions"));
 }
@@ -1010,6 +1013,7 @@ fn live_claude_smoke() {
     let dir = std::env::temp_dir().join(format!("aether-claude-smoke-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: dir.clone(),
         model: String::new(),
@@ -1096,6 +1100,7 @@ fn live_wake_smoke() {
     std::fs::create_dir_all(&dir).unwrap();
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let opts = DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: dir,
         model: "haiku".into(),
@@ -1173,6 +1178,7 @@ fn every_fixture_replays_without_panicking() {
 
 fn ask_opts() -> DriverStartOptions {
     DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: String::new(),
@@ -1188,7 +1194,7 @@ fn ask_opts() -> DriverStartOptions {
 
 #[test]
 fn launch_uses_public_flags_and_hook_events() {
-    let (args, _, _) = launch_args(&ask_opts());
+    let (args, ..) = launch_args(&ask_opts());
     let pair = |a: &str, b: &str| args.windows(2).any(|w| w[0] == a && w[1] == b);
     assert!(pair("--permission-prompts", "host") && pair("--permission-mode", "manual"));
     assert!(args.iter().any(|a| a == "--include-hook-events"));
@@ -1253,6 +1259,25 @@ fn modes_map_and_unknown_is_none() {
 }
 
 #[test]
+fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
+    let notice = lost_resume("no-such-session-aether-test", false).unwrap();
+    assert_eq!(notice.id, "info-resume");
+    assert_eq!(notice.kind, NoticeKind::Info);
+    assert_eq!(
+        notice.text,
+        "Couldn't find the earlier Claude session, so this is a new one."
+    );
+    assert!(lost_resume("", false).is_none());
+    assert!(lost_resume("abc", true).is_none());
+    let opts = DriverStartOptions { resume: "no-such-session-aether-test".into(), ..ask_opts() };
+    let (_, _, resumed, note) = launch_args(&opts);
+    assert!(!resumed);
+    assert_eq!(note.unwrap().text, notice.text);
+    let fresh = DriverStartOptions { resume: String::new(), ..ask_opts() };
+    assert!(launch_args(&fresh).3.is_none());
+}
+
+#[test]
 fn resume_failures_pick_fresh_or_fork() {
     let mut tail = StderrTail::default();
     tail.push("No conversation found with session ID: 1234");
@@ -1271,7 +1296,7 @@ fn fatal_fixture_fails_and_resume_fixture_does_not() {
 
 #[test]
 fn read_only_launches_plan_and_plan_init_is_no_mismatch() {
-    let (args, _, _) =
+    let (args, ..) =
         launch_args(&DriverStartOptions { access: AccessMode::ReadOnly, ..ask_opts() });
     assert!(args.windows(2).any(|w| w[0] == "--permission-mode" && w[1] == "plan"));
     let mut s = State { requested: AccessMode::ReadOnly, ..State::default() };
@@ -2023,6 +2048,7 @@ fn only_the_latest_interrupt_can_time_out() {
 
 fn test_opts() -> DriverStartOptions {
     DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: "opus".into(),
@@ -2034,6 +2060,14 @@ fn test_opts() -> DriverStartOptions {
         background: Vec::new(),
         lead: None,
     }
+}
+
+#[test]
+fn side_run_skips_session_persistence() {
+    let has =
+        |o: &DriverStartOptions| launch_args(o).0.iter().any(|a| a == "--no-session-persistence");
+    assert!(!has(&test_opts()));
+    assert!(has(&DriverStartOptions { ephemeral: true, ..test_opts() }));
 }
 
 #[test]
@@ -2170,4 +2204,63 @@ fn bash_approve_strips_display_notes_from_edited_command() {
         reply(&mut s, id, &same).unwrap()["response"]["response"]["updatedInput"]["command"],
         "ls"
     );
+}
+
+#[test]
+fn side_question_request_has_empty_history() {
+    let v = side_request("aether-btw-1", "why?");
+    assert_eq!(v["type"], "control_request");
+    assert_eq!(v["request_id"], "aether-btw-1");
+    assert_eq!(v["request"]["subtype"], "side_question");
+    assert_eq!(v["request"]["question"], "why?");
+    assert_eq!(v["request"]["history"], json!([]));
+}
+
+#[test]
+fn side_answer_routes_to_its_reply_only() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State { active: true, ..State::default() };
+    s.sides.insert("aether-btw-1".into(), tx);
+    let progress = r#"{"type":"system","subtype":"control_request_progress","request_id":"aether-btw-1","status":"started"}"#;
+    assert!(map_line(&mut s, progress).is_empty());
+    let done = r#"{"type":"control_response","response":{"subtype":"success","request_id":"aether-btw-1","response":{"response":"because","synthetic":false}}}"#;
+    assert!(map_line(&mut s, done).is_empty());
+    assert_eq!(rx.try_recv().unwrap(), Update::Final("because".into()));
+    assert!(s.sides.is_empty());
+    assert!(s.active);
+}
+
+#[test]
+fn synthetic_side_answer_is_an_error() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State::default();
+    s.sides.insert("aether-btw-3".into(), tx);
+    let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"aether-btw-3","response":{"response":"(No answer available for this side question.)","synthetic":true}}}"#;
+    assert!(map_line(&mut s, line).is_empty());
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        Update::Error("claude had no answer for this side question".into())
+    );
+}
+
+#[test]
+fn side_error_response_is_an_error() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State::default();
+    s.sides.insert("aether-btw-2".into(), tx);
+    let line = r#"{"type":"control_response","response":{"subtype":"error","request_id":"aether-btw-2","error":"Unsupported control request subtype: side_question"}}"#;
+    assert!(map_line(&mut s, line).is_empty());
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        Update::Error("Unsupported control request subtype: side_question".into())
+    );
+}
+
+#[test]
+fn process_exit_fails_pending_side_questions() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut s = State::default();
+    s.sides.insert("aether-btw-3".into(), tx);
+    on_exit(&mut s, "gone".into());
+    assert_eq!(rx.try_recv().unwrap(), Update::Error("gone".into()));
 }

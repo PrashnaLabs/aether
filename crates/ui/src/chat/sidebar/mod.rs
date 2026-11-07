@@ -367,6 +367,16 @@ pub const SIDEBAR_MIN_WIDTH: f32 = 200.;
 pub const SIDEBAR_MAX_WIDTH: f32 = 480.;
 
 type WatchHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
+type HandoffHandler = Rc<dyn Fn(i64, Provider, &mut Window, &mut App)>;
+type PickHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
+
+/// A row's bulk-select state: picked, any row picked, toggle.
+#[derive(Clone)]
+struct Pick {
+    picked: bool,
+    picking: bool,
+    on_toggle: PickHandler,
+}
 type ResizeHandler = Rc<dyn Fn(f32, &mut Window, &mut App)>;
 type ResizeEndHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -382,6 +392,7 @@ struct ChatItem {
     child: bool,
     lead: bool,
     on_watch: Option<WatchHandler>,
+    handoff: Option<(Vec<Provider>, HandoffHandler)>,
     line: Option<ChatLine>,
     on_click: RowHandler,
     on_rename: RowHandler,
@@ -393,6 +404,7 @@ struct ChatItem {
     on_status: Option<RowHandler>,
     /// Lives in the Archive view; its menu offers Unarchive.
     archived: bool,
+    pick: Option<Pick>,
     now: i64,
 }
 
@@ -479,6 +491,9 @@ pub struct ChatSidebar {
     collapsed_crews: std::collections::HashSet<i64>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
+    handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
+    picks: Option<(Vec<i64>, PickHandler)>,
+    bulk_bar: Option<AnyElement>,
 }
 
 impl ChatSidebar {
@@ -519,6 +534,9 @@ impl ChatSidebar {
             collapsed_crews: std::collections::HashSet::new(),
             leads: Vec::new(),
             on_watch: None,
+            handoff: None,
+            picks: None,
+            bulk_bar: None,
         }
     }
 
@@ -530,6 +548,17 @@ impl ChatSidebar {
     ) -> Self {
         self.watched = watched;
         self.on_watch = Some(Rc::new(on_watch));
+        self
+    }
+
+    /// Adds "Continue in new chat" to the menus of chats in `chats` (id, agent), listing `targets` but that agent.
+    pub fn handoff(
+        mut self,
+        targets: Vec<Provider>,
+        chats: Vec<(i64, Provider)>,
+        on_pick: impl Fn(i64, Provider, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.handoff = Some((targets, chats, Rc::new(on_pick)));
         self
     }
 
@@ -709,6 +738,7 @@ impl ChatSidebar {
             child: self.children.contains(&id),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
+            handoff: self.handoff_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),
@@ -719,6 +749,7 @@ impl ChatSidebar {
             on_remove_worktree: on_remove_worktree.map(Rc::from),
             on_status: on_status.map(Rc::from),
             archived: false,
+            pick: self.pick_for(id),
             now: 0,
         };
         match (project, worktree) {
@@ -824,6 +855,38 @@ impl ChatSidebar {
         self
     }
 
+    /// Rows added after this show a checkbox on hover; `picked` are checked.
+    pub fn pickable(
+        mut self,
+        picked: Vec<i64>,
+        on_toggle: impl Fn(i64, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.picks = Some((picked, Rc::new(on_toggle)));
+        self
+    }
+
+    /// Bulk actions pinned under the list, e.g. for picked rows.
+    pub fn bulk_bar(mut self, bar: impl IntoElement) -> Self {
+        self.bulk_bar = Some(bar.into_any_element());
+        self
+    }
+
+    fn handoff_for(&self, id: i64) -> Option<(Vec<Provider>, HandoffHandler)> {
+        let (targets, chats, pick) = self.handoff.as_ref()?;
+        let &(_, own) = chats.iter().find(|(c, _)| *c == id)?;
+        let targets: Vec<Provider> = targets.iter().copied().filter(|&t| t != own).collect();
+        (!targets.is_empty()).then(|| (targets, pick.clone()))
+    }
+
+    fn pick_for(&self, id: i64) -> Option<Pick> {
+        let (picked, on_toggle) = self.picks.as_ref()?;
+        Some(Pick {
+            picked: picked.contains(&id),
+            picking: !picked.is_empty(),
+            on_toggle: on_toggle.clone(),
+        })
+    }
+
     pub fn style(mut self, style: SidebarStyle) -> Self {
         self.style = style;
         self
@@ -885,6 +948,7 @@ impl ChatSidebar {
             child: self.children.contains(&id),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
+            handoff: self.handoff_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),
@@ -895,6 +959,7 @@ impl ChatSidebar {
             on_remove_worktree: on_remove_worktree.map(Rc::from),
             on_status: on_status.map(Rc::from),
             archived: self.archived,
+            pick: self.pick_for(id),
             now: 0,
         };
         let section = section.into();

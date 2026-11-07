@@ -31,13 +31,6 @@ fn legacy_openrouter_chat_uses_the_global_model() {
     assert_eq!(chat.model(&settings), "");
 }
 
-#[test]
-fn provider_locks_after_the_first_message() {
-    let mut chat = chat_with("t", &[]);
-    assert!(!chat.provider_locked());
-    chat.messages.push(Message::user("hi"));
-    assert!(chat.provider_locked());
-}
 
 #[test]
 fn activity_is_the_latest_send_reply_or_creation() {

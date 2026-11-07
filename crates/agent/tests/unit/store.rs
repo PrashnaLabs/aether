@@ -31,6 +31,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: Some(3),
     };
     let older = SavedChat {
         id: 3,
@@ -51,6 +52,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: None,
     };
     for chat in [&chat, &older] {
         rt.block_on(save(&store.pool, chat)).unwrap();
@@ -72,6 +74,8 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
     assert_eq!(chats[1].project, "/code/p");
     assert_eq!(chats[1].worktree_path, "/w/p-1/fix");
     assert_eq!(chats[1].worktree_branch, "aether/fix");
+    assert_eq!(chats[1].handoff_from, Some(3));
+    assert_eq!(chats[0].handoff_from, None);
     assert!(chats[0].project.is_empty() && chats[0].worktree_path.is_empty());
     let reply = &chats[1].messages[1];
     assert_eq!(reply.text, "**Hi**");
@@ -173,6 +177,7 @@ fn ids_include_every_row() {
             lead: false,
             lead_seen: None,
             pending_deliveries: vec![],
+            handoff_from: None,
         };
         rt.block_on(save(&store.pool, &chat)).unwrap();
     }
@@ -207,6 +212,7 @@ fn flush_returns_once_queued_saves_are_written() {
             lead: false,
             lead_seen: None,
             pending_deliveries: vec![],
+            handoff_from: None,
         });
     }
     store.flush();
@@ -251,6 +257,7 @@ fn parent_and_lead_round_trip() {
         lead: true,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: None,
     });
     store.flush();
     drop(store);
@@ -312,6 +319,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         lead: false,
         lead_seen: Some(3),
         pending_deliveries: vec![],
+        handoff_from: None,
     });
     store.save(SavedChat {
         id: 5,
@@ -336,6 +344,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
             reply_ix: Some(3),
             text: "[Aether child result] Agent 9 done".into(),
         }],
+        handoff_from: None,
     });
     store.flush();
     drop(store);
@@ -362,4 +371,71 @@ fn new_database_file_is_owner_only() {
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     let _ = std::fs::remove_file(&path);
     assert_eq!(mode, 0o600);
+}
+
+fn card(id: i64, col: &str, position: f64) -> SavedCard {
+    SavedCard {
+        id,
+        title: format!("Card {id}"),
+        body: "body".into(),
+        col: col.into(),
+        position,
+        chat: Some(7),
+        project: "/code/p".into(),
+        updated_at: 99,
+        by_agent: false,
+    }
+}
+
+#[test]
+fn cards_round_trip() {
+    let path = std::env::temp_dir().join(format!("aether-store-cards-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let mut a = card(1, "todo", 2.0);
+    let b = SavedCard { chat: None, by_agent: true, ..card(2, "doing", 0.5) };
+    store.save_card(a.clone());
+    store.save_card(b.clone());
+    a.title = "Renamed".into();
+    store.save_card(a.clone());
+    store.flush();
+    let cards = store.load_cards().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(cards, [b, a]);
+}
+
+#[test]
+fn card_delete() {
+    let path = std::env::temp_dir().join(format!("aether-store-carddel-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    store.save_card(card(1, "todo", 0.0));
+    store.delete_card(1);
+    store.flush();
+    let cards = store.load_cards().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert!(cards.is_empty());
+}
+
+#[test]
+fn old_db_gains_cards_table() {
+    let path = std::env::temp_dir().join(format!("aether-store-nocards-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    rt.block_on(async {
+        let options = SqliteConnectOptions::new().filename(&path).create_if_missing(true);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE chats (id INTEGER PRIMARY KEY, title TEXT NOT NULL, messages TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+    });
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let cards = store.load_cards();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(cards.unwrap(), vec![]);
 }

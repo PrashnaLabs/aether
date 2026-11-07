@@ -550,6 +550,13 @@ impl ChatApp {
                 .into_iter()
                 .chain([
                     (
+                        item("Tasks board")
+                            .icon(gpui_kit::assets::IconName::LayoutDashboard)
+                            .keywords(["kanban", "tasks", "cards", "todo"])
+                            .action(Box::new(crate::actions::OpenBoard)),
+                        None,
+                    ),
+                    (
                         item("Open usage")
                             .icon(gpui_kit::assets::IconName::ChartColumn)
                             .keywords(["cost", "tokens", "analytics", "spend", "history"])

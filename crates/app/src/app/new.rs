@@ -73,6 +73,9 @@ impl ChatApp {
             })
         });
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("Chat name"));
+        let board_title = cx.new(|cx| InputState::new(window, cx).placeholder("Title"));
+        let board_body =
+            cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 16).placeholder("Description"));
         let worktree_name_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Custom name, empty = auto from message")
         });
@@ -120,6 +123,7 @@ impl ChatApp {
         let hn_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search stories..."));
         let skill_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
+        let board_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search cards"));
         let explorer_quick_open_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search files by name..."));
         let grep_tip = key_hint(&SearchWorkspace, cx)
@@ -306,6 +310,11 @@ impl ChatApp {
                     cx.notify();
                 }
             }),
+            cx.subscribe_in(&board_search, window, |_, _, ev: &InputEvent, _, cx| {
+                if let InputEvent::Change = ev {
+                    cx.notify();
+                }
+            }),
             cx.observe_window_appearance(window, |this, window, cx| {
                 if this.settings.appearance == Appearance::System {
                     apply_look(&this.settings, window, cx);
@@ -319,6 +328,16 @@ impl ChatApp {
                     }
                     this.refresh_branches(None, cx);
                     this.refresh_git(false, cx);
+                }
+            }),
+            cx.subscribe_in(&board_title, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } | InputEvent::Blur = ev {
+                    this.board_commit_in(window, cx);
+                }
+            }),
+            cx.subscribe_in(&board_body, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::Blur = ev {
+                    this.board_commit_in(window, cx);
                 }
             }),
             cx.subscribe(&commit_message, |this, _, ev: &InputEvent, cx| {
@@ -445,6 +464,7 @@ impl ChatApp {
                     this.persist(ix);
                 }
             }
+            this.board_commit(cx);
             if let Some(store) = &this.store {
                 store.flush();
             }
@@ -464,6 +484,16 @@ impl ChatApp {
             ui_owner: None,
             workspace: Default::default(),
             agent,
+            cards: store
+                .as_ref()
+                .and_then(|s| s.load_cards().ok())
+                .unwrap_or_default()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            board_selected: None,
+            board_title,
+            board_body,
             store,
             chats: Vec::new(),
             active: 0,
@@ -526,7 +556,8 @@ impl ChatApp {
             background_resizing: false,
             removing: HashSet::new(),
             worktrees: None,
-            listing_worktrees: false,
+            // tests: no real ~/.aether worktree scan; its tokio wakeup aborts gpui tests
+            listing_worktrees: cfg!(test),
             external: Vec::new(),
             scan_run: 0,
             scanning: false,
@@ -561,6 +592,8 @@ impl ChatApp {
             attach_error: None,
             attaching: HashMap::new(),
             quotes: HashMap::new(),
+            side: HashMap::new(),
+            side_runs: 0,
             selection_bar: None,
             copied: None,
             sessions_made: 0,
@@ -581,6 +614,13 @@ impl ChatApp {
             right_surface: None,
             right_review_open: false,
             right_browser_open: false,
+            board_tab: false,
+            board_all: false,
+            board_search,
+            board_by: None,
+            board_picks: HashSet::new(),
+            archive_picks: Default::default(),
+            project_picks: Default::default(),
             right_panel_resizing: false,
             side_tabs: HashMap::new(),
             side_back: crate::side_panel::SideTab::Agent,
@@ -638,6 +678,13 @@ impl ChatApp {
         app.load_models(window, cx);
         if app.restore_chats() {
             app.prune_watchlist(cx);
+            let homes = app
+                .chats
+                .iter()
+                .filter(|c| !c.project.is_empty() && !c.cwd.is_empty() && c.cwd != c.project)
+                .map(|c| (c.cwd.clone(), c.project.clone()))
+                .collect();
+            app.board_tidy(&homes);
         }
         let restored_workspace = app.load_session_workspace(window, cx);
         app.refresh_missing_attachments(true, cx);

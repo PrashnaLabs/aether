@@ -143,3 +143,56 @@ fn updates_find_tools_inside_activity_groups() {
     assert!(shows_tool(&steps, &block, "c"));
     assert!(!shows_tool(&steps, &block, "other"));
 }
+
+#[test]
+fn seed_history_keeps_one_entry_per_message() {
+    use aether_core::{ToolCall, ToolDetail};
+    let mut chat = chat_with("c", &["ask", "", "again", "done"]);
+    chat.messages[1].apply(Update::Tool(ToolCall::new(
+        "1",
+        "T",
+        ToolDetail::Read { path: "README.md".into(), range: None },
+    )));
+    let seeded = seed_history(&chat.messages);
+    let texts: Vec<_> = seeded.iter().map(|(_, t)| t.as_str()).collect();
+    assert_eq!(texts, ["ask", "(tool calls only)", "again", "done"]);
+    assert_eq!(history(&chat.messages).len(), 3, "OpenRouter history still skips empty replies");
+}
+
+#[test]
+fn tool_records_show_what_ran_with_output_tails() {
+    use aether_core::{ToolCall, ToolDetail, ToolStatus};
+    let cmd = ToolCall::new(
+        "2",
+        "T",
+        ToolDetail::Command {
+            command: "ls api\n&& head -30 mcp_server.py".into(),
+            cwd: None,
+            output: format!("{}\nfrom fastmcp import FastMCP", "x".repeat(2_000)),
+            exit_code: Some(0),
+        },
+    );
+    let text = tool_record(&cmd, 600).unwrap();
+    assert!(
+        text.starts_with("- Ran `ls api && head -30 mcp_server.py` → exit 0\n  output:\n    …"),
+        "{text}"
+    );
+    assert!(text.ends_with("    from fastmcp import FastMCP") && text.len() < 700, "{text}");
+    let mut failed = ToolCall::new(
+        "4",
+        "T",
+        ToolDetail::Search {
+            pattern: "Product".into(),
+            path: Some("api".into()),
+            matches: Some(12),
+            output: String::new(),
+        },
+    );
+    (failed.status, failed.error) = (ToolStatus::Failed, Some("rg missing\nmore".into()));
+    assert_eq!(
+        tool_record(&failed, 600).unwrap(),
+        "- Searched `Product` in api → 12 matches (failed: rg missing)"
+    );
+    let read = ToolCall::new("1", "T", ToolDetail::Read { path: "README.md".into(), range: None });
+    assert_eq!(tool_record(&read, 600).unwrap(), "- Read README.md");
+}

@@ -26,7 +26,20 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS chats (
     parent INTEGER,
     lead INTEGER NOT NULL DEFAULT 0,
     lead_seen INTEGER,
-    pending_deliveries TEXT NOT NULL DEFAULT '[]'
+    pending_deliveries TEXT NOT NULL DEFAULT '[]',
+    handoff_from INTEGER
+)";
+
+const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    col TEXT NOT NULL DEFAULT 'todo',
+    position REAL NOT NULL DEFAULT 0,
+    chat INTEGER,
+    project TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    by_agent INTEGER NOT NULL DEFAULT 0
 )";
 
 // Added after the first release; existing files gain them with zero values.
@@ -55,6 +68,8 @@ pub struct SavedChat {
     pub lead_seen: Option<usize>,
     /// Child results queued for this lead but not yet delivered as a turn.
     pub pending_deliveries: Vec<SavedDelivery>,
+    /// Chat this one was handed off from.
+    pub handoff_from: Option<i64>,
 }
 
 /// A child result waiting to be handed to its lead.
@@ -66,6 +81,21 @@ pub struct SavedDelivery {
     pub text: String,
 }
 
+/// A task-board card as kept on disk. `col` is one of backlog|todo|doing|review|done.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SavedCard {
+    pub id: i64,
+    pub title: String,
+    pub body: String,
+    pub col: String,
+    pub position: f64,
+    pub chat: Option<i64>,
+    pub project: String,
+    pub updated_at: i64,
+    /// Added by an agent's add_card or spawn_agent, not the user.
+    pub by_agent: bool,
+}
+
 /// Chats in a SQLite file. Saves queue up and are written in order.
 pub struct Store {
     pool: SqlitePool,
@@ -75,6 +105,8 @@ pub struct Store {
 
 enum Write {
     Save(Box<SavedChat>),
+    SaveCard(SavedCard),
+    DeleteCard(i64),
     /// Answered once every write queued before it is done.
     Flush(std::sync::mpsc::Sender<()>),
 }
@@ -97,6 +129,18 @@ impl Store {
         let pool = rt.block_on(async {
             let pool = SqlitePool::connect_with(options).await?;
             sqlx::query(SCHEMA).execute(&pool).await?;
+            sqlx::query(CARDS_SCHEMA).execute(&pool).await?;
+            let card_cols: Vec<String> = sqlx::query("PRAGMA table_info(cards)")
+                .fetch_all(&pool)
+                .await?
+                .iter()
+                .map(|row| row.get::<String, _>("name"))
+                .collect();
+            if !card_cols.iter().any(|c| c == "by_agent") {
+                sqlx::query("ALTER TABLE cards ADD COLUMN by_agent INTEGER NOT NULL DEFAULT 0")
+                    .execute(&pool)
+                    .await?;
+            }
             let cols: Vec<String> = sqlx::query("PRAGMA table_info(chats)")
                 .fetch_all(&pool)
                 .await?
@@ -158,6 +202,7 @@ impl Store {
                     "pending_deliveries",
                     "ALTER TABLE chats ADD COLUMN pending_deliveries TEXT NOT NULL DEFAULT '[]'",
                 ),
+                ("handoff_from", "ALTER TABLE chats ADD COLUMN handoff_from INTEGER"),
             ] {
                 if !cols.iter().any(|c| c == col) {
                     sqlx::query(add).execute(&pool).await?;
@@ -175,6 +220,20 @@ impl Store {
                             eprintln!("aether: couldn't save chat {}: {e}", chat.id);
                         }
                     }
+                    Write::SaveCard(card) => {
+                        if let Err(e) = save_card(&writer, &card).await {
+                            eprintln!("aether: couldn't save card {}: {e}", card.id);
+                        }
+                    }
+                    Write::DeleteCard(id) => {
+                        if let Err(e) = sqlx::query("DELETE FROM cards WHERE id = ?")
+                            .bind(id)
+                            .execute(&writer)
+                            .await
+                        {
+                            eprintln!("aether: couldn't delete card {id}: {e}");
+                        }
+                    }
                     Write::Flush(done) => {
                         let _ = done.send(());
                     }
@@ -187,7 +246,7 @@ impl Store {
     /// Every chat whose row and messages still parse, oldest first.
     pub fn load(&self) -> sqlx::Result<Vec<SavedChat>> {
         let rows = self.rt.block_on(
-            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries FROM chats ORDER BY id")
+            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from FROM chats ORDER BY id")
                 .fetch_all(&self.pool),
         )?;
         Ok(rows
@@ -217,6 +276,7 @@ impl Store {
                         .ok()?
                         .and_then(|v| usize::try_from(v).ok()),
                     pending_deliveries: parse_pending_deliveries(&text("pending_deliveries")?),
+                    handoff_from: row.try_get("handoff_from").ok()?,
                 })
             })
             .collect())
@@ -233,6 +293,44 @@ impl Store {
         let id = chat.id;
         if let Err(e) = self.writes.unbounded_send(Write::Save(Box::new(chat))) {
             eprintln!("aether: couldn't queue save for chat {id}: {e}");
+        }
+    }
+
+    /// Every card, ordered by column then position.
+    pub fn load_cards(&self) -> sqlx::Result<Vec<SavedCard>> {
+        let rows = self.rt.block_on(
+            sqlx::query("SELECT id, title, body, col, position, chat, project, updated_at, by_agent FROM cards ORDER BY col, position")
+                .fetch_all(&self.pool),
+        )?;
+        rows.iter()
+            .map(|row| {
+                Ok(SavedCard {
+                    id: row.try_get("id")?,
+                    title: row.try_get("title")?,
+                    body: row.try_get("body")?,
+                    col: row.try_get("col")?,
+                    position: row.try_get("position")?,
+                    chat: row.try_get("chat")?,
+                    project: row.try_get("project")?,
+                    updated_at: row.try_get("updated_at")?,
+                    by_agent: row.try_get("by_agent")?,
+                })
+            })
+            .collect()
+    }
+
+    /// Inserts or replaces the card in the background.
+    pub fn save_card(&self, card: SavedCard) {
+        let id = card.id;
+        if let Err(e) = self.writes.unbounded_send(Write::SaveCard(card)) {
+            eprintln!("aether: couldn't queue save for card {id}: {e}");
+        }
+    }
+
+    /// Deletes the card in the background; a missing row is fine.
+    pub fn delete_card(&self, id: i64) {
+        if let Err(e) = self.writes.unbounded_send(Write::DeleteCard(id)) {
+            eprintln!("aether: couldn't queue delete for card {id}: {e}");
         }
     }
 
@@ -278,7 +376,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     let pending_deliveries = serde_json::to_string(&chat.pending_deliveries)
         .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
     sqlx::query(
-        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, messages = excluded.messages,
          pinned = excluded.pinned, archived = excluded.archived,
          provider = excluded.provider, provider_model = excluded.provider_model,
@@ -286,7 +384,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
          effort = excluded.effort, cwd = excluded.cwd, project = excluded.project,
          worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
          parent = excluded.parent, lead = excluded.lead, lead_seen = excluded.lead_seen,
-         pending_deliveries = excluded.pending_deliveries",
+         pending_deliveries = excluded.pending_deliveries, handoff_from = excluded.handoff_from",
     )
     .bind(chat.id)
     .bind(&chat.title)
@@ -306,6 +404,28 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     .bind(i64::from(chat.lead))
     .bind(chat.lead_seen.map(i64::try_from).transpose().ok().flatten())
     .bind(pending_deliveries)
+    .bind(chat.handoff_from)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn save_card(pool: &SqlitePool, card: &SavedCard) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO cards (id, title, body, col, position, chat, project, updated_at, by_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
+         col = excluded.col, position = excluded.position, chat = excluded.chat,
+         project = excluded.project, updated_at = excluded.updated_at, by_agent = excluded.by_agent",
+    )
+    .bind(card.id)
+    .bind(&card.title)
+    .bind(&card.body)
+    .bind(&card.col)
+    .bind(card.position)
+    .bind(card.chat)
+    .bind(&card.project)
+    .bind(card.updated_at)
+    .bind(card.by_agent)
     .execute(pool)
     .await?;
     Ok(())

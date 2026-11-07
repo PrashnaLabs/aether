@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::channel::mpsc::UnboundedSender;
 use serde_json::{Value, json};
@@ -56,9 +56,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
 #[allow(unused_imports)]
 use std::sync::mpsc::channel;
-#[cfg(test)]
-#[allow(unused_imports)]
-use std::time::Instant;
 
 mod approve;
 mod events;
@@ -88,6 +85,8 @@ enum Call {
     Note,
     Models(String),
     SideThread(String),
+    Fork(String, UnboundedSender<Update>),
+    ForkTurn(String),
     Terminate(String),
     Reconcile(Vec<String>),
 }
@@ -104,6 +103,8 @@ enum Naming {
 
 #[derive(Default)]
 pub(crate) struct State {
+    /// Fork thread id to the side question it answers.
+    sides: HashMap<String, Side>,
     next_id: u64,
     calls: HashMap<u64, Call>,
     outbox: Vec<Value>,
@@ -148,6 +149,11 @@ pub(crate) struct State {
     resolved: String,
     /// Items started this turn; only these can be cut by its Stop.
     turn_rows: HashSet<String>,
+}
+
+pub(crate) struct Side {
+    reply: UnboundedSender<Update>,
+    text: String,
 }
 
 const LIVE_OUTPUT_CAP: usize = 64 * 1024;
@@ -253,6 +259,21 @@ impl State {
     }
 }
 
+/// Responses API messages for thread/inject_items: the context note, then each message.
+pub(crate) fn inject_items(context: &str, messages: &[(aether_core::Role, String)]) -> Value {
+    let item = |role: &str, kind: &str, text: &str| {
+        json!({"type": "message", "role": role, "content": [{"type": kind, "text": text}]})
+    };
+    let mut items = vec![item("user", "input_text", context)];
+    for (role, text) in messages {
+        items.push(match role {
+            aether_core::Role::User => item("user", "input_text", text),
+            aether_core::Role::Assistant => item("assistant", "output_text", text),
+        });
+    }
+    items.into()
+}
+
 impl Driver for CodexDriver {
     fn prompt(&mut self, text: String, images: Vec<Attachment>) {
         let mut s = self.state.guard();
@@ -305,6 +326,21 @@ impl Driver for CodexDriver {
         let mut s = self.state.guard();
         (s.model, s.effort) = (model.to_string(), effort.to_string());
         true
+    }
+
+    fn seed_history(&mut self, context: &str, messages: &[(aether_core::Role, String)]) -> bool {
+        let thread = self.state.guard().thread.clone();
+        if thread.is_empty() {
+            return false;
+        }
+        let params = json!({"threadId": thread, "items": inject_items(context, messages)});
+        let deadline = Instant::now() + Duration::from_secs(10);
+        self.request("thread/inject_items", params, deadline).is_ok()
+    }
+
+    fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
+        let line = fork_line(&mut self.state.guard(), self.resumed, question, reply);
+        line.inspect(|line| self.write(line)).is_some()
     }
 
     fn cancel(&mut self) {
@@ -403,6 +439,21 @@ impl Drop for CodexDriver {
     }
 }
 
+/// The `thread/fork` that opens a `/btw` side question; none while the thread has no turn to fork.
+pub(crate) fn fork_line(
+    s: &mut State,
+    resumed: bool,
+    question: &str,
+    reply: UnboundedSender<Update>,
+) -> Option<Value> {
+    let model = if s.model.is_empty() { &s.resolved } else { &s.model };
+    if s.dead.is_some() || s.thread.is_empty() || model.is_empty() || !(resumed || s.turn > 0) {
+        return None;
+    }
+    let params = fork_params(&s.thread, model);
+    Some(s.rpc("thread/fork", params, Some(Call::Fork(question.to_string(), reply))))
+}
+
 fn on_cancel(s: &mut State) -> bool {
     if !s.active {
         return false;
@@ -490,6 +541,9 @@ fn on_death(s: &mut State, why: String) -> Vec<Update> {
         out.push(Update::Final(String::new()));
     } else {
         out.push(Update::Warning(why.clone()));
+    }
+    for (_, side) in s.sides.drain() {
+        let _ = side.reply.unbounded_send(Update::Error(why.clone()));
     }
     s.dead = Some(why);
     out

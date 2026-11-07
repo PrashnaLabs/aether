@@ -39,6 +39,7 @@ use gpui_kit::{App, Context, Entity, FocusHandle, SharedString, Subscription, Wi
 
 mod chat;
 mod composer;
+mod control;
 mod draft_editor;
 mod format;
 mod links;
@@ -59,6 +60,7 @@ mod worktree;
 
 pub(crate) use format::{chat_markdown, display_path, format_full, format_time, now_ms};
 pub(crate) use providers::picker_value;
+pub(crate) use chat::Bulk;
 use sidebar::folder_label;
 use worktree::SetupJob;
 
@@ -74,6 +76,7 @@ pub(crate) enum Page {
     Project,
     HackerNews,
     Notes,
+    Board,
 }
 
 pub(crate) const CLIS: [Provider; 5] =
@@ -136,7 +139,7 @@ pub(crate) struct Chat {
     /// Outside agent this chat was opened from; read-only while it runs.
     pub external_pid: Option<u32>,
     /// When the latest turn was sent, in ms; 0 until one is sent this run.
-    turn_at: i64,
+    pub(crate) turn_at: i64,
     /// Folder the chat started in, once it runs in a worktree; empty otherwise.
     project: String,
     /// Worktree the chat runs in and the branch made for it; empty for none.
@@ -147,6 +150,8 @@ pub(crate) struct Chat {
     pub(crate) lead: bool,
     /// Newest reply of this child its lead has read with read_agent.
     pub(crate) lead_seen: Option<usize>,
+    /// Chat this one was handed off from.
+    pub(crate) handoff_from: Option<i64>,
     /// Draft only: base branch for a worktree made at first send; `None` works locally.
     pub(crate) new_worktree: Option<String>,
     /// Draft only: live worktree to share at first send; `None` unless picked. Disarms `new_worktree`.
@@ -305,13 +310,8 @@ impl Chat {
         self.cancel.is_some() || self.queue.iter().any(|q| q.delivering)
     }
 
-    /// Provider can change only before the first message.
-    fn provider_locked(&self) -> bool {
-        !self.messages.is_empty() || self.cancel.is_some()
-    }
-
     /// Kind of reply the pending request needs, for the project page.
-    fn wait_label(&self) -> &'static str {
+    pub(crate) fn wait_label(&self) -> &'static str {
         match self.messages.last().and_then(Message::pending_request).map(|r| &r.ask) {
             Some(Ask::Question { .. } | Ask::Questions(_) | Ask::Form(_)) => "Answer",
             Some(Ask::Plan(_)) => "Review",
@@ -319,7 +319,7 @@ impl Chat {
         }
     }
 
-    fn status(&self, now_ms: i64) -> ChatStatus {
+    pub(crate) fn status(&self, now_ms: i64) -> ChatStatus {
         let last = self.messages.last();
         let busy = self.cancel.is_some();
         let retrying = last.is_some_and(|m| running_notice(m, &[NoticeKind::Retry]));
@@ -487,7 +487,11 @@ pub(crate) struct ChatApp {
     pub(crate) ui_owner: Option<i64>,
     pub(crate) workspace: crate::session_workspace::Workspace,
     pub(crate) agent: Agent,
-    store: Option<Store>,
+    pub(crate) store: Option<Store>,
+    pub(crate) cards: Vec<crate::board::model::BoardCard>,
+    pub(crate) board_selected: Option<i64>,
+    pub(crate) board_title: Entity<InputState>,
+    pub(crate) board_body: Entity<TextareaState>,
     pub(crate) chats: Vec<Chat>,
     pub(crate) active: usize,
     /// Chat whose text the composer holds; by id, as indices shift.
@@ -607,6 +611,9 @@ pub(crate) struct ChatApp {
     pub(crate) attaching: HashMap<i64, usize>,
     /// Reply text each chat's next message quotes, by chat id.
     quotes: HashMap<i64, SharedString>,
+    /// In-memory `/btw` cards per chat id, oldest first; never saved.
+    pub(crate) side: HashMap<i64, Vec<chat::SideCard>>,
+    side_runs: u64,
     /// Chat, window point and text of the reply selection the toolbar acts on.
     selection_bar: Option<(i64, gpui_kit::Point<gpui_kit::Pixels>, SharedString)>,
     /// (chat, message) whose Copy button reads "Copied" until the timer clears it.
@@ -631,6 +638,15 @@ pub(crate) struct ChatApp {
     pub(crate) right_surface: Option<crate::side_panel::Surface>,
     pub(crate) right_review_open: bool,
     pub(crate) right_browser_open: bool,
+    pub(crate) board_tab: bool,
+    pub(crate) board_all: bool,
+    pub(crate) board_search: Entity<InputState>,
+    /// Author filter: `None` all, `Some(true)` agent-added, `Some(false)` user-added.
+    pub(crate) board_by: Option<bool>,
+    /// Cards picked for a bulk delete.
+    pub(crate) board_picks: HashSet<i64>,
+    pub(crate) archive_picks: HashSet<i64>,
+    pub(crate) project_picks: HashSet<i64>,
     pub(crate) right_panel_resizing: bool,
     /// Detached session windows' tabs; main keeps `side_tab`.
     pub(crate) side_tabs: HashMap<crate::session_workspace::WindowId, crate::side_panel::SideTab>,
@@ -691,11 +707,15 @@ pub(crate) struct ChatApp {
 impl ChatApp {
     pub(crate) fn open_project_page(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
         self.project_page = Some(folder.clone());
+        self.project_picks.clear();
         self.open_page(Page::Project, cx);
         self.load_project_data(folder, cx);
     }
 
     pub(crate) fn open_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.page == Page::Board && page != Page::Board {
+            self.board_commit(cx);
+        }
         self.open_error = None;
         if page == Page::Agents {
             self.scan_agents(cx);
@@ -854,6 +874,7 @@ pub(super) fn chat_with(title: &str, texts: &[&str]) -> Chat {
         parent: None,
         lead: false,
         lead_seen: None,
+        handoff_from: None,
     }
 }
 

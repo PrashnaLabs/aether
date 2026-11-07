@@ -37,14 +37,49 @@ fn notifications_get_no_reply() {
 fn tools_list_is_empty_without_token() {
     let v = rpc(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, None, &mut never);
     assert_eq!(v["result"]["tools"], serde_json::json!([]));
-    let v = rpc(r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#, Some("t"), &mut never);
+    let mut down = |_: &str, _: Value| Err("Aether didn't answer".to_string());
+    let v = rpc(r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#, Some("t"), &mut down);
     let names: Vec<_> = v["result"]["tools"]
         .as_array()
         .unwrap()
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(names, ["list_agents", "spawn_agent", "read_agent", "message_agent", "stop_agent"]);
+    assert_eq!(
+        names,
+        [
+            "list_agents",
+            "spawn_agent",
+            "read_agent",
+            "message_agent",
+            "stop_agent",
+            "list_cards",
+            "add_card",
+            "move_card",
+            "delete_cards",
+            "read_history",
+            "list_chats",
+            "archive_chats",
+            "delete_chats",
+            "unarchive_chats",
+            "update_chat",
+            "stop_chat",
+            "open_chat"
+        ]
+    );
+}
+
+#[test]
+fn tools_list_asks_the_app_which_tools_this_chat_gets() {
+    let mut asked = None;
+    let v = rpc(r#"{"jsonrpc":"2.0","id":5,"method":"tools/list"}"#, Some("t"), &mut |tool, _| {
+        asked = Some(tool.to_string());
+        Ok(crate::orchestrator::history_specs())
+    });
+    assert_eq!(asked.as_deref(), Some("list_tools"));
+    let names: Vec<_> =
+        v["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].clone()).collect();
+    assert_eq!(names, ["read_history"]);
 }
 
 #[test]

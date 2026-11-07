@@ -177,6 +177,76 @@ fn merge_matches_opencode_tuis_and_drops_own_sessions() {
 }
 
 #[test]
+fn pi_session_arg_parses_path_flags() {
+    let want = Some(PathBuf::from("/x/y.jsonl"));
+    assert_eq!(pi_session_arg("pi --session /x/y.jsonl foo"), want.clone());
+    assert_eq!(pi_session_arg("pi -s /x/y.jsonl"), want.clone());
+    assert_eq!(
+        pi_session_arg("node /x/pi-coding-agent/dist/cli.js --session /x/y.jsonl"),
+        want.clone()
+    );
+    assert_eq!(pi_session_arg("pi --session=/x/y.jsonl"), want);
+    assert_eq!(
+        pi_session_arg("pi --session relative.jsonl"),
+        Some(PathBuf::from("relative.jsonl"))
+    );
+    assert_eq!(pi_session_arg("pi"), None);
+    assert_eq!(pi_session_arg("pi --resume"), None);
+    assert_eq!(pi_session_arg("pi --sessionx /x/y.jsonl"), None);
+    assert_eq!(pi_session_arg("pi --session abc"), None);
+}
+
+#[test]
+fn pi_session_id_parses_bare_ids() {
+    assert_eq!(pi_session_id("pi --session abc"), Some("abc".into()));
+    assert_eq!(pi_session_id("pi --session=/x/y.jsonl"), None);
+    assert_eq!(pi_session_id("pi --session-id abc"), Some("abc".into()));
+    assert_eq!(pi_session_id("pi"), None);
+}
+
+#[test]
+fn pi_session_prefers_session_arg_over_newest_file() {
+    let root = std::env::temp_dir().join(format!("aether-pi-exact-{}-a", std::process::id()));
+    let dir = root.join("--w--");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stop = r#"{"type":"message","message":{"role":"assistant","stopReason":"stop"}}"#;
+    let now = SystemTime::now();
+    let file = |name: &str, age: u64| {
+        let path = dir.join(name);
+        std::fs::write(&path, stop).unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(now - Duration::from_secs(age))
+            .unwrap();
+        path
+    };
+    let old = file("2020-01-01T00-00-00-000Z_old-id.jsonl", 100_000);
+    file("newer.jsonl", 10);
+    let cmd = format!("pi --session {}", old.display());
+    let mut a = agent(Provider::Pi, "/w", "");
+    pi_session(&mut a, &root, &HashSet::new(), &cmd);
+    assert_eq!((a.session.as_str(), a.exact), (old.to_string_lossy().as_ref(), true));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn pi_session_resolves_bare_id_to_bucket_file() {
+    let root = std::env::temp_dir().join(format!("aether-pi-exact-{}-b", std::process::id()));
+    let dir = root.join("--w--");
+    std::fs::create_dir_all(&dir).unwrap();
+    let id = "01a1b1f1-a601-723a-bc93-f0b7df1fc391";
+    let path = dir.join(format!("2026-11-06T17-39-26-337Z_{id}.jsonl"));
+    std::fs::write(&path, format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"cwd\":\"/w\"}}\n{{\"type\":\"message\",\"message\":{{\"role\":\"assistant\",\"stopReason\":\"stop\"}}}}")).unwrap();
+    let cmd = format!("pi --session {id}");
+    let mut a = agent(Provider::Pi, "/w", "");
+    pi_session(&mut a, &root, &HashSet::new(), &cmd);
+    assert_eq!((a.session.as_str(), a.exact), (path.to_string_lossy().as_ref(), true));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn pi_session_picks_newest_outside_file() {
     let root = std::env::temp_dir().join(format!("aether-pi-scan-{}", std::process::id()));
     let dir = root.join("--w--");
@@ -197,9 +267,9 @@ fn pi_session_picks_newest_outside_file() {
     let (mine, theirs) = (file("mine.jsonl", 10), file("theirs.jsonl", 20));
     file("before-start.jsonl", 1000);
     let mut a = agent(Provider::Pi, "/w", "");
-    pi_session(&mut a, &root, &HashSet::from([mine.clone()]));
+    pi_session(&mut a, &root, &HashSet::from([mine.clone()]), "pi");
     assert_eq!((a.session.as_str(), a.state.clone()), (theirs.as_str(), Idle));
-    pi_session(&mut a, &root, &HashSet::new());
+    pi_session(&mut a, &root, &HashSet::new(), "pi");
     assert_eq!(a.session, mine);
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -284,10 +354,38 @@ fn claude_transcript_keeps_plain_text_only() {
         "not json",
     ]
     .join("\n");
+    let turns = claude_transcript(&t);
+    assert_eq!(texts(&turns), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    assert_eq!(turns[1].tools.len(), 1);
+}
+
+fn texts(turns: &[Turn]) -> Vec<(Role, String)> {
+    turns.iter().map(|t| (t.role, t.text.clone())).collect()
+}
+
+#[test]
+fn claude_tool_calls_come_back_typed_with_their_results() {
+    let t = [
+        r#"{"type":"user","message":{"content":"what is this"}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Read","input":{"file_path":"README.md"}}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"ls api"}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b","content":"views.py"}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"A Django API."}]}}"#,
+    ]
+    .join("\n");
+    let turns = claude_transcript(&t);
     assert_eq!(
-        claude_transcript(&t),
-        [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]
+        texts(&turns),
+        [(Role::User, "what is this".into()), (Role::Assistant, "A Django API.".into())]
     );
+    let tools = &turns[1].tools;
+    assert!(
+        matches!(&tools[0].detail, aether_core::ToolDetail::Read { path, .. } if path == "README.md")
+    );
+    assert!(
+        matches!(&tools[1].detail, aether_core::ToolDetail::Command { command, output, .. } if command == "ls api" && output.contains("views.py"))
+    );
+    assert!(tools.iter().all(|c| c.status == aether_core::ToolStatus::Done));
 }
 
 #[test]
@@ -299,7 +397,91 @@ fn pi_transcript_keeps_user_and_assistant_text() {
         r#"{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"out"}]}}"#,
     ]
     .join("\n");
-    assert_eq!(pi_transcript(&t), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    let turns = pi_transcript(&t);
+    assert_eq!(texts(&turns), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    assert_eq!(turns[1].tools.len(), 1);
+}
+
+#[test]
+fn codex_transcript_keeps_user_and_assistant_text() {
+    let t = [
+        r#"{"type":"session_meta","payload":{"id":"01a10f51-211c-7610-a20f-ac9f43c1c667"}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"system"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/x</cwd>\n</environment_context>"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>agents</user_instructions>"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"hm"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"custom_tool_call","name":"x","input":"{}"}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"again"},{"type":"input_image","image_url":"x"}]}}"#,
+        "not json",
+    ]
+    .join("\n");
+    let turns = codex_transcript(&t);
+    assert_eq!(
+        texts(&turns),
+        [
+            (Role::User, "hi".into()),
+            (Role::Assistant, "hello".into()),
+            (Role::User, "again".into())
+        ]
+    );
+    assert_eq!(turns[1].tools.len(), 1);
+}
+
+#[test]
+fn codex_file_finds_rollout_by_thread_id() {
+    let root = std::env::temp_dir().join(format!("aether-codex-lookup-{}", std::process::id()));
+    let dir = root.join("sessions/2026/10/06");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rollout-2026-10-06T09-30-37-01a10f51-211c-7610-a20f-ac9f43c1c667.jsonl");
+    std::fs::write(&path, "{}").unwrap();
+    assert_eq!(
+        codex_file(&root, "01a10f51-211c-7610-a20f-ac9f43c1c667"),
+        Some(path.to_string_lossy().into_owned())
+    );
+    assert_eq!(codex_file(&root, "missing"), None);
+    assert_eq!(codex_file(&root, "../escape"), None);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn agy_transcript_decodes_user_and_planner_steps() {
+    let rows = [
+        // type 14, a fixed64 to skip, then 19 { 2: "hi" }
+        "14|080E1901020304050607089A010412026869",
+        // 19 { 3 { 1: "yo" } } fallback
+        "14|080E9A01061A040A02796F",
+        // planner 20 { 1: "hello" }
+        "15|080FA201070A0568656C6C6F",
+        // tool-only planner placeholder, and a truncated blob
+        "15|080F",
+        "15|A20107",
+    ]
+    .join("\n");
+    assert_eq!(
+        texts(&agy_transcript(&rows)),
+        [
+            (Role::User, "hi".to_string()),
+            (Role::User, "yo".to_string()),
+            (Role::Assistant, "hello".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn agy_rows_reads_with_and_without_a_wal() {
+    let dir = std::env::temp_dir().join(format!("aether-agy-rows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("c2f4e33d.db");
+    let sql = "CREATE TABLE steps (idx INTEGER, step_type INTEGER, step_payload BLOB); \
+               INSERT INTO steps VALUES (0, 14, X'9A010412026869'), (1, 132, X'00');";
+    let made = std::process::Command::new("/usr/bin/sqlite3").arg(&db).arg(&sql).status();
+    assert!(made.unwrap().success());
+    assert_eq!(agy_rows(&db).as_deref(), Some("14|9A010412026869\n132|00\n"));
+    std::fs::write(db.with_extension("db-wal"), "not a wal").unwrap();
+    assert_eq!(texts(&agy_transcript(&agy_rows(&db).unwrap())), [(Role::User, "hi".to_string())]);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -308,10 +490,9 @@ fn opencode_transcript_keeps_text_parts() {
             {"type":"assistant","id":"msg_3","content":[{"type":"tool","id":"d","name":"bash"}]},
             {"type":"assistant","id":"msg_2","content":[{"type":"reasoning","text":"hm"},{"type":"tool","id":"c","name":"bash"},{"type":"text","text":"hello"}]},
             {"type":"user","id":"msg_1","text":"hi"}]}"#;
-    assert_eq!(
-        opencode_transcript(body),
-        [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]
-    );
+    let turns = opencode_transcript(body);
+    assert_eq!(texts(&turns), [(Role::User, "hi".into()), (Role::Assistant, "hello".into())]);
+    assert_eq!(turns[1].tools.len(), 2);
 }
 
 #[test]
@@ -326,4 +507,34 @@ fn live_scan_summary() {
             a.provider, a.pid, a.state, a.exact, a.origin
         );
     }
+}
+
+#[test]
+fn agy_planner_calls_settle_from_tool_steps() {
+    fn field(n: u64, body: &[u8]) -> Vec<u8> {
+        let mut out = vec![];
+        let mut key = n << 3 | 2;
+        while key >= 0x80 {
+            out.push((key as u8) | 0x80);
+            key >>= 7;
+        }
+        out.push(key as u8);
+        out.push(body.len() as u8);
+        out.extend_from_slice(body);
+        out
+    }
+    let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02X}")).collect::<String>();
+    let call =
+        [field(1, b"t1"), field(2, b"run_command"), field(3, br#"{"CommandLine":"ls"}"#)].concat();
+    let plan = field(20, &[field(1, b"Looking."), field(7, &call)].concat());
+    let step = [field(5, &field(4, &field(1, b"t1"))), field(140, &field(2, &field(1, b"a.txt")))]
+        .concat();
+    let rows = format!("15|{}\n132|{}", hex(plan), hex(step));
+    let turns = agy_transcript(&rows);
+    assert_eq!(texts(&turns), [(Role::Assistant, "Looking.".to_string())]);
+    let tool = &turns[0].tools[0];
+    assert!(
+        matches!(&tool.detail, aether_core::ToolDetail::Other { name, output, .. } if name == "run_command" && output.contains("a.txt")),
+        "{tool:?}"
+    );
 }

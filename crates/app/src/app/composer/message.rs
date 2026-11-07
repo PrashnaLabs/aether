@@ -265,6 +265,10 @@ impl ChatApp {
             Block::Request(i) => self.render_request(message.requests.get(*i)?, view, cx),
             Block::Fatal => self.fatal_row(msg, ix, view),
             Block::Stopped => self.stopped_row(msg, view),
+            Block::Handoff => match &message.handoff {
+                Some(h) => aether_ui::HandoffMarker::new(h.clone()).into_any_element(),
+                None => div().into_any_element(),
+            },
             Block::Fold => self.fold_row(msg, view),
             Block::Changes => {
                 let files = reply_edits(&message.steps, cwd.as_deref());

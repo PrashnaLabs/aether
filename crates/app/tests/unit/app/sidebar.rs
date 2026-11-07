@@ -411,3 +411,78 @@ fn native_lead_chats_get_the_lead_marker(cx: &mut gpui_kit::TestAppContext) {
     assert!(visual.debug_bounds("chat-lead-0").is_some());
     assert!(visual.debug_bounds("chat-lead-1").is_none());
 }
+
+#[gpui_kit::test]
+fn direct_and_archive_nav_buttons_toggle_back(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        app.chats.clear();
+        let mut chat = crew(1, None, false);
+        chat.provider = Provider::OpenRouter;
+        app.chats.push(chat);
+        app.active = 0;
+        app
+    });
+    window
+        .update(cx, |app, window, cx| {
+            app.sidebar_view = SidebarView::DirectChats;
+            app.toggle_archive(cx);
+            assert_eq!(app.sidebar_view, SidebarView::Archived);
+            app.toggle_archive(cx);
+            assert_eq!(app.sidebar_view, SidebarView::DirectChats);
+            app.toggle_direct_chats(window, cx);
+            assert_eq!(app.sidebar_view, SidebarView::Projects);
+            app.toggle_direct_chats(window, cx);
+            assert_eq!(app.sidebar_view, SidebarView::DirectChats);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn bulk_actions_apply_to_picked_chats_and_clear_picks(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        app.chats.clear();
+        for id in 1..=4 {
+            let mut chat = crew(id, None, false);
+            chat.provider = Provider::OpenRouter;
+            chat.archived = id <= 3;
+            app.chats.push(chat);
+        }
+        app.active = 3;
+        app
+    });
+    window
+        .update(cx, |app, window, cx| {
+            app.archive_picks.extend([1, 2, 3]);
+            app.apply_bulk(Bulk::Unarchive, &[1], window, cx);
+            assert!(!app.chats.iter().find(|c| c.id == 1).unwrap().archived);
+            app.apply_bulk(Bulk::Delete, &[2, 3], window, cx);
+            let left: Vec<i64> = app.chats.iter().map(|c| c.id).collect();
+            assert_eq!(left, vec![1, 4]);
+            assert!(app.archive_picks.is_empty());
+            app.project_picks.insert(1);
+            app.apply_bulk(Bulk::Archive, &[1], window, cx);
+            assert!(app.chats.iter().find(|c| c.id == 1).unwrap().archived);
+            assert!(app.project_picks.is_empty());
+        })
+        .unwrap();
+}

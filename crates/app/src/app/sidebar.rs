@@ -20,7 +20,7 @@ use gpui_kit::{Context, Entity, PathPromptOptions, SharedString, Window, prelude
 
 use super::format::now_ms;
 use super::providers::initial_model;
-use super::{CLIS, Chat, ChatApp, Page, SidebarView, chat_cwd, project_dir};
+use super::{Bulk, CLIS, Chat, ChatApp, Page, SidebarView, chat_cwd, project_dir};
 
 pub(super) fn disambiguated_names(folders: &[PathBuf]) -> HashMap<PathBuf, String> {
     let mut names: Vec<String> =
@@ -280,12 +280,44 @@ impl ChatApp {
 
     pub(crate) fn switch_sidebar_to_archive(&mut self, cx: &mut Context<Self>) {
         self.sidebar_view = SidebarView::Archived;
+        self.archive_picks.clear();
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_direct_chats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sidebar_view == SidebarView::DirectChats {
+            self.switch_sidebar_to_projects(window, cx);
+        } else {
+            self.switch_sidebar_to_direct_chats(window, cx);
+        }
+    }
+
+    pub(crate) fn toggle_archive(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_view != SidebarView::Archived {
+            return self.switch_sidebar_to_archive(cx);
+        }
+        self.leave_sidebar_view(cx);
+    }
+
+    fn leave_sidebar_view(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_view = if self.chats[self.active].is_agent() {
+            SidebarView::Projects
+        } else {
+            SidebarView::DirectChats
+        };
         cx.notify();
     }
 
     pub(crate) fn switch_sidebar_to_outside(&mut self, cx: &mut Context<Self>) {
         self.sidebar_view = SidebarView::Outside;
         cx.notify();
+    }
+
+    pub(crate) fn toggle_outside(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_view != SidebarView::Outside {
+            return self.switch_sidebar_to_outside(cx);
+        }
+        self.leave_sidebar_view(cx);
     }
 
     /// Chats with an agent state: (chat index, title, provider, detail, state), newest first.
@@ -565,6 +597,29 @@ impl ChatApp {
             .empty("No archived chats")
             .style(self.settings.sidebar_style)
             .archived();
+        let ids: Vec<i64> = archived.iter().map(|&ix| self.chats[ix].id).collect();
+        let picked: Vec<i64> =
+            ids.iter().copied().filter(|id| self.archive_picks.contains(id)).collect();
+        let view = cx.entity().downgrade();
+        sidebar = sidebar.pickable(picked.clone(), move |id, _, cx| {
+            view.update(cx, |this, cx| {
+                if !this.archive_picks.remove(&id) {
+                    this.archive_picks.insert(id);
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        if let Some(bar) = self.bulk_bar(
+            "archive-bulk",
+            picked,
+            ids,
+            &[Bulk::Unarchive, Bulk::Delete],
+            false,
+            cx,
+        ) {
+            sidebar = sidebar.bulk_bar(bar);
+        }
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }
@@ -694,9 +749,25 @@ impl ChatApp {
 
     /// Header and resizable edge shared by every sidebar view.
     fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
-        let (resize, resize_end, watch) = (cx.entity(), cx.entity(), cx.entity());
+        let (resize, resize_end, watch, handoff) =
+            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)
             .now(now_ms())
+            .handoff(
+                self.handoff_targets(None),
+                self.chats
+                    .iter()
+                    .filter(|c| !c.messages.is_empty())
+                    .map(|c| (c.id, c.provider))
+                    .collect(),
+                move |id, target, window, cx| {
+                    handoff.update(cx, |this, cx| {
+                        if let Some(ix) = this.chats.iter().position(|c| c.id == id) {
+                            this.continue_in_new_chat(ix, target, window, cx);
+                        }
+                    })
+                },
+            )
             .lead_agents(self.chats.iter().filter(|c| c.lead).map(|c| c.id).collect())
             .when(self.settings.watch_enabled, |sidebar| {
                 sidebar.watching(
@@ -1205,6 +1276,10 @@ impl ChatApp {
     /// set keeps one worktree at 1 git call and the panel paints each
     /// result as it lands.
     pub(crate) fn refresh_sidebar_git(&mut self, folders: Vec<PathBuf>, cx: &mut Context<Self>) {
+        // gpui test scheduler aborts on wakeups from tokio git tasks
+        if cfg!(test) {
+            return;
+        }
         // Filter first: sidebar_missing claims its result in flight, and a
         // skipped folder would hold its claim forever with no read landing.
         let folders: Vec<PathBuf> =

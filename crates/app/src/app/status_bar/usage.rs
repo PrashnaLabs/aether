@@ -17,8 +17,13 @@ use gpui_kit::{
 use crate::app::{ChatApp, Page};
 use crate::workspace_popover::{POP_CONTEXT, PopBack, PopDown, PopUp, Stop, pop_step};
 
-const PROVIDERS: [Provider; 4] =
-    [Provider::Claude, Provider::Codex, Provider::Antigravity, Provider::OpenRouter];
+const PROVIDERS: [Provider; 5] = [
+    Provider::Claude,
+    Provider::Codex,
+    Provider::Antigravity,
+    Provider::OpenRouter,
+    Provider::OpenCode,
+];
 const DETAILS: usize = PROVIDERS.len();
 const ROWS: usize = DETAILS + 1;
 
@@ -121,12 +126,16 @@ fn balance(u: &PlanUsage) -> Option<String> {
     credits.reset_label.split_whitespace().next().map(str::to_string)
 }
 
-/// Used % (None for OpenRouter's pay-as-you-go balance), reset or balance, short label.
+/// Used % (None when pay-as-you-go), reset or balance, short label.
 pub(super) fn gauge(p: Provider, u: &PlanUsage) -> Option<(Option<f32>, String, Option<String>)> {
     if p == Provider::OpenRouter {
         return Some((None, balance(u)?, None));
     }
-    headline(u).map(|(pct, reset, label)| (Some(pct), reset, label))
+    match headline(u) {
+        Some((pct, reset, label)) => Some((Some(pct), reset, label)),
+        None if p == Provider::OpenCode => Some((None, "Pay-as-you-go".into(), None)),
+        None => None,
+    }
 }
 
 fn refresh_button(id: &'static str, view: &Entity<ChatApp>, cx: &App) -> impl IntoElement {
@@ -254,9 +263,8 @@ impl ChatApp {
         window: &Window,
         cx: &App,
     ) -> impl IntoElement + use<> {
-        // OpenRouter is pay-as-you-go; it lives in the popover only, not the bar.
-        let items: Vec<_> =
-            self.shown().into_iter().filter(|(p, _, _)| *p != Provider::OpenRouter).collect();
+        // pay-as-you-go rows have no %; they live in the popover only, not the bar
+        let items: Vec<_> = self.shown().into_iter().filter(|(_, _, g)| g.0.is_some()).collect();
         let empty = items.is_empty();
         let open_view = view.clone();
         let strip = h_flex()

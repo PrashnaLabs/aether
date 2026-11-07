@@ -237,6 +237,7 @@ const DEV_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 	<key>CFBundleVersion</key><string>0</string>
 	<key>CFBundleIconFile</key><string>Aether.icns</string>
 	<key>NSHighResolutionCapable</key><true/>
+	<key>NSAppSleepDisabled</key><true/>
 	<key>NSMicrophoneUsageDescription</key><string>Aether turns your speech into text in the composer. Audio stays on this device.</string>
 </dict>
 </plist>

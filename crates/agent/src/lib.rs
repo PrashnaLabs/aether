@@ -11,7 +11,10 @@ mod turn;
 pub mod usage;
 pub mod usage_history;
 
-pub use agent::{Agent, Cancel, ChatSession, Reply, SessionHealth, SideUpdate};
-pub use external::{ExternalAgent, ExternalState};
+pub use agent::{
+    Agent, Cancel, ChatSession, HISTORY_BUDGET, Reply, SIDE_UNSUPPORTED, SessionHealth, SideUpdate,
+    budget_history,
+};
+pub use external::{ExternalAgent, ExternalState, Turn};
 pub use models::ModelInfo;
-pub use store::{SavedChat, SavedDelivery, Store};
+pub use store::{SavedCard, SavedChat, SavedDelivery, Store};

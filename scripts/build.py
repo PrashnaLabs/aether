@@ -55,6 +55,7 @@ def macos(binary, stage, version, identity):
         "NSHumanReadableCopyright": "Copyright © 2026 PrashnaLabs. MIT License.",
         "LSMinimumSystemVersion": os.environ.get("MACOSX_DEPLOYMENT_TARGET", "12.0"),
         "NSHighResolutionCapable": True,
+        "NSAppSleepDisabled": True,
         "NSMicrophoneUsageDescription": "Aether turns your speech into text in the composer. Audio stays on this device.",
         "NSSupportsAutomaticGraphicsSwitching": True,
     }

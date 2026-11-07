@@ -9,10 +9,12 @@ use aether_ui::{
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme, Disableable, Icon, IconName, Sizable, checkbox::Checkbox, h_flex, v_flex,
+};
 use gpui_kit::{
-    Anchor, AnyElement, Context, FontWeight, Hsla, Role, SharedString, div, img, prelude::*, px,
-    transparent_black,
+    Anchor, AnyElement, App, Context, FontWeight, Hsla, Role, SharedString, div, img, prelude::*,
+    px, transparent_black,
 };
 
 use super::model::{
@@ -20,14 +22,14 @@ use super::model::{
     activity_text, arrange, badge, card_aria, commit_activity, facts, filter_aria, in_filter,
     new_here_aria, recent, tree_badges, tree_label, verb,
 };
-use crate::app::{ChatApp, now_ms};
+use crate::app::{Bulk, ChatApp, now_ms};
 use crate::open_in;
 use crate::projects::relative_time;
 use crate::workspace_popover::{choose_app_label, diff_stat, disabled_label, home_short};
 
 const NO_FOLDER: &str = "Folder not found";
 
-fn pill(text: String, bg: Hsla, fg: Hsla) -> impl IntoElement {
+pub(crate) fn pill(text: String, bg: Hsla, fg: Hsla) -> impl IntoElement {
     div()
         .flex_none()
         .px(px(7.))
@@ -50,6 +52,18 @@ fn caption(text: &'static str, cx: &Context<ChatApp>) -> impl IntoElement {
         .child(text)
 }
 
+pub(crate) fn status_tint(status: CardStatus, cx: &App) -> (Hsla, Hsla) {
+    let theme = cx.theme();
+    match status {
+        CardStatus::Working => (theme.info.opacity(0.12), theme::info_text(cx)),
+        CardStatus::Waiting(_) => (theme::mango().opacity(0.14), theme::mango_text(cx)),
+        CardStatus::Failed => (theme.danger.opacity(0.12), theme::danger_text(cx)),
+        CardStatus::Done | CardStatus::Idle => {
+            (theme.success.opacity(0.12), theme::success_text(cx))
+        }
+    }
+}
+
 impl ChatApp {
     pub(crate) fn render_project_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(folder) = self.project_page.clone() else {
@@ -62,6 +76,16 @@ impl ChatApp {
         let header = self.project_header(&folder, data, missing, cx);
         let filters = self.project_filters(&cards, cx);
         let grid = self.project_grid(&cards, now, cx);
+        let ids: Vec<i64> = cards
+            .iter()
+            .filter(|c| in_filter(self.project_view.filter, c.status))
+            .map(|c| c.id)
+            .collect();
+        let picked: Vec<i64> =
+            ids.iter().copied().filter(|id| self.project_picks.contains(id)).collect();
+        let bulk = self
+            .bulk_bar("project-bulk", picked, ids, &[Bulk::Archive, Bulk::Delete], true, cx)
+            .map(|bar| div().mb(px(12.)).child(bar));
         let trees = data.filter(|d| !d.worktrees.is_empty()).map(|d| {
             v_flex().child(caption("Worktrees", cx)).child(
                 v_flex()
@@ -111,6 +135,7 @@ impl ChatApp {
                     .pb(px(40.))
                     .child(header)
                     .child(filters)
+                    .children(bulk)
                     .child(grid)
                     .children(trees)
                     .children(activity),
@@ -418,14 +443,7 @@ impl ChatApp {
         let (muted, ring, fill, pressed) =
             (theme.muted_foreground, theme.ring, overlay(cx), overlay_strong(cx));
         let age = relative_time(card.activity_ms, now, &chrono::Local);
-        let tint = match card.status {
-            CardStatus::Working => (theme.info.opacity(0.12), theme::info_text(cx)),
-            CardStatus::Waiting(_) => (theme::mango().opacity(0.14), theme::mango_text(cx)),
-            CardStatus::Failed => (theme.danger.opacity(0.12), theme::danger_text(cx)),
-            CardStatus::Done | CardStatus::Idle => {
-                (theme.success.opacity(0.12), theme::success_text(cx))
-            }
-        };
+        let tint = status_tint(card.status, cx);
         let badge = badge(card.status, card.since_ms, now).map(|text| pill(text, tint.0, tint.1));
         let meta = h_flex()
             .mt_auto()
@@ -465,8 +483,49 @@ impl ChatApp {
                 m.child(div().flex_none().child(age.clone()))
             });
         let ix = card.ix;
+        let id = card.id;
+        let picked = self.project_picks.contains(&id);
+        let picking = !self.project_picks.is_empty();
+        let group = SharedString::from(format!("project-card-{ix}"));
+        let icon_slot = div()
+            .relative()
+            .flex_none()
+            .size(px(16.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .when(picking, |d| d.opacity(0.))
+                    .when(!picking, |d| d.group_hover(group.clone(), |s| s.opacity(0.)))
+                    .child(provider_icon(card.provider).size(px(14.)).text_color(muted)),
+            )
+            .child(
+                div()
+                    .id(("project-card-pick-slot", ix))
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(!picking, |d| d.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)))
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        Checkbox::new(("project-card-pick", ix))
+                            .checked(picked)
+                            .tab_stop(false)
+                            .aria_label(SharedString::from(format!("Select {}", card.title)))
+                            .on_click(cx.listener(move |this, _: &bool, _, cx| {
+                                if !this.project_picks.remove(&id) {
+                                    this.project_picks.insert(id);
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
         v_flex()
             .id(("project-card", card.ix))
+            .group(group)
             .role(Role::Button)
             .tab_index(0)
             .aria_label(card_aria(card, &age))
@@ -478,7 +537,7 @@ impl ChatApp {
             .gap(px(8.))
             .corner(px(12.))
             .border_1()
-            .border_color(theme.border)
+            .border_color(if picked { ring } else { theme.border })
             .focus_visible(move |s| s.border_color(ring))
             .cursor_pointer()
             .hover(move |s| s.bg(fill))
@@ -487,7 +546,7 @@ impl ChatApp {
                 h_flex()
                     .gap(px(8.))
                     .items_center()
-                    .child(provider_icon(card.provider).size(px(14.)).text_color(muted))
+                    .child(icon_slot)
                     .child(
                         div()
                             .flex_1()

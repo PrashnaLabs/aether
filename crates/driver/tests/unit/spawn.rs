@@ -43,6 +43,7 @@ fn describe_hides_env() {
 #[test]
 fn command_strips_lead_env() {
     let opts = DriverStartOptions {
+        ephemeral: false,
         binary: "/bin/sh".into(),
         cwd: "/tmp".into(),
         model: String::new(),

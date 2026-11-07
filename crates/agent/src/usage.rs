@@ -123,6 +123,29 @@ impl PlanUsage {
             );
         }
 
+        let scoped = val.get("limits").and_then(|v| v.as_array()).into_iter().flatten();
+        for limit in scoped.filter(|l| l["kind"] == "weekly_scoped") {
+            let scope = &limit["scope"];
+            let Some(name) = ["model", "surface"]
+                .iter()
+                .find_map(|k| scope[k]["display_name"].as_str())
+            else {
+                continue;
+            };
+            let Some(used) = limit["percent"].as_f64() else { continue };
+            let left = (100.0 - used as f32).clamp(0.0, 100.0);
+            let reset = limit["resets_at"]
+                .as_str()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|at| format!("resets {}", format_reset_countdown(at.with_timezone(&Utc), now)))
+                .unwrap_or_else(|| "resets in 7d".to_string());
+            limits.push(
+                PlanLimit::new(format!("Weekly ({name})"), left, reset)
+                    .threshold(Some(50.0))
+                    .trend_down(false),
+            );
+        }
+
         let footer_text = if weekly_depleted && !weekly_reset_str.is_empty() {
             Some(format!("Weekly limit reached · Resets {weekly_reset_str}"))
         } else {
@@ -340,6 +363,62 @@ impl PlanUsage {
             secondary: None,
         })
     }
+
+    /// Body of OpenCode v2's `/api/experimental/usage/limits`; `data` is null when not signed in.
+    pub fn parse_opencode(json: &str) -> Option<Self> {
+        let val: serde_json::Value = serde_json::from_str(json).ok()?;
+        let data = val.get("data")?.as_object()?;
+        let now = Utc::now();
+        let resets = |v: &serde_json::Value| {
+            v.get("resetsAt")
+                .and_then(|v| v.as_i64())
+                .and_then(DateTime::from_timestamp_millis)
+                .map_or_else(
+                    || "resets soon".to_string(),
+                    |at| format!("resets {}", format_reset_countdown(at, now)),
+                )
+        };
+        let go = data.get("go");
+        let mut limits: Vec<PlanLimit> = [
+            ("rolling", "Session", 75.0, true),
+            ("weekly", "Weekly", 50.0, false),
+            ("monthly", "Monthly", 50.0, false),
+        ]
+        .into_iter()
+        .filter_map(|(key, label, threshold, trend_down)| {
+            let meter = go?.get(key)?;
+            let used = meter.get("percent")?.as_f64()? as f32;
+            Some(
+                PlanLimit::new(label, 100.0 - used, resets(meter))
+                    .threshold(Some(threshold))
+                    .trend_down(trend_down),
+            )
+        })
+        .collect();
+        for b in data.get("budgets").and_then(|v| v.as_array()).into_iter().flatten() {
+            let (Some(limit), Some(spent)) =
+                (b.get("limit").and_then(|v| v.as_f64()), b.get("spent").and_then(|v| v.as_f64()))
+            else {
+                continue;
+            };
+            let used = if limit > 0.0 { spent / limit * 100.0 } else { 100.0 };
+            limits.push(
+                PlanLimit::new(
+                    format!("Budget · ${spent:.2} of ${limit:.2}"),
+                    100.0 - used as f32,
+                    resets(b),
+                )
+                .threshold(Some(75.0))
+                .trend_down(true),
+            );
+        }
+        Some(Self {
+            plan_name: if go.is_some() { "OpenCode Go" } else { "OpenCode Zen" }.to_string(),
+            limits,
+            footer_action: Some("Dashboard".to_string()),
+            ..Self::default()
+        })
+    }
 }
 
 pub fn format_seconds_countdown(secs: u64) -> String {
@@ -548,6 +627,20 @@ pub fn fetch_openrouter_plan_usage(api_key: &str) -> Option<PlanUsage> {
         let text = res.text().await.ok()?;
         PlanUsage::parse_openrouter(&text)
     })
+}
+
+/// Fetches OpenCode Go and Console budget limits from the running OpenCode service.
+pub fn fetch_opencode_plan_usage() -> Option<PlanUsage> {
+    let api = aether_driver::opencode::service_api()?;
+    let Ok((200, body)) = api.send(
+        reqwest::Method::GET,
+        "/api/experimental/usage/limits",
+        None,
+        Duration::from_secs(16),
+    ) else {
+        return None;
+    };
+    PlanUsage::parse_opencode(&body)
 }
 
 /// Fetches Antigravity quota by invoking `agy -p /usage`.

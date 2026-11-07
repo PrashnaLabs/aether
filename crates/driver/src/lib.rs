@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use aether_core::{AccessMode, Answer, Attachment, Provider, Settings};
+use aether_core::{AccessMode, Answer, Attachment, Provider, Settings, Update};
+use futures::channel::mpsc::UnboundedSender;
 
 pub mod antigravity;
 pub mod catalog;
@@ -19,7 +20,7 @@ pub use claude::ClaudeDriver;
 pub use codex::CodexDriver;
 pub use opencode::OpencodeDriver;
 pub use pi::PiDriver;
-pub use tool::{INPUT_CHARS, clip, head_tail};
+pub use tool::{INPUT_CHARS, clip, head_tail, logged_call};
 
 #[derive(Clone)]
 pub struct DriverStartOptions {
@@ -37,6 +38,8 @@ pub struct DriverStartOptions {
     pub background: Vec<String>,
     /// Aether tools to attach to this chat's CLI; set only for a lead chat.
     pub lead: Option<LeadTools>,
+    /// A `/btw` side run: the CLI shouldn't save its session.
+    pub ephemeral: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -76,6 +79,7 @@ impl DriverStartOptions {
                     attachments: None,
                     background: Vec::new(),
                     lead: None,
+                    ephemeral: false,
                 };
             }
         };
@@ -90,6 +94,7 @@ impl DriverStartOptions {
             attachments: None,
             background: Vec::new(),
             lead: None,
+            ephemeral: false,
         }
     }
 }
@@ -127,6 +132,18 @@ pub trait Driver: Send {
     }
     /// Runs a notice action, offered by a notice whose `url` is `"aether:<action>"`.
     fn notice_action(&mut self, _action: &str) {}
+    /// Asks `question` natively, off the main turn: the answer comes on `reply` as one
+    /// `Update::Final` or an `Update::Error`, never on the driver's own stream. False,
+    /// sending nothing, when the CLI can't.
+    /// Loads earlier messages as native history before the first prompt; `false` when the CLI
+    /// can't, and the caller puts them in the prompt instead.
+    fn seed_history(&mut self, _context: &str, _messages: &[(aether_core::Role, String)]) -> bool {
+        false
+    }
+
+    fn side_question(&mut self, _question: &str, _reply: UnboundedSender<Update>) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

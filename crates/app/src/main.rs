@@ -3,6 +3,7 @@ mod agents_view;
 mod app;
 mod assets;
 mod attachments;
+mod board;
 mod browser;
 mod explorer;
 mod font_picker;

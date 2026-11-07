@@ -14,8 +14,8 @@ use crate::tool::{
 
 use super::approve::{DENIED, control_request};
 use super::{
-    ACTIVITY_CHARS, ClaudeAsk, INTERRUPT_REQUEST, MODEL_REQUEST, STOP_REQUEST, State,
-    TITLE_REQUEST, TODOS_ID, on_interrupted, quiet_turn_end,
+    ACTIVITY_CHARS, BTW_REQUEST, ClaudeAsk, INTERRUPT_REQUEST, MODEL_REQUEST, STOP_REQUEST, State,
+    TITLE_REQUEST, TODOS_ID, on_interrupted, quiet_turn_end, side_answer,
 };
 
 pub(crate) fn claude_mode(mode: &str) -> Option<AccessMode> {
@@ -483,6 +483,7 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                 | "local_command"
                 | "memory_recall"
                 | "commands_changed"
+                | "control_request_progress"
                 | "thinking_tokens",
             ) => vec![],
             other => {
@@ -686,6 +687,17 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                 .collect();
             out.extend(quiet_turn_end(s));
             out
+        }
+        Some("control_response")
+            if v["response"]["request_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with(BTW_REQUEST)) =>
+        {
+            let id = v["response"]["request_id"].as_str().unwrap_or_default();
+            if let Some(reply) = s.sides.remove(id) {
+                let _ = reply.unbounded_send(side_answer(v));
+            }
+            vec![]
         }
         Some("control_response")
             if v["response"]["subtype"] == "error"

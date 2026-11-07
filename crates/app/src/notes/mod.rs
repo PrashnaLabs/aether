@@ -42,7 +42,7 @@ pub(crate) struct NotesModel {
     pub(crate) form: Option<Form>,
     pub(crate) initial: String,
     pub(crate) project: Option<String>,
-    /// Active project folder `project` was last taken from.
+    /// Active project folder when notes last opened; a change re-scopes project notes.
     project_folder: Option<PathBuf>,
     pub(crate) listing: Listing,
     pub(crate) entries: Vec<(PathBuf, String)>,
@@ -132,11 +132,12 @@ impl ChatApp {
             return;
         }
         let folder = self.active_project_folder();
-        if self.settings.notes.project_scope && self.notes.project_folder.as_ref() != Some(&folder)
+        if (self.settings.notes.project_scope || self.notes.project.is_some())
+            && self.notes.project_folder.as_ref() != Some(&folder)
         {
             self.notes.project = folder.file_name().map(|s| s.to_string_lossy().to_string());
-            self.notes.project_folder = Some(folder);
         }
+        self.notes.project_folder = Some(folder);
         self.open_page(Page::Notes, cx);
         let root = self.notes_explorer(cx).read(cx).root.clone();
         self.check_explorer_disk(&root, window, cx);

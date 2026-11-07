@@ -174,6 +174,8 @@ pub(crate) struct State {
     texted: HashSet<String>,
     /// (message uuid, text) of the current text segment, for refusal retractions.
     turn_texts: Vec<(String, String)>,
+    /// Side question request id to the reply it answers on.
+    sides: HashMap<String, UnboundedSender<Update>>,
 }
 
 const TODOS_ID: &str = "todos";
@@ -190,9 +192,32 @@ const MODEL_REQUEST: &str = "aether-model-";
 
 const STOP_REQUEST: &str = "aether-stop-";
 
+const BTW_REQUEST: &str = "aether-btw-";
+
 const INTERRUPT_REQUEST: &str = "aether-interrupt-";
 
 const ACTIVITY_CHARS: usize = 120;
+
+fn side_request(id: &str, question: &str) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": id,
+        "request": {"subtype": "side_question", "question": question, "history": []},
+    })
+}
+
+/// The reply to a `side_question` request: its answer, or the CLI's refusal. A synthetic one
+/// is the CLI's "No answer available" stand-in, so it's an error the app retries emulated.
+fn side_answer(v: &Value) -> Update {
+    let r = &v["response"];
+    match (r["subtype"].as_str(), r["response"]["response"].as_str()) {
+        (Some("success"), Some(_)) if r["response"]["synthetic"] == true => {
+            Update::Error("claude had no answer for this side question".into())
+        }
+        (Some("success"), Some(text)) => Update::Final(text.to_string()),
+        _ => Update::Error(r["error"].as_str().unwrap_or("side question failed").to_string()),
+    }
+}
 
 fn on_prompt(s: &mut State, text: &str) {
     s.active = true;
@@ -315,6 +340,9 @@ fn on_exit(s: &mut State, why: String) -> Vec<Update> {
     } else {
         out.push(Update::Warning(why.clone()));
     }
+    for (_, reply) in s.sides.drain() {
+        let _ = reply.unbounded_send(Update::Error(why.clone()));
+    }
     s.dead = Some(why);
     out
 }
@@ -432,6 +460,20 @@ impl Driver for ClaudeDriver {
         let line = stop_request(&self.state.guard(), id, self.next_request + 1);
         let Some(line) = line else { return false };
         self.next_request += 1;
+        self.write(line);
+        true
+    }
+
+    fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
+        let mut s = self.state.guard();
+        if s.dead.is_some() {
+            return false;
+        }
+        self.next_request += 1;
+        let id = format!("{BTW_REQUEST}{}", self.next_request);
+        let line = side_request(&id, question);
+        s.sides.insert(id, reply);
+        drop(s);
         self.write(line);
         true
     }

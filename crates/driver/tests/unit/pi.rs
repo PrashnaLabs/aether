@@ -325,6 +325,7 @@ fn dialogs_ask_and_replies_echo_request_id() {
 
 fn opts_for_test() -> DriverStartOptions {
     DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: String::new(),
@@ -346,9 +347,11 @@ fn read_only_args_and_model_split() {
         ["--mode", "rpc", "--tools", "read,grep,find,ls", "--exclude-tools", "mcp__*"]
     );
     assert_eq!(
-        launch_args(&DriverStartOptions { access: AccessMode::Full, ..opts }, false),
+        launch_args(&DriverStartOptions { access: AccessMode::Full, ..opts.clone() }, false),
         ["--mode", "rpc"]
     );
+    let side = DriverStartOptions { access: AccessMode::Full, ephemeral: true, ..opts };
+    assert_eq!(launch_args(&side, false), ["--mode", "rpc", "--no-session"]);
     let m = set_model("openrouter/z-ai/glm-5");
     assert_eq!(
         (m["provider"].as_str(), m["modelId"].as_str()),
@@ -501,6 +504,7 @@ fn live_pi_smoke() {
     let dir = std::env::temp_dir().join(format!("aether-pi-smoke-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: dir.clone(),
         model: std::env::var("AETHER_PI_SMOKE_MODEL").unwrap_or_default(),

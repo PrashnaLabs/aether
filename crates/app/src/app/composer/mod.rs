@@ -16,11 +16,13 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, h_flex, v_flex};
 use gpui_kit::{App, Context, Focusable, SharedString, Window, div, prelude::*, px};
 
 use self::attach::{PasteKind, paste_kind, shell_command};
 use self::chips::resting_chip;
+use super::chat::limit_hit;
 use super::format::{format_cost, format_full, message_cost};
 use super::{ChatApp, WorktreeJob, chat_cwd};
 
@@ -215,10 +217,54 @@ impl ChatApp {
         let locked = lock.is_some();
         let banner = lock.map(|a| {
             let origin = if a.origin.is_empty() { "another terminal" } else { a.origin.as_str() };
-            h_flex().px_2().text_xs().text_color(cx.theme().muted_foreground).child(format!(
-                "Running in {origin}. Stop it or wait for it to finish to continue here."
-            ))
+            let outside = a.clone();
+            h_flex()
+                .px_2()
+                .gap_2()
+                .justify_between()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("Running in {origin}. Stop it or wait for it to finish to continue here."))
+                .child(
+                    div().debug_selector(|| "composer-stop-external".into()).child(
+                        aether_ui::button("composer-stop-external")
+                            .outline()
+                            .xsmall()
+                            .label("Stop to continue here")
+                            .on_click(self.session_listener(cx, move |this, _, window, cx| {
+                                this.stop_external(outside.clone(), window, cx)
+                            })),
+                    ),
+                )
         });
+        let stuck = chat.messages.last().is_some_and(|m| limit_hit(m) && m.handoff.is_none());
+        let limit = (!busy && stuck)
+            .then(|| self.handoff_targets(Some(chat.provider)))
+            .filter(|targets| !targets.is_empty())
+            .map(|targets| {
+                let handoff = self.session_handle(cx);
+                let on_pick: aether_ui::OnHandoff = Rc::new(move |target, window, cx| {
+                    handoff.update(cx, |this, cx| this.handoff_to(this.active, target, window, cx));
+                });
+                h_flex()
+                    .px_2()
+                    .gap_2()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Hit a limit \u{2014} continue in another agent")
+                    .child(
+                        div().debug_selector(|| "composer-handoff-limit".into()).child(
+                            aether_ui::button("composer-handoff-limit")
+                                .outline()
+                                .xsmall()
+                                .label("Continue in\u{2026}")
+                                .dropdown_menu(move |menu, _, _| {
+                                    aether_ui::handoff_items(menu, &targets, &on_pick)
+                                }),
+                        ),
+                    )
+            });
         let editing = self.editing.is_some().then(|| {
             h_flex()
                 .px_2()
@@ -231,6 +277,7 @@ impl ChatApp {
                 ))
         });
         let voice = self.voice_banner(cx);
+        let side = self.side_cards(chat.id, cx);
         let recording = self.recording_voice();
         let voice_busy = self.voice_active();
         let cockpit = self.usage_cockpit(cx);
@@ -249,7 +296,6 @@ impl ChatApp {
             .map(|msg| self.live_row(msg, &self.session_handle(cx)));
         let switching = self.switching_folder(&chat_cwd(chat, &self.settings.workspace_root));
         let selector = AgentSelector::new(&self.selector)
-            .locked(chat.provider_locked())
             .resting(resting)
             .disabled(busy || chat.worktree_job.is_some() || chat.setup.is_some() || switching);
         let footer = FooterChips::for_provider(chat.provider);
@@ -471,6 +517,8 @@ impl ChatApp {
                     || editing.is_some()
                     || voice.is_some()
                     || locked
+                    || limit.is_some()
+                    || !side.is_empty()
                     || note.is_some()
                     || setup.is_some()
                     || attach_error.is_some()
@@ -484,7 +532,9 @@ impl ChatApp {
                             .children(rows)
                             .children(quote)
                             .children(cockpit)
+                            .children(side)
                             .children(banner)
+                            .children(limit)
                             .children(note)
                             .children(setup)
                             .children(editing)

@@ -155,6 +155,7 @@ fn cli_settings() -> Settings {
 
 fn chat(effort: &str) -> ChatSession {
     ChatSession {
+        ephemeral: false,
         key: "1".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,
@@ -198,6 +199,49 @@ fn resumed_session_is_not_seeded() {
         agent.send("x", "hi".into(), vec![], &cli_settings(), "", vec![], &history, &chat("")),
     );
     assert_eq!(log.lock().unwrap()[0], "prompt:hi");
+}
+
+/// A CLI that loads history natively, like Codex's thread/inject_items.
+struct Native(UnboundedSender<Update>, Arc<StdMutex<Vec<String>>>);
+
+impl Driver for Native {
+    fn prompt(&mut self, text: String, _: Vec<Attachment>) {
+        self.1.lock().unwrap().push(format!("prompt:{text}"));
+        let _ = self.0.unbounded_send(Update::Final(text));
+    }
+    fn steer(&mut self, _: String, _: Vec<Attachment>) -> bool {
+        false
+    }
+    fn cancel(&mut self) {}
+    fn resumed(&self) -> bool {
+        false
+    }
+    fn seed_history(&mut self, context: &str, messages: &[(Role, String)]) -> bool {
+        let lines: Vec<&str> = messages.iter().map(|(_, t)| t.as_str()).collect();
+        self.1.lock().unwrap().push(format!("seed:{context}|{}", lines.join("|")));
+        true
+    }
+}
+
+#[test]
+fn a_cli_that_loads_history_gets_it_natively_and_a_bare_prompt() {
+    let log = Arc::new(StdMutex::new(Vec::new()));
+    let l = log.clone();
+    let factory: Factory = Arc::new(move |_, _, tx| Box::new(Native(tx, l.clone())));
+    let agent = Agent::with_factory(factory, Duration::from_secs(600)).unwrap();
+    let history = [(Role::User, "earlier".to_string()), (Role::Assistant, "sure".to_string())];
+    drain(
+        &agent,
+        agent.send("x", "hi".into(), vec![], &cli_settings(), "", vec![], &history, &chat("")),
+    );
+    let log = log.lock().unwrap();
+    assert!(
+        log[0].starts_with("seed:Earlier conversation in this chat: messages 0-1."),
+        "{}",
+        log[0]
+    );
+    assert!(log[0].ends_with("|[0] earlier|[1] sure"), "{}", log[0]);
+    assert_eq!(log[1], "prompt:hi");
 }
 
 #[test]
@@ -576,6 +620,7 @@ fn forked_sessions_start_with_their_history() {
 
 fn missing_chat() -> ChatSession {
     ChatSession {
+        ephemeral: false,
         key: "m".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,
@@ -627,11 +672,63 @@ fn opencode_send_with_missing_binary_and_no_hub_errors_and_closes() {
 }
 
 #[test]
-fn cli_prompt_carries_the_transcript_as_context() {
+fn cli_prompt_numbers_the_transcript_and_points_at_read_history() {
     let history = [(Role::User, "hi".to_string()), (Role::Assistant, "yo".to_string())];
-    let prompt = context_prompt(&history, "again");
-    assert!(prompt.contains("hi") && prompt.contains("yo") && prompt.contains("again"));
-    assert_eq!(context_prompt(&[], "bare"), "bare");
+    assert_eq!(
+        context_prompt(&history, "again", true),
+        "Earlier conversation in this chat: messages 0-1. Tool calls and their output aren't included; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls. Treat it as context only, not a new request; files on disk are the source of truth.\n\n<conversation_so_far>\n[0] User: hi\n[1] Assistant: yo\n</conversation_so_far>\n\nYour task now:\nagain"
+    );
+    assert!(!context_prompt(&history, "again", false).contains("read_history"));
+    assert_eq!(context_prompt(&[], "bare", true), "bare");
+}
+
+#[test]
+fn history_budget_keeps_first_and_latest_exchange_then_newest() {
+    let m = |role, text: &str| (role, text.to_string());
+    assert_eq!(budget_history(&[], 10), (vec![], 0));
+    let all = vec![
+        m(Role::User, "first"),
+        m(Role::Assistant, "aaaaaaaaaa"),
+        m(Role::User, "bbbb"),
+        m(Role::Assistant, "cccc"),
+    ];
+    assert_eq!(budget_history(&all, 100), (all.clone(), 0));
+    let (kept, omitted) = budget_history(&all, 5 + 8);
+    assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()]);
+    assert_eq!(omitted, 1);
+    let (kept, omitted) = budget_history(&all, 0);
+    assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()], "never dropped");
+    assert_eq!(omitted, 1);
+    let skip = vec![
+        m(Role::User, "u"),
+        m(Role::Assistant, "x"),
+        m(Role::User, "huge huge huge"),
+        m(Role::Assistant, "y"),
+        m(Role::User, "v"),
+        m(Role::Assistant, "w"),
+    ];
+    let (kept, omitted) = budget_history(&skip, 5);
+    assert_eq!(kept.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(), ["u", "x", "y", "v", "w"]);
+    assert_eq!(omitted, 1, "a message that does not fit is skipped whole, older ones still fit");
+}
+
+#[test]
+fn cli_prompt_keeps_numbers_when_messages_are_left_out() {
+    let history: Vec<_> = (0..4)
+        .map(|i| {
+            (if i % 2 == 0 { Role::User } else { Role::Assistant }, format!("{i}").repeat(9_000))
+        })
+        .collect();
+    let prompt = context_prompt(&history, "again", true);
+    assert!(
+        prompt.starts_with(
+            "Earlier conversation in this chat: messages 0-3, 1 omitted to save space."
+        )
+    );
+    assert!(!prompt.contains("[1] "), "oldest reply dropped");
+    assert!(prompt.contains(&format!("[0] User: {}", "0".repeat(9_000))));
+    assert!(prompt.contains(&format!("[2] User: {}", "2".repeat(9_000))));
+    assert!(prompt.contains(&format!("[3] Assistant: {}", "3".repeat(9_000))));
 }
 
 fn png(path: &str) -> Attachment {
@@ -868,7 +965,7 @@ fn lead_session_gets_lead_tools_and_stable_token() {
     assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
     let settings = Settings::default();
     let on = ChatSession { key: "9".into(), lead: true, ..chat("") };
-    let (opts, key_on) = session_options(&settings, &on, agent.lead_tools(&on));
+    let (opts, key_on) = session_options(&settings, &on, agent.lead_tools(&on, false));
     let want = aether_driver::LeadTools {
         token: t,
         sock: crate::orchestrator::socket_path().unwrap(),
@@ -877,7 +974,52 @@ fn lead_session_gets_lead_tools_and_stable_token() {
     };
     assert_eq!(opts.lead, Some(want));
     let off = ChatSession { key: "9".into(), ..chat("") };
-    let (opts, key_off) = session_options(&settings, &off, agent.lead_tools(&off));
+    let (opts, key_off) = session_options(&settings, &off, agent.lead_tools(&off, false));
     assert_eq!(opts.lead, None);
     assert_ne!(key_on, key_off);
+    let seeded = agent.lead_tools(&off, true).unwrap();
+    assert_eq!(seeded.specs, crate::orchestrator::history_specs(), "only read_history");
+}
+
+struct Side(UnboundedSender<Update>, bool);
+
+impl Driver for Side {
+    fn prompt(&mut self, text: String, _: Vec<Attachment>) {
+        let _ = self.0.unbounded_send(Update::Final(text));
+    }
+    fn steer(&mut self, _: String, _: Vec<Attachment>) -> bool {
+        false
+    }
+    fn cancel(&mut self) {}
+    fn resumed(&self) -> bool {
+        true
+    }
+    fn side_question(&mut self, question: &str, reply: UnboundedSender<Update>) -> bool {
+        if self.1 {
+            let _ = reply.unbounded_send(Update::Final(format!("re:{question}")));
+        }
+        self.1
+    }
+}
+
+#[test]
+fn side_question_needs_a_live_driver_that_takes_it() {
+    let can = std::sync::atomic::AtomicBool::new(true);
+    let can = Arc::new(can);
+    let flag = can.clone();
+    let factory: Factory = Arc::new(move |_, _, tx| {
+        Box::new(Side(tx, flag.load(std::sync::atomic::Ordering::SeqCst)))
+    });
+    let agent = Agent::with_factory(factory, Duration::from_secs(600)).unwrap();
+    assert!(agent.side_question("1", "q").is_none());
+    drain(&agent, agent.send("x", "a".into(), vec![], &cli_settings(), "", vec![], &[], &chat("")));
+    let reply = agent.side_question("1", "q").expect("live driver");
+    let got: Vec<Update> = agent.rt.block_on(reply.updates.take(1).collect());
+    assert_eq!(got, [Update::Final("re:q".into())]);
+    agent.close_session("1");
+    can.store(false, std::sync::atomic::Ordering::SeqCst);
+    drain(&agent, agent.send("x", "a".into(), vec![], &cli_settings(), "", vec![], &[], &chat("")));
+    let reply = agent.side_question("1", "q").expect("live session");
+    let got: Vec<Update> = agent.rt.block_on(reply.updates.take(1).collect());
+    assert_eq!(got[0], Update::Error(SIDE_UNSUPPORTED.into()));
 }

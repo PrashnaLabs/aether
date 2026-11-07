@@ -72,6 +72,7 @@ const INTERRUPTED: &str = r#"{"event":"result","result":{"conversation_id":"86d4
 
 fn opts(model: &str, effort: &str, access: AccessMode) -> DriverStartOptions {
     DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: model.into(),
@@ -107,7 +108,8 @@ fn launch_args_per_access_mode() {
     assert_eq!(args(AccessMode::AutoEdit, false), accept);
     assert_eq!(args(AccessMode::Auto, false), format!("{base} --mode auto"));
     assert_eq!(args(AccessMode::Ask, false), accept);
-    assert_eq!(args(AccessMode::ReadOnly, false), accept);
+    assert_eq!(args(AccessMode::ReadOnly, false), format!("{base} --mode plan"));
+    assert_eq!(requested_mode(AccessMode::ReadOnly), AccessMode::ReadOnly);
     assert_eq!(args(AccessMode::Auto, true), full);
 }
 
@@ -1324,4 +1326,25 @@ fn register_agy_aether_adds_without_env() {
     let err = register_agy_aether(bin.to_str().unwrap(), Path::new("/x/aether")).unwrap_err();
     assert!(err.to_string().contains("bad config"), "{err}");
     assert!(register_agy_aether("/nonexistent/agy", Path::new("/x/aether")).is_err());
+}
+
+#[test]
+fn forget_conversation_removes_only_that_conversation() {
+    let root = std::env::temp_dir().join(format!("aether-agy-forget-{}", std::process::id()));
+    let (id, keep) = ("c2f4e33d-4134", "aaaa-bbbb");
+    for dir in ["conversations", "annotations", "presence", "brain"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    std::fs::create_dir_all(root.join("brain").join(id)).unwrap();
+    for name in [id, keep] {
+        std::fs::write(root.join(format!("conversations/{name}.db")), "x").unwrap();
+    }
+    std::fs::write(root.join(format!("annotations/{id}.pbtxt")), "x").unwrap();
+    forget_conversation(&root, id);
+    forget_conversation(&root, "../conversations");
+    assert!(!root.join(format!("conversations/{id}.db")).exists());
+    assert!(!root.join(format!("annotations/{id}.pbtxt")).exists());
+    assert!(!root.join("brain").join(id).exists());
+    assert!(root.join(format!("conversations/{keep}.db")).exists());
+    std::fs::remove_dir_all(&root).unwrap();
 }

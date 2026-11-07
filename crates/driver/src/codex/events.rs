@@ -16,8 +16,10 @@ use crate::tool::{
 };
 
 use super::approve::server_request;
-use super::spawn::{side_thread_params, side_turn_params, start_turn, steer_refused, turn_started};
-use super::{Call, Cites, Naming, State, refuse_queued, side_turn_end};
+use super::spawn::{
+    fork_turn_params, side_thread_params, side_turn_params, start_turn, steer_refused, turn_started,
+};
+use super::{Call, Cites, Naming, Side, State, refuse_queued, side_turn_end};
 
 pub(crate) fn map_event(s: &mut State, v: &Value) -> Vec<Update> {
     // server ids count from 0 like ours; only a line without a method answers us
@@ -36,6 +38,10 @@ pub(crate) fn map_event(s: &mut State, v: &Value) -> Vec<Update> {
     {
         if s.agents.contains_key(thread) {
             return agent_event(s, thread, method, p);
+        }
+        if s.sides.contains_key(thread) {
+            fork_event(s, thread, method, p);
+            return vec![];
         }
         side_event(s, thread, method, p);
         return vec![];
@@ -559,6 +565,26 @@ pub(crate) fn response(s: &mut State, v: &Value) -> Vec<Update> {
             s.outbox.push(line);
             vec![]
         }
+        Call::Fork(question, reply) => {
+            let Some(id) = v["result"]["thread"]["id"].as_str().filter(|_| !failed) else {
+                let _ = reply.unbounded_send(Update::Error(error_text(&v["error"])));
+                return vec![];
+            };
+            s.sides.insert(id.to_string(), Side { reply, text: String::new() });
+            let line = s.rpc(
+                "turn/start",
+                fork_turn_params(id, &question),
+                Some(Call::ForkTurn(id.to_string())),
+            );
+            s.outbox.push(line);
+            vec![]
+        }
+        Call::ForkTurn(id) => {
+            if failed {
+                end_fork(s, &id, Err(error_text(&v["error"])));
+            }
+            vec![]
+        }
         Call::SideThread(prompt) => {
             if let Some(id) = v["result"]["thread"]["id"].as_str() {
                 s.naming = Naming::Side(id.to_string());
@@ -568,6 +594,44 @@ pub(crate) fn response(s: &mut State, v: &Value) -> Vec<Update> {
             vec![]
         }
     }
+}
+
+/// A `/btw` fork's traffic answers its side reply only; the main turn never sees it.
+pub(crate) fn fork_event(s: &mut State, thread: &str, method: &str, p: &Value) {
+    match method {
+        "item/completed" if p["item"]["type"] == "agentMessage" => {
+            let Some(text) = p["item"]["text"].as_str() else { return };
+            if let Some(side) = s.sides.get_mut(thread) {
+                if !side.text.is_empty() {
+                    side.text.push_str("\n\n");
+                }
+                side.text.push_str(text);
+            }
+        }
+        "turn/completed" => {
+            let turn = &p["turn"];
+            let end = match turn["status"].as_str() {
+                Some("failed") => Err(error_text(&turn["error"])),
+                Some("interrupted") => Err("side question interrupted".into()),
+                _ => Ok(()),
+            };
+            end_fork(s, thread, end);
+        }
+        _ => {}
+    }
+}
+
+fn end_fork(s: &mut State, thread: &str, end: Result<(), String>) {
+    let Some(side) = s.sides.remove(thread) else { return };
+    let text = side.text.trim();
+    let update = match end {
+        Err(why) => Update::Error(why),
+        Ok(()) if text.is_empty() => Update::Error("side question got no answer".into()),
+        Ok(()) => Update::Final(text.to_string()),
+    };
+    let _ = side.reply.unbounded_send(update);
+    let line = s.rpc("thread/unsubscribe", json!({"threadId": thread}), None);
+    s.outbox.push(line);
 }
 
 /// Side-thread traffic never reaches the chat; its title renames the main thread.

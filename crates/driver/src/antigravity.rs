@@ -384,14 +384,41 @@ impl Driver for AntigravityDriver {
 
 impl Drop for AntigravityDriver {
     fn drop(&mut self) {
+        let mut forget = None;
         if let Ok(mut s) = self.state.lock() {
             s.epoch += 1;
             s.dead.get_or_insert_with(|| "agy session closed".into());
+            forget = self.opts.ephemeral.then(|| s.conversation.clone());
         }
-        if let Some(child) = self.close() {
-            std::thread::spawn(move || reap(child));
+        let child = self.close();
+        if child.is_some() || forget.is_some() {
+            std::thread::spawn(move || {
+                if let Some(child) = child {
+                    reap(child);
+                }
+                if let Some(id) = forget {
+                    forget_conversation(&home_dir().join(".gemini/antigravity-cli"), &id);
+                }
+            });
         }
     }
+}
+
+/// agy has no no-save flag; a side run's files go once its process is gone.
+fn forget_conversation(root: &Path, id: &str) {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return;
+    }
+    for file in [
+        format!("conversations/{id}.db"),
+        format!("conversations/{id}.db-wal"),
+        format!("conversations/{id}.db-shm"),
+        format!("annotations/{id}.pbtxt"),
+        format!("presence/{id}.lock"),
+    ] {
+        let _ = std::fs::remove_file(root.join(file));
+    }
+    let _ = std::fs::remove_dir_all(root.join("brain").join(id));
 }
 
 fn begin(s: &mut State) {
@@ -638,7 +665,10 @@ fn window(model: &str) -> Option<u64> {
 }
 
 fn requested_mode(access: AccessMode) -> AccessMode {
-    if access == AccessMode::Auto { AccessMode::Auto } else { AccessMode::AutoEdit }
+    match access {
+        AccessMode::Auto | AccessMode::ReadOnly => access,
+        _ => AccessMode::AutoEdit,
+    }
 }
 
 fn agy_mode(permission_mode: &str) -> Option<AccessMode> {
@@ -760,6 +790,7 @@ fn launch_args(opts: &DriverStartOptions, conversation: &str, full: bool) -> Vec
     let mode: &[&str] = match opts.access {
         _ if full => &["--dangerously-skip-permissions"],
         AccessMode::Auto => &["--mode", "auto"],
+        AccessMode::ReadOnly => &["--mode", "plan"],
         _ => &["--mode", "accept-edits"],
     };
     args.extend(mode.iter().map(|s| s.to_string()));

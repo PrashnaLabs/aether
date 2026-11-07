@@ -9,7 +9,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{App, Context, SharedString, Window};
 
-use super::{Changed, history};
+use super::{Changed, btw_question, btw_rest, seed_history};
 use crate::app::composer::attach::{delete_later, first_refusal, is_cli_command, shell_command};
 use crate::app::composer::quote::quoted;
 use crate::app::format::now_ms;
@@ -17,6 +17,7 @@ use crate::app::orchestrate::{clip, stranded_texts};
 use crate::app::providers::set_default_model;
 use crate::app::worktree::{WorktreeTarget, worktree_name_hint, worktree_target};
 use crate::app::{Chat, ChatApp, Queued, chat_cwd};
+use crate::board::model::Turn;
 use crate::suggest::prompt_commands;
 
 /// Title a chat takes from its first message until renamed or titled by its CLI.
@@ -101,6 +102,17 @@ impl ChatApp {
     /// Sends the composer's text. While a reply streams it joins the chat's
     /// queue, unless it replaces an edited message.
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let draft = self.composer.read(cx).value().to_string();
+        if btw_rest(&draft).is_some() {
+            if let Some(question) = btw_question(&draft) {
+                let question = question.to_string();
+                self.composer.update(cx, |s, cx| s.clean(window, cx));
+                self.composer_history_index = None;
+                self.composer_draft = None;
+                self.ask_side(self.active, question, cx);
+            }
+            return;
+        }
         if self.locked(self.active)
             || self.worktree_blocks_send(self.active).is_some()
             || self.attaching(self.chats[self.active].id)
@@ -221,7 +233,7 @@ impl ChatApp {
         let queued = &mut chat.queue[i];
         queued.delivering = true;
         let (text, attachments) = (queued.text.clone(), queued.attachments.clone());
-        let (id, epoch, hist) = (chat.id, chat.epoch, history(&chat.messages));
+        let (id, epoch, hist) = (chat.id, chat.epoch, seed_history(&chat.messages));
         let (settings, session) = self.cli_request(ix);
         let reply = self.agent.steer(text.clone(), attachments.clone(), &settings, &hist, &session);
         cx.spawn_in(window, async move |this, cx| {
@@ -296,7 +308,7 @@ impl ChatApp {
             if self.chats[ix].is_agent() { self.agent_skills(provider) } else { Vec::new() };
         // Transcript before this turn; live CLI sessions keep their own
         // memory, so it only seeds a fresh one.
-        let hist = history(&self.chats[ix].messages);
+        let hist = seed_history(&self.chats[ix].messages);
         let chat = &mut self.chats[ix];
         let model = chat.model(&self.settings);
         let prev = chat.messages.len().checked_sub(1);
@@ -350,6 +362,8 @@ impl ChatApp {
             &session,
         );
         chat.cancel = Some(cancel);
+        let chat_id = chat.id;
+        self.board_on_turn(chat_id, Turn::Started);
         self.list_turn(ix, prev, follow, cx);
         if ix == self.active {
             self.worktree_menu.update(cx, |s, cx| s.dismiss(cx));
@@ -375,6 +389,7 @@ impl ChatApp {
         effective.provider = chat.provider;
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
         let session = ChatSession {
+            ephemeral: false,
             key: chat.id.to_string(),
             cwd: chat_cwd(chat, &self.settings.workspace_root),
             access: chat.access,
@@ -413,7 +428,8 @@ impl ChatApp {
         chat.stopped = false;
         chat.turn_at = now_ms();
         chat.cancel = Some(reply.cancel);
-        let (run, epoch) = (chat.run, chat.epoch);
+        let (run, epoch, chat_id) = (chat.run, chat.epoch, chat.id);
+        self.board_on_turn(chat_id, Turn::Started);
         self.persist(ix);
         if ix == self.active {
             // the CLI started this turn; only follow it if the reader is at the end
@@ -556,6 +572,11 @@ impl ChatApp {
             for id in expired {
                 self.drop_request(id, window, cx);
             }
+            let chat = &self.chats[ix];
+            if chat.run == run && !chat.stopped {
+                let chat_id = chat.id;
+                self.board_on_turn(chat_id, Turn::Finished { failed });
+            }
             if failed {
                 self.refresh_health(ix, now_ms());
             }
@@ -611,7 +632,7 @@ impl ChatApp {
         if self.chats[self.active].cancel.is_none() {
             return self.stop_chat(self.active, cx);
         }
-        let view = cx.entity();
+        let (view, id) = (cx.entity(), self.chats[self.active].id);
         aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
@@ -623,7 +644,11 @@ impl ChatApp {
                 .ok_text("Stop")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, _window, cx| {
-                    view.update(cx, |this, cx| this.stop_chat(this.active, cx));
+                    view.update(cx, |this, cx| {
+                        if let Some(ix) = this.chat_ix(id) {
+                            this.stop_chat(ix, cx);
+                        }
+                    });
                     true
                 })
         });

@@ -1,12 +1,15 @@
 use crate::theme::Corners;
 use std::rc::Rc;
 
-use aether_core::{Notice, NoticeKind, NoticeState, Step, ToolDetail, ToolStatus};
+use aether_core::{Notice, NoticeKind, NoticeState, Provider, Step, ToolDetail, ToolStatus};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::SelectableText;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex, spinner::Spinner, v_flex,
+    ActiveTheme, Icon, IconName, Sizable, StyledExt, h_flex,
+    menu::{DropdownMenu, PopupMenu, PopupMenuItem},
+    spinner::Spinner,
+    v_flex,
 };
 use gpui_kit::{App, ElementId, Global, Hsla, SharedString, Window, div, prelude::*, px, rems};
 
@@ -530,6 +533,64 @@ impl RenderOnce for StoppedMarker {
     }
 }
 
+/// Divider where a chat continued in another agent: "Context handoff · from → to".
+#[derive(IntoElement)]
+pub struct HandoffMarker(aether_core::Handoff);
+
+impl HandoffMarker {
+    pub fn new(handoff: aether_core::Handoff) -> Self {
+        Self(handoff)
+    }
+}
+
+impl RenderOnce for HandoffMarker {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let h = self.0;
+        let (muted, line) = (cx.theme().muted_foreground, cx.theme().border);
+        let rule = || div().flex_1().min_w(px(16.)).h(px(1.)).bg(line);
+        let agent = |p: Provider, model: String| {
+            h_flex()
+                .flex_none()
+                .gap(px(5.))
+                .items_center()
+                .child(crate::provider_icon(p).size(px(13.)))
+                .child(if model.is_empty() { p.label().to_string() } else { model })
+        };
+        quiet_row(cx)
+            .id("handoff-marker")
+            .role(gpui_kit::Role::Group)
+            .aria_label(SharedString::from(format!(
+                "Context handoff from {} to {}",
+                h.from.label(),
+                h.to.label()
+            )))
+            .py(px(10.))
+            .gap(px(10.))
+            .child(rule())
+            .child(Icon::new(Lucide::ArrowLeftRight).xsmall().text_color(muted))
+            .child(div().flex_none().child("Context handoff"))
+            .child(agent(h.from, h.from_model))
+            .child(Icon::new(Lucide::ArrowRight).xsmall().text_color(muted))
+            .child(agent(h.to, h.to_model))
+            .child(rule())
+    }
+}
+
+pub type OnHandoff = Rc<dyn Fn(Provider, &mut Window, &mut App)>;
+
+/// One "Continue in X" item per target, for the failed-reply card.
+pub fn handoff_items(mut menu: PopupMenu, targets: &[Provider], on_pick: &OnHandoff) -> PopupMenu {
+    for &target in targets {
+        let on_pick = on_pick.clone();
+        menu = menu.item(
+            PopupMenuItem::new(format!("Continue in {}", target.label()))
+                .icon(crate::provider_icon(target))
+                .on_click(move |_, window, cx| on_pick(target, window, cx)),
+        );
+    }
+    menu
+}
+
 /// The error that ended the run.
 #[derive(IntoElement)]
 pub struct FatalCard {
@@ -542,6 +603,8 @@ pub struct FatalCard {
     on_retry: Option<OnOpen>,
     on_copy: Option<OnOpen>,
     on_reflow: Option<Reflow>,
+    handoff: Vec<Provider>,
+    on_handoff: Option<OnHandoff>,
 }
 
 impl FatalCard {
@@ -556,6 +619,8 @@ impl FatalCard {
             on_retry: None,
             on_copy: None,
             on_reflow: None,
+            handoff: Vec::new(),
+            on_handoff: None,
         }
     }
 
@@ -593,6 +658,13 @@ impl FatalCard {
 
     pub fn on_reflow(mut self, on_reflow: Option<Reflow>) -> Self {
         self.on_reflow = on_reflow;
+        self
+    }
+
+    /// Agents this turn can continue in; empty hides the button.
+    pub fn handoff(mut self, targets: Vec<Provider>, on_pick: OnHandoff) -> Self {
+        self.handoff = targets;
+        self.on_handoff = Some(on_pick);
         self
     }
 }
@@ -636,6 +708,20 @@ impl RenderOnce for FatalCard {
                         .icon(Lucide::RotateCcw)
                         .label("Retry last message")
                         .on_click(run(self.on_retry.clone())),
+                )
+            })
+            .when(self.actions && !self.handoff.is_empty(), |d| {
+                let (targets, on_pick) = (self.handoff.clone(), self.on_handoff.clone());
+                d.child(
+                    crate::components::button(SharedString::from(format!("{id}-handoff")))
+                        .ghost()
+                        .small()
+                        .icon(Lucide::ArrowRight)
+                        .label("Continue in another agent")
+                        .dropdown_menu(move |menu: PopupMenu, _, _| match &on_pick {
+                            Some(on_pick) => handoff_items(menu, &targets, on_pick),
+                            None => menu,
+                        }),
                 )
             })
             .when(!rest.is_empty(), |d| {
