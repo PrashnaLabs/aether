@@ -155,6 +155,7 @@ fn cli_settings() -> Settings {
 
 fn chat(effort: &str) -> ChatSession {
     ChatSession {
+        ephemeral: false,
         key: "1".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,
@@ -576,6 +577,7 @@ fn forked_sessions_start_with_their_history() {
 
 fn missing_chat() -> ChatSession {
     ChatSession {
+        ephemeral: false,
         key: "m".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,

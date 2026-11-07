@@ -48,7 +48,7 @@ pub(super) fn start(
         let rec = rec.clone();
         std::thread::spawn(move || listen(api, session, events, state, tx, rec, stopped));
     }
-    let c = Conn { api, session, resumed: false, _stop: stop, server };
+    let c = Conn { api, session, resumed: false, ephemeral: opts.ephemeral, _stop: stop, server };
     let label = if resume { "Resuming session" } else { "Creating session" };
     step(tx, NoticeState::Running, label);
     let setup = || -> Result<Option<Value>, String> {

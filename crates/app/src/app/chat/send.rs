@@ -389,6 +389,7 @@ impl ChatApp {
         effective.provider = chat.provider;
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
         let session = ChatSession {
+            ephemeral: false,
             key: chat.id.to_string(),
             cwd: chat_cwd(chat, &self.settings.workspace_root),
             access: chat.access,

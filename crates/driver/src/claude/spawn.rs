@@ -332,6 +332,9 @@ pub(crate) fn launch_args(
     if opts.access == AccessMode::Full {
         args.push("--dangerously-skip-permissions".into());
     }
+    if opts.ephemeral {
+        args.push("--no-session-persistence".into());
+    }
     for (flag, value) in [("--model", &opts.model), ("--effort", &opts.effort)] {
         if !value.is_empty() {
             args.extend([flag.to_string(), value.clone()]);

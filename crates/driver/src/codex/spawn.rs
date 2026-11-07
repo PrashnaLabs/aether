@@ -335,6 +335,9 @@ pub(crate) fn thread_params(opts: &DriverStartOptions) -> Value {
     if !opts.model.is_empty() {
         p["model"] = opts.model.clone().into();
     }
+    if opts.ephemeral {
+        p["ephemeral"] = true.into();
+    }
     p
 }
 

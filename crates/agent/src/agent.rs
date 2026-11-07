@@ -58,6 +58,7 @@ pub struct ChatSession {
     pub effort: String,
     pub resume: String,
     pub lead: bool,
+    pub ephemeral: bool,
 }
 
 /// What a live CLI session can't change without a restart; model and effort ride on each prompt.
@@ -990,6 +991,7 @@ fn session_options(
         resume: chat.resume.clone(),
         attachments: attachments_dir().map(|d| d.join(&chat.key)),
         lead,
+        ephemeral: chat.ephemeral,
         ..DriverStartOptions::for_provider(settings, settings.provider, chat.cwd.clone())
     };
     let key = SessionKey {

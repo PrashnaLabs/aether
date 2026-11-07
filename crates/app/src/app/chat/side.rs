@@ -120,6 +120,7 @@ impl ChatApp {
         session.access = AccessMode::ReadOnly;
         session.resume.clear();
         session.lead = false;
+        session.ephemeral = true;
         if chat.provider == Provider::OpenRouter
             && let Err(e) = self.agent.fork_session(&key, &hist)
         {

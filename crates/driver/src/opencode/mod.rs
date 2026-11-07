@@ -37,6 +37,8 @@ struct Conn {
     api: Arc<Api>,
     session: String,
     resumed: bool,
+    /// A `/btw` side run: its session is deleted on drop.
+    ephemeral: bool,
     _stop: oneshot::Sender<()>,
     server: Option<service::LeadServer>,
 }
@@ -375,6 +377,12 @@ impl Drop for OpencodeDriver {
     fn drop(&mut self) {
         if let Ok(mut s) = self.state.lock() {
             s.dead.get_or_insert_with(|| "opencode session closed".into());
+        }
+        if let Some(c) = self.conn.as_ref().filter(|c| c.ephemeral) {
+            let (api, path) = (c.api.clone(), c.path(""));
+            std::thread::spawn(move || {
+                let _ = api.send(Method::DELETE, &path, None, Duration::from_secs(5));
+            });
         }
     }
 }

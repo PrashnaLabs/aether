@@ -38,6 +38,8 @@ pub struct DriverStartOptions {
     pub background: Vec<String>,
     /// Aether tools to attach to this chat's CLI; set only for a lead chat.
     pub lead: Option<LeadTools>,
+    /// A `/btw` side run: the CLI shouldn't save its session.
+    pub ephemeral: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +79,7 @@ impl DriverStartOptions {
                     attachments: None,
                     background: Vec::new(),
                     lead: None,
+                    ephemeral: false,
                 };
             }
         };
@@ -91,6 +94,7 @@ impl DriverStartOptions {
             attachments: None,
             background: Vec::new(),
             lead: None,
+            ephemeral: false,
         }
     }
 }

@@ -64,6 +64,7 @@ fn tool(updates: &[Update]) -> &ToolCall {
 
 fn opts(access: AccessMode, model: &str, resume: &str) -> DriverStartOptions {
     DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: PathBuf::from("/tmp/codex-probe"),
         model: model.into(),
@@ -118,6 +119,9 @@ fn access_modes_map_to_codex_policies() {
 fn thread_start_and_resume_requests() {
     let start = thread_params(&opts(AccessMode::Ask, "gpt-6.1-sol", ""));
     assert_eq!(start["model"], "gpt-6.1-sol");
+    assert!(start.get("ephemeral").is_none());
+    let side = DriverStartOptions { ephemeral: true, ..opts(AccessMode::ReadOnly, "", "") };
+    assert_eq!(thread_params(&side)["ephemeral"], true);
     let resume =
         resume_params(&opts(AccessMode::ReadOnly, "", "01a15157-b7e2-7e01-ad4c-0dcb40b02092"));
     assert_eq!(

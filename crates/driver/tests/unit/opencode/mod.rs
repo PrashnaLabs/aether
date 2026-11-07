@@ -60,6 +60,7 @@ fn live_opencode_smoke() {
     let dir = std::env::temp_dir().join(format!("aether-opencode-smoke-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
+        ephemeral: false,
         binary: String::new(),
         cwd: dir.clone(),
         model: std::env::var("AETHER_OPENCODE_SMOKE_MODEL").unwrap_or_default(),

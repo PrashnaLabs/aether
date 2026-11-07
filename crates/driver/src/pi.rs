@@ -664,6 +664,9 @@ fn launch_args_with(opts: &DriverStartOptions, approve: bool, ext: Option<&Path>
     if approve {
         args.push("--approve".into());
     }
+    if opts.ephemeral {
+        args.push("--no-session".into());
+    }
     args
 }
 
