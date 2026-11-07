@@ -1,7 +1,6 @@
 use crate::settings_search::*;
 use crate::settings_view::SettingsTab;
 
-#[cfg(unix)]
 #[test]
 fn terminal_rows_search_into_the_terminal_tab() {
     for (query, id) in [("cursor", "terminal-cursor"), ("nerd", "terminal-font-family")] {
@@ -55,18 +54,9 @@ fn search_settings_matches_title_description_and_keywords() {
 
 #[test]
 fn search_settings_requires_all_tokens_and_ignores_whitespace() {
-    #[cfg(unix)]
-    {
-        let matches = search_settings("  TERMINAL   font  ");
-        assert_eq!(matches.len(), 2);
-        assert!(matches.iter().all(|item| item.id.starts_with("terminal-font")));
-    }
-    #[cfg(not(unix))]
-    {
-        let matches = search_settings("  CHAT   layout  ");
-        assert_eq!(matches.len(), 1);
-        assert!(matches.iter().all(|item| item.id == "chat-layout"));
-    }
+    let matches = search_settings("  TERMINAL   font  ");
+    assert_eq!(matches.len(), 2);
+    assert!(matches.iter().all(|item| item.id.starts_with("terminal-font")));
     assert!(search_settings("terminal keychain").is_empty());
     assert_eq!(search_settings("  ").len(), all_setting_items().len());
 }
@@ -75,10 +65,7 @@ fn search_settings_requires_all_tokens_and_ignores_whitespace() {
 fn tab_match_count_aggregates_per_category() {
     let matches = search_settings("font");
     assert_eq!(tab_match_count(SettingsTab::Appearance, &matches), 2);
-    #[cfg(unix)]
     assert_eq!(tab_match_count(SettingsTab::Terminal, &matches), 2);
-    #[cfg(not(unix))]
-    assert_eq!(tab_match_count(SettingsTab::Terminal, &matches), 0);
     assert_eq!(tab_match_count(SettingsTab::Account, &matches), 0);
 }
 
@@ -99,7 +86,6 @@ fn theme_search_finds_scheme_names() {
         assert!(search_settings(query).iter().any(|m| m.id == "theme"), "{query}");
     }
     assert!(search_settings("catppuccin").iter().any(|m| m.id == "theme"));
-    #[cfg(unix)]
     assert!(search_settings("catppuccin").iter().any(|m| m.id == "terminal-theme"));
 }
 

@@ -127,7 +127,9 @@ impl Session {
     /// The user's login shell in `folder`. Blocking: resolves PATH through a
     /// login shell and forks. Run off the UI thread.
     pub fn spawn(folder: &Path, size: WindowSize, palette: Palette) -> Result<Self, String> {
-        Self::start(folder, user_shell(), vec!["-l".into()], size, palette)
+        let shell = user_shell();
+        let args = login_args(&shell);
+        Self::start(folder, shell, args, size, palette)
     }
 
     pub fn spawn_command(
@@ -136,7 +138,9 @@ impl Session {
         size: WindowSize,
         palette: Palette,
     ) -> Result<Self, String> {
-        Self::start(folder, user_shell(), command_args(command), size, palette)
+        let shell = user_shell();
+        let args = command_args(&shell, command);
+        Self::start(folder, shell, args, size, palette)
     }
 
     fn start(
@@ -166,8 +170,8 @@ impl Session {
             use std::os::fd::AsRawFd;
             (pty.child().id(), pty.file().as_raw_fd())
         };
-        #[cfg(not(unix))]
-        let (pid, master) = (0, -1);
+        #[cfg(windows)]
+        let (pid, master) = (pty.child_watcher().pid().map_or(0, |pid| pid.get()), -1);
         let (tx, notices) = mpsc::channel();
         let shared = Arc::new(Shared {
             dirty: AtomicBool::new(true),
@@ -318,8 +322,13 @@ fn signal(pid: u32, sig: i32) {
     }
 }
 
-#[cfg(not(unix))]
-fn signal(_: u32, _: i32) {}
+// no signals here: SIGKILL ends the tree, anything else is left to the PTY closing
+#[cfg(windows)]
+fn signal(pid: u32, sig: i32) {
+    if sig == SIGKILL && pid > 1 {
+        aether_core::signal_process(pid, "KILL", true);
+    }
+}
 
 /// The shell leads its PTY session, so its pid is also its process group.
 #[cfg(unix)]
@@ -334,8 +343,12 @@ fn signal_group(pid: u32, sig: i32) {
     }
 }
 
-#[cfg(not(unix))]
-fn signal_group(_: u32, _: i32) {}
+#[cfg(windows)]
+fn signal_group(pid: u32, _: i32) {
+    if pid > 1 {
+        std::thread::spawn(move || aether_core::signal_process(pid, "KILL", true));
+    }
+}
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -410,10 +423,23 @@ fn account_shell() -> Option<String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg_attr(windows, allow(dead_code))]
 fn account_shell() -> Option<String> {
     None
 }
 
+/// PowerShell 7, else Windows PowerShell, else `%ComSpec%` (cmd.exe).
+#[cfg(windows)]
+fn user_shell() -> String {
+    ["pwsh", "powershell"]
+        .iter()
+        .find_map(|name| aether_core::find_binary(name, ""))
+        .map(|path| path.display().to_string())
+        .or_else(|| std::env::var("ComSpec").ok())
+        .unwrap_or_else(|| "cmd.exe".into())
+}
+
+#[cfg(not(windows))]
 fn user_shell() -> String {
     let env_shell = std::env::var("SHELL").ok();
     shell_program(account_shell().as_deref(), env_shell.as_deref(), |p| Path::new(p).is_file())
@@ -421,6 +447,7 @@ fn user_shell() -> String {
 
 /// The account's shell, else `$SHELL`, as long as it is an absolute path to an
 /// existing program; else `/bin/sh`.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn shell_program(
     account: Option<&str>,
     env: Option<&str>,
@@ -434,8 +461,28 @@ pub(crate) fn shell_program(
         .to_string()
 }
 
-pub(crate) fn command_args(command: &str) -> Vec<String> {
-    vec!["-lc".into(), command.to_string()]
+fn is_powershell(shell: &str) -> bool {
+    let name = shell.rsplit(['/', '\\']).next().unwrap_or(shell).to_ascii_lowercase();
+    matches!(name.trim_end_matches(".exe"), "pwsh" | "powershell")
+}
+
+/// Arguments for an interactive shell.
+fn login_args(shell: &str) -> Vec<String> {
+    match (cfg!(windows), is_powershell(shell)) {
+        (false, _) => vec!["-l".into()],
+        (true, true) => vec!["-NoLogo".into()],
+        (true, false) => Vec::new(),
+    }
+}
+
+/// Arguments that make `shell` run `command` and exit; PowerShell and cmd take the
+/// rest of the line as the command, so it is passed unquoted.
+pub(crate) fn command_args(shell: &str, command: &str) -> Vec<String> {
+    match (cfg!(windows), is_powershell(shell)) {
+        (false, _) => vec!["-lc".into(), command.to_string()],
+        (true, true) => vec!["-NoLogo".into(), "-Command".into(), command.to_string()],
+        (true, false) => vec!["/C".into(), command.to_string()],
+    }
 }
 
 /// Variables the shell gets on top of the app's own environment.
@@ -469,6 +516,10 @@ pub(crate) fn foreign_terminal_vars(names: impl Iterator<Item = String>) -> Vec<
 /// Program and arguments that start `shell` without the `unset` variables;
 /// alacritty can add variables but not remove them, so `env -u` does.
 pub(crate) fn launch(shell: &str, args: Vec<String>, unset: Vec<String>) -> (String, Vec<String>) {
+    // alacritty puts the program on the command line unquoted
+    if cfg!(windows) {
+        return (format!("\"{shell}\""), args);
+    }
     if unset.is_empty() {
         return (shell.to_string(), args);
     }

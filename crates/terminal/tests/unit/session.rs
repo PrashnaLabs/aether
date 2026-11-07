@@ -46,6 +46,7 @@ fn env_sets_terminal_type_path_and_a_missing_locale() {
     assert!(!env.contains_key("LANG"));
 }
 
+#[cfg(unix)]
 #[test]
 fn other_terminals_variables_are_dropped() {
     let names = [
@@ -141,8 +142,48 @@ fn session_update_theme_updates_palette_and_flags_dirty() {
     assert!(!session.terminate());
 }
 
+#[cfg(unix)]
 #[test]
 fn command_args_pass_command_verbatim() {
     let cmd = r#"echo 'a b' && FOO="$HOME" ls | wc -l"#;
-    assert_eq!(command_args(cmd), vec!["-lc".to_string(), cmd.to_string()]);
+    assert_eq!(command_args("/bin/zsh", cmd), vec!["-lc".to_string(), cmd.to_string()]);
+}
+
+#[test]
+fn powershell_is_told_from_cmd_by_program_name() {
+    assert!(is_powershell(r"C:\Program Files\PowerShell\7\pwsh.exe"));
+    assert!(is_powershell("powershell"));
+    assert!(is_powershell("/usr/bin/pwsh"));
+    assert!(!is_powershell(r"C:\Windows\System32\cmd.exe"));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_shells_run_a_command_and_quote_the_program() {
+    assert_eq!(
+        command_args(r"C:\x\pwsh.exe", "dir"),
+        ["-NoLogo".to_string(), "-Command".into(), "dir".into()]
+    );
+    assert_eq!(command_args("cmd.exe", "dir /b"), ["/C".to_string(), "dir /b".into()]);
+    assert_eq!(login_args("cmd.exe"), Vec::<String>::new());
+    let (program, args) = launch(r"C:\Program Files\x\pwsh.exe", vec![], vec!["A".into()]);
+    assert_eq!(program, "\"C:\\Program Files\\x\\pwsh.exe\"");
+    assert!(args.is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_shell_output_reaches_the_grid() {
+    let size = WindowSize { num_lines: 8, num_cols: 60, cell_width: 8, cell_height: 18 };
+    let palette = Palette::new(false, Rgb { r: 0, g: 0, b: 0 }, Rgb { r: 255, g: 255, b: 255 });
+    let session =
+        Session::spawn_command(&std::env::temp_dir(), "echo aether-ok", size, palette).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !session.notices().any(|n| matches!(n, Notice::Exited(_))) {
+        assert!(Instant::now() < deadline, "shell never exited");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let frame = super::super::grid::snapshot(&session.term.lock(), &palette, false);
+    let rows: Vec<_> = frame.rows.iter().map(|r| r.text.as_str()).collect();
+    assert!(rows.iter().any(|r| r.contains("aether-ok")), "{rows:?}");
 }

@@ -253,7 +253,6 @@ static SETTING_CATALOG: &[SettingItem] = &[
         description: "Include seconds in the status bar clock.",
         keywords: &["seconds", "clock", "precision", "tick"],
     },
-    #[cfg(unix)]
     SettingItem {
         id: "terminal-theme",
         tab: SettingsTab::Terminal,
@@ -261,7 +260,6 @@ static SETTING_CATALOG: &[SettingItem] = &[
         description: "Terminal palette. Auto pairs Mocha for dark and Latte for light appearance.",
         keywords: &["catppuccin", "mocha", "macchiato", "frappe", "latte", "aether"],
     },
-    #[cfg(unix)]
     SettingItem {
         id: "terminal-font-size",
         tab: SettingsTab::Terminal,
@@ -269,7 +267,6 @@ static SETTING_CATALOG: &[SettingItem] = &[
         description: "Terminal text size, independent of the app UI size.",
         keywords: &["terminal", "font", "scale"],
     },
-    #[cfg(unix)]
     SettingItem {
         id: "terminal-font-family",
         tab: SettingsTab::Terminal,
@@ -277,7 +274,6 @@ static SETTING_CATALOG: &[SettingItem] = &[
         description: "System monospace for the terminal. Use a Nerd Font for prompt icons. Empty uses the theme font; symbol fonts are fallbacks. Restart after installing a font.",
         keywords: &["terminal", "font", "nerd", "meslo", "jetbrains", "tofu"],
     },
-    #[cfg(unix)]
     SettingItem {
         id: "terminal-cursor",
         tab: SettingsTab::Terminal,
