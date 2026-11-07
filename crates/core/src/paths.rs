@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-/// Aether's per-user config folder: Application Support on macOS, XDG config
-/// elsewhere.
+/// Aether's per-user config folder: Application Support on macOS, %APPDATA% on
+/// Windows, XDG config elsewhere.
 pub fn config_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     let base = {
@@ -21,7 +21,9 @@ pub fn config_dir() -> Option<PathBuf> {
             (library, xdg) => library.or(xdg),
         }
     };
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    let base = env::var_os("APPDATA").filter(|dir| !dir.is_empty()).map(PathBuf::from);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let base = env::var_os("XDG_CONFIG_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
@@ -63,7 +65,25 @@ pub fn find_binary(name: &str, override_path: &str) -> Option<PathBuf> {
         let p = expand_tilde(override_path);
         return p.is_file().then_some(p);
     }
-    search_dirs().into_iter().map(|d| d.join(name)).find(|p| p.is_file())
+    let exts = executable_exts();
+    search_dirs()
+        .into_iter()
+        .flat_map(|d| exts.iter().map(move |e| d.join(format!("{name}{e}"))).collect::<Vec<_>>())
+        .find(|p| p.is_file())
+}
+
+// Windows: bare name last, an extensionless npm shim next to a .cmd is not runnable.
+fn executable_exts() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+        let mut exts: Vec<String> =
+            pathext.split(';').filter(|e| !e.is_empty()).map(str::to_lowercase).collect();
+        exts.push(String::new());
+        exts
+    }
+    #[cfg(not(windows))]
+    vec![String::new()]
 }
 
 fn expand_tilde(p: &str) -> PathBuf {
@@ -75,12 +95,12 @@ fn expand_tilde(p: &str) -> PathBuf {
 }
 
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    env::home_dir().unwrap_or_default()
 }
 
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> =
-        login_path().split(':').filter(|s| !s.is_empty()).map(PathBuf::from).collect();
+        env::split_paths(&login_path()).filter(|p| !p.as_os_str().is_empty()).collect();
     for extra in [
         home_dir().join(".local/bin"),
         home_dir().join(".cargo/bin"),
@@ -105,6 +125,9 @@ fn login_shell_path() -> Option<String> {
 }
 
 fn run_login_shell() -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
     let mut child = Command::new("sh")
         .args(["-l", "-c", "printf %s \"$PATH\""])
         .stdout(Stdio::piped())
@@ -146,20 +169,14 @@ pub fn repaired_path() -> String {
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
     ];
-    let mut seen: Vec<String> = path.split(':').map(str::to_string).collect();
-    let mut out = path;
+    let mut dirs: Vec<PathBuf> =
+        env::split_paths(&path).filter(|p| !p.as_os_str().is_empty()).collect();
     for e in extras {
-        if let Some(s) = e.to_str()
-            && !seen.iter().any(|x| x == s)
-        {
-            seen.push(s.to_string());
-            if !out.is_empty() {
-                out.push(':');
-            }
-            out.push_str(s);
+        if !dirs.contains(&e) {
+            dirs.push(e);
         }
     }
-    out
+    env::join_paths(dirs).map(|p| p.to_string_lossy().into_owned()).unwrap_or(path)
 }
 
 #[cfg(test)]
