@@ -15,7 +15,7 @@ use super::{Chat, ChatApp, ChatViewMode, Page, chat_cwd};
 
 mod commands;
 mod create;
-pub(super) use create::reattach_wanted;
+pub(super) use create::{limit_hit, reattach_wanted};
 mod edit;
 mod live;
 mod manage;

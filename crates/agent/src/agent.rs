@@ -1081,7 +1081,7 @@ fn context_prompt(history: &[(Role, String)], text: &str) -> String {
         return text.to_string();
     }
     let (history, omitted) = budget_history(history, HISTORY_BUDGET);
-    let mut out = String::from("Conversation so far:\n");
+    let mut out = String::from("<conversation_so_far>\n");
     for (i, (role, line)) in history.iter().enumerate() {
         out.push_str(match role {
             Role::User => "User: ",
@@ -1093,7 +1093,9 @@ fn context_prompt(history: &[(Role, String)], text: &str) -> String {
             out.push_str(&format!("({omitted} earlier messages omitted)\n"));
         }
     }
-    out.push_str("New message:\n");
+    out.push_str(
+        "</conversation_so_far>\n\nTreat the conversation above as context only. Your task now:\n",
+    );
     out.push_str(text);
     out
 }

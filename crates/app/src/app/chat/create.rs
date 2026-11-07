@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use aether_agent::{ExternalAgent, HISTORY_BUDGET, SavedChat, budget_history};
-use aether_core::{Message, Provider, RequestStatus, Role, Step, ToolStatus, attachments_dir};
+use aether_core::{
+    Message, NoticeKind, NoticeState, Provider, RequestStatus, Role, Step, ToolStatus,
+    attachments_dir,
+};
 use aether_ui::{ChatStatus, background_rows};
 use gpui_kit::component::WindowExt;
 use gpui_kit::component::notification::Notification;
@@ -16,6 +19,42 @@ use crate::app::{CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued};
 use crate::attachments;
 
 const HANDOFF_DRAFT: &str = "Continue where the previous agent left off. You're in the same folder, so check the working tree for changes it already made.";
+
+const LIMIT_PHRASES: [&str; 15] = [
+    "usage limit",
+    "rate limit",
+    "rate_limit",
+    "quota",
+    "context window",
+    "context length",
+    "maximum context",
+    "too many tokens",
+    "too many requests",
+    "http 429",
+    "status 429",
+    "error 429",
+    "max_turns",
+    "max_budget",
+    "output limit",
+];
+
+/// The reply stopped on a usage, rate, budget or context limit another agent could get past.
+pub(crate) fn limit_hit(msg: &Message) -> bool {
+    let hit = |text: &str| {
+        let text = text.to_lowercase();
+        LIMIT_PHRASES.iter().any(|p| text.contains(p))
+    };
+    msg.role == Role::Assistant
+        && (msg.error.as_deref().is_some_and(hit)
+            || msg.steps.iter().any(|s| match s {
+                Step::Notice(n) => match n.kind {
+                    NoticeKind::RateLimit => n.state == NoticeState::Failed,
+                    NoticeKind::Warning => hit(&n.text),
+                    _ => false,
+                },
+                _ => false,
+            }))
+}
 
 pub(super) fn new_chat_folder(
     cli: bool,

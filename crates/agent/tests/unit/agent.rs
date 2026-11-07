@@ -630,7 +630,10 @@ fn opencode_send_with_missing_binary_and_no_hub_errors_and_closes() {
 fn cli_prompt_carries_the_transcript_as_context() {
     let history = [(Role::User, "hi".to_string()), (Role::Assistant, "yo".to_string())];
     let prompt = context_prompt(&history, "again");
-    assert!(prompt.contains("hi") && prompt.contains("yo") && prompt.contains("again"));
+    assert_eq!(
+        prompt,
+        "<conversation_so_far>\nUser: hi\nAssistant: yo\n</conversation_so_far>\n\nTreat the conversation above as context only. Your task now:\nagain"
+    );
     assert_eq!(context_prompt(&[], "bare"), "bare");
 }
 
@@ -659,10 +662,14 @@ fn history_budget_keeps_first_and_newest_whole_messages() {
 fn cli_prompt_says_how_many_messages_were_dropped() {
     let history: Vec<_> = (0..4).map(|i| (Role::User, format!("{i}").repeat(30_000))).collect();
     let prompt = context_prompt(&history, "again");
-    assert!(prompt.contains("(2 earlier messages omitted)"));
-    let note = prompt.find("(2 earlier").unwrap();
-    assert!(prompt.find("0000").unwrap() < note && note < prompt.find("3333").unwrap());
-    assert!(prompt.ends_with("again"));
+    let (a, d) = ("0".repeat(30_000), "3".repeat(30_000));
+    assert_eq!(
+        prompt,
+        format!(
+            "<conversation_so_far>\nUser: {a}\n(2 earlier messages omitted)\n\
+             User: {d}\n</conversation_so_far>\n\nTreat the conversation above as context only. Your task now:\nagain"
+        )
+    );
     assert!(!context_prompt(&history[..1], "again").contains("omitted"));
 }
 

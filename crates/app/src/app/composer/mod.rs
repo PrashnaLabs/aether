@@ -16,11 +16,13 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, h_flex, v_flex};
 use gpui_kit::{App, Context, Focusable, SharedString, Window, div, prelude::*, px};
 
 use self::attach::{PasteKind, paste_kind, shell_command};
 use self::chips::resting_chip;
+use super::chat::limit_hit;
 use super::format::{format_cost, format_full, message_cost};
 use super::{ChatApp, WorktreeJob, chat_cwd};
 
@@ -235,6 +237,33 @@ impl ChatApp {
                     ),
                 )
         });
+        let limit = (!busy && chat.messages.last().is_some_and(limit_hit))
+            .then(|| self.handoff_targets(Some(chat.provider)))
+            .filter(|targets| !targets.is_empty())
+            .map(|targets| {
+                let handoff = self.session_handle(cx);
+                let on_pick: aether_ui::OnHandoff = Rc::new(move |target, window, cx| {
+                    handoff.update(cx, |this, cx| this.handoff_to(this.active, target, window, cx));
+                });
+                h_flex()
+                    .px_2()
+                    .gap_2()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Hit a limit \u{2014} continue in another agent")
+                    .child(
+                        div().debug_selector(|| "composer-handoff-limit".into()).child(
+                            aether_ui::button("composer-handoff-limit")
+                                .outline()
+                                .xsmall()
+                                .label("Continue in\u{2026}")
+                                .dropdown_menu(move |menu, _, _| {
+                                    aether_ui::handoff_items(menu, &targets, &on_pick)
+                                }),
+                        ),
+                    )
+            });
         let editing = self.editing.is_some().then(|| {
             h_flex()
                 .px_2()
@@ -488,6 +517,7 @@ impl ChatApp {
                     || editing.is_some()
                     || voice.is_some()
                     || locked
+                    || limit.is_some()
                     || !side.is_empty()
                     || note.is_some()
                     || setup.is_some()
@@ -504,6 +534,7 @@ impl ChatApp {
                             .children(cockpit)
                             .children(side)
                             .children(banner)
+                            .children(limit)
                             .children(note)
                             .children(setup)
                             .children(editing)
