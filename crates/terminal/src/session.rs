@@ -332,8 +332,12 @@ fn watch_job(shared: std::sync::Weak<Shared>, shell: u32) {
             let job = system
                 .processes()
                 .values()
-                .find(|p| p.parent() == Some(shell) && p.name() != "conhost.exe")
-                .map(|p| p.name().to_string_lossy().trim_end_matches(".exe").to_string());
+                .filter(|p| p.parent() == Some(shell))
+                .map(|p| p.name().to_string_lossy().into_owned())
+                .find(|name| !name.eq_ignore_ascii_case("conhost.exe"))
+                .and_then(|name| {
+                    Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned())
+                });
             *shared.job.guard() = job;
             drop(shared);
             std::thread::sleep(Duration::from_secs(1));
