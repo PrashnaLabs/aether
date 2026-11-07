@@ -4,7 +4,6 @@ use std::{
     fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    process::Command,
     time::{Duration, SystemTime},
 };
 
@@ -57,7 +56,7 @@ impl Store {
             let Some(parent) = existing.parent() else { break };
             existing = parent;
         }
-        let root = match existing.canonicalize() {
+        let root = match aether_core::canonicalize(existing) {
             Ok(mut resolved) => {
                 for name in missing.iter().rev() {
                     resolved.push(name);
@@ -539,7 +538,7 @@ impl Store {
             return Err("Notes directory is not a Git repository; run git init there first".into());
         }
         let run = |args: &[&str]| -> Result<String> {
-            let out = Command::new("git")
+            let out = aether_core::command("git")
                 .current_dir(&self.root)
                 .args(args)
                 .output()

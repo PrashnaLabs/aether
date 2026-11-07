@@ -722,7 +722,7 @@ fn untrusted_project(cwd: &Path, trust: &Value, default_trust: &str) -> bool {
         ".pi/SYSTEM.md",
         ".pi/APPEND_SYSTEM.md",
     ];
-    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let cwd = aether_core::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let protected = PROTECTED.iter().any(|p| cwd.join(p).exists())
         || cwd.ancestors().any(|d| d.join(".agents/skills").exists());
     if !protected || default_trust == "always" {

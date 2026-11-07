@@ -1,5 +1,3 @@
-use std::process::Command;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
     pub cpu_percent: f32,
@@ -82,7 +80,7 @@ pub fn parse_meminfo(text: &str) -> Option<(u64, u64)> {
 }
 
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).output().ok()?;
+    let out = aether_core::command(program).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 

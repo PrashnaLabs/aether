@@ -3,7 +3,7 @@
 //! Process probes must not block the UI thread.
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
 
 pub fn prepare(
@@ -12,8 +12,8 @@ pub fn prepare(
     path: &Path,
     line: Option<usize>,
 ) -> Result<String, String> {
-    let root = root.canonicalize().map_err(|e| format!("Open notes directory: {e}"))?;
-    let path = path.canonicalize().map_err(|e| format!("Open note: {e}"))?;
+    let root = aether_core::canonicalize(root).map_err(|e| format!("Open notes directory: {e}"))?;
+    let path = aether_core::canonicalize(path).map_err(|e| format!("Open note: {e}"))?;
     if !path.starts_with(&root) || !path.is_file() {
         return Err("The note must be a file inside the notes directory".into());
     }
@@ -286,7 +286,7 @@ fn run_with_timeout(
 ) -> std::io::Result<Output> {
     let mut stdout = ProcessOutput::new()?;
     let mut stderr = ProcessOutput::new()?;
-    let mut child = Command::new(program)
+    let mut child = aether_core::command(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.file.try_clone()?))

@@ -106,7 +106,7 @@ pub fn scan(own_pid: u32, own_sessions: &HashSet<String>) -> Option<Vec<External
 
 // lsof escapes non-ASCII paths under the C locale a GUI app may inherit
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program)
+    let out = aether_core::command(program)
         .args(args)
         .env("LC_ALL", "en_US.UTF-8")
         .stdin(Stdio::null())

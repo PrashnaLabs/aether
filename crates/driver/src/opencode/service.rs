@@ -229,11 +229,7 @@ impl Drop for LeadServer {
 pub fn kill_lead_servers() {
     let pids = LEAD_PIDS.lock().unwrap_or_else(|e| e.into_inner());
     for pid in pids.iter() {
-        let _ = Command::new("/bin/kill")
-            .args(["-KILL", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        aether_core::signal_process(*pid, "KILL", false);
     }
 }
 
@@ -296,9 +292,7 @@ fn scan_stdout(out: impl Read, found: &std::sync::mpsc::Sender<String>) {
 }
 
 fn password() -> std::io::Result<String> {
-    let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
-    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+    Ok(aether_core::random_bytes::<16>().iter().map(|x| format!("{x:02x}")).collect())
 }
 
 pub(super) fn connect(

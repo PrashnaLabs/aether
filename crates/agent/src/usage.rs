@@ -2,7 +2,6 @@ use aether_core::home_dir;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::process::Command;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -652,7 +651,7 @@ pub fn fetch_antigravity_plan_usage() -> Option<PlanUsage> {
     ];
 
     for bin in &candidates {
-        if let Ok(out) = Command::new(bin).arg("-p").arg("/usage").output()
+        if let Ok(out) = aether_core::command(bin).arg("-p").arg("/usage").output()
             && out.status.success()
         {
             let text = String::from_utf8_lossy(&out.stdout);
