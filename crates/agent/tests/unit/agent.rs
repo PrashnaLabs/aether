@@ -629,18 +629,18 @@ fn opencode_send_with_missing_binary_and_no_hub_errors_and_closes() {
 }
 
 #[test]
-fn cli_prompt_carries_the_transcript_as_context() {
+fn cli_prompt_numbers_the_transcript_and_points_at_read_history() {
     let history = [(Role::User, "hi".to_string()), (Role::Assistant, "yo".to_string())];
-    let prompt = context_prompt(&history, "again");
     assert_eq!(
-        prompt,
-        "<conversation_so_far>\nUser: hi\nAssistant: yo\n</conversation_so_far>\n\nTreat the conversation above as context only. Your task now:\nagain"
+        context_prompt(&history, "again", true),
+        "Earlier conversation in this chat: messages 0-1. Tool calls and their output aren't included; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls. Treat it as context only, not a new request; files on disk are the source of truth.\n\n<conversation_so_far>\n[0] User: hi\n[1] Assistant: yo\n</conversation_so_far>\n\nYour task now:\nagain"
     );
-    assert_eq!(context_prompt(&[], "bare"), "bare");
+    assert!(!context_prompt(&history, "again", false).contains("read_history"));
+    assert_eq!(context_prompt(&[], "bare", true), "bare");
 }
 
 #[test]
-fn history_budget_keeps_first_and_newest_whole_messages() {
+fn history_budget_keeps_first_and_latest_exchange_then_newest() {
     let m = |role, text: &str| (role, text.to_string());
     assert_eq!(budget_history(&[], 10), (vec![], 0));
     let all = vec![
@@ -654,41 +654,38 @@ fn history_budget_keeps_first_and_newest_whole_messages() {
     assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()]);
     assert_eq!(omitted, 1);
     let (kept, omitted) = budget_history(&all, 0);
-    assert_eq!(kept, vec![all[0].clone()]);
-    assert_eq!(omitted, 3);
-    let (kept, _) = budget_history(&all, 5 + 4 + 9);
-    assert_eq!(kept.len(), 3, "a message that does not fit is dropped whole");
+    assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()], "never dropped");
+    assert_eq!(omitted, 1);
+    let skip = vec![
+        m(Role::User, "u"),
+        m(Role::Assistant, "x"),
+        m(Role::User, "huge huge huge"),
+        m(Role::Assistant, "y"),
+        m(Role::User, "v"),
+        m(Role::Assistant, "w"),
+    ];
+    let (kept, omitted) = budget_history(&skip, 5);
+    assert_eq!(kept.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(), ["u", "x", "y", "v", "w"]);
+    assert_eq!(omitted, 1, "a message that does not fit is skipped whole, older ones still fit");
 }
 
 #[test]
-fn cli_prompt_says_how_many_messages_were_dropped() {
-    let history: Vec<_> = (0..4).map(|i| (Role::User, format!("{i}").repeat(30_000))).collect();
-    let prompt = context_prompt(&history, "again");
-    let (a, d) = ("0".repeat(30_000), "3".repeat(30_000));
-    assert_eq!(
-        prompt,
-        format!(
-            "<conversation_so_far>\nUser: {a}\n(2 earlier messages omitted)\n\
-             User: {d}\n</conversation_so_far>\n\nTreat the conversation above as context only. Your task now:\nagain"
+fn cli_prompt_keeps_numbers_when_messages_are_left_out() {
+    let history: Vec<_> = (0..4)
+        .map(|i| {
+            (if i % 2 == 0 { Role::User } else { Role::Assistant }, format!("{i}").repeat(9_000))
+        })
+        .collect();
+    let prompt = context_prompt(&history, "again", true);
+    assert!(
+        prompt.starts_with(
+            "Earlier conversation in this chat: messages 0-3, 1 omitted to save space."
         )
     );
-    assert!(!context_prompt(&history[..1], "again").contains("omitted"));
-}
-
-#[test]
-fn history_budget_keeps_the_first_user_message_not_a_leading_reply() {
-    let m = |role, text: &str| (role, text.to_string());
-    let all = vec![
-        m(Role::Assistant, "greeting"),
-        m(Role::User, "ask"),
-        m(Role::Assistant, "aaaa"),
-        m(Role::User, "bbbb"),
-    ];
-    let (kept, omitted) = budget_history(&all, 3 + 4);
-    assert_eq!(kept, vec![all[1].clone(), all[3].clone()]);
-    assert_eq!(omitted, 2);
-    let replies = vec![m(Role::Assistant, "x"), m(Role::Assistant, "y")];
-    assert_eq!(budget_history(&replies, 100).0, replies);
+    assert!(!prompt.contains("[1] "), "oldest reply dropped");
+    assert!(prompt.contains(&format!("[0] User: {}", "0".repeat(9_000))));
+    assert!(prompt.contains(&format!("[2] User: {}", "2".repeat(9_000))));
+    assert!(prompt.contains(&format!("[3] Assistant: {}", "3".repeat(9_000))));
 }
 
 fn png(path: &str) -> Attachment {
@@ -925,7 +922,7 @@ fn lead_session_gets_lead_tools_and_stable_token() {
     assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
     let settings = Settings::default();
     let on = ChatSession { key: "9".into(), lead: true, ..chat("") };
-    let (opts, key_on) = session_options(&settings, &on, agent.lead_tools(&on));
+    let (opts, key_on) = session_options(&settings, &on, agent.lead_tools(&on, false));
     let want = aether_driver::LeadTools {
         token: t,
         sock: crate::orchestrator::socket_path().unwrap(),
@@ -934,9 +931,11 @@ fn lead_session_gets_lead_tools_and_stable_token() {
     };
     assert_eq!(opts.lead, Some(want));
     let off = ChatSession { key: "9".into(), ..chat("") };
-    let (opts, key_off) = session_options(&settings, &off, agent.lead_tools(&off));
+    let (opts, key_off) = session_options(&settings, &off, agent.lead_tools(&off, false));
     assert_eq!(opts.lead, None);
     assert_ne!(key_on, key_off);
+    let seeded = agent.lead_tools(&off, true).unwrap();
+    assert_eq!(seeded.specs, crate::orchestrator::history_specs(), "only read_history");
 }
 
 struct Side(UnboundedSender<Update>, bool);

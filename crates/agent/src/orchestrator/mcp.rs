@@ -21,7 +21,14 @@ pub fn handle(
             "serverInfo": {"name": "aether", "version": env!("CARGO_PKG_VERSION")}
         }),
         "ping" => json!({}),
-        "tools/list" => json!({"tools": if token.is_some() { tool_specs() } else { json!([]) }}),
+        "tools/list" => {
+            // the app scopes tools per chat; all specs only if it can't answer
+            let tools = match token {
+                Some(_) => call("list_tools", json!({})).unwrap_or_else(|_| tool_specs()),
+                None => json!([]),
+            };
+            json!({"tools": tools})
+        }
         "tools/call" => {
             let outcome = match token {
                 Some(_) => call(params["name"].as_str().unwrap_or(""), params["arguments"].clone()),

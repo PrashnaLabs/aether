@@ -256,15 +256,18 @@ impl Agent {
         token
     }
 
-    fn lead_tools(&self, chat: &ChatSession) -> Option<LeadTools> {
-        if !chat.lead {
-            return None;
-        }
+    /// Aether tools for the chat's CLI: all for a lead, read_history for one `seeded` with history.
+    fn lead_tools(&self, chat: &ChatSession, seeded: bool) -> Option<LeadTools> {
+        let specs = match (chat.lead, seeded) {
+            (true, _) => crate::orchestrator::tool_specs(),
+            (false, true) => crate::orchestrator::history_specs(),
+            (false, false) => return None,
+        };
         Some(LeadTools {
             exe: std::env::current_exe().ok()?,
             sock: socket_path()?,
             token: self.lead_token(&chat.key),
-            specs: crate::orchestrator::tool_specs(),
+            specs,
         })
     }
 
@@ -609,7 +612,8 @@ impl Agent {
             let (done, _) = std::sync::mpsc::channel();
             return Reply { updates, cancel: Cancel(CancelInner::Cli(done)) };
         }
-        let (opts, key) = session_options(settings, chat, self.lead_tools(chat));
+        let (opts, key) =
+            session_options(settings, chat, self.lead_tools(chat, !history.is_empty()));
         let mut live = self.live.guard();
         let mut command = Command::Prompt {
             text,
@@ -649,7 +653,7 @@ impl Agent {
         if live.contains_key(&chat.key) {
             return;
         }
-        let (mut opts, key) = session_options(settings, chat, self.lead_tools(chat));
+        let (mut opts, key) = session_options(settings, chat, self.lead_tools(chat, false));
         opts.reattach = true;
         opts.background = background;
         let session = self.spawn_live(&chat.key, key, opts, None);
@@ -704,7 +708,7 @@ impl Agent {
                         let text = if seeded || history.is_empty() {
                             text
                         } else {
-                            context_prompt(&history, &text)
+                            context_prompt(&history, &text, opts.lead.is_some())
                         } + &attached_files_block(&by_path);
                         seeded = true;
                         orphan.store(false, Ordering::SeqCst);
@@ -908,7 +912,7 @@ impl Agent {
         chat: &ChatSession,
     ) -> Reply {
         let (tx, updates) = mpsc::unbounded();
-        let (_, key) = session_options(settings, chat, self.lead_tools(chat));
+        let (_, key) = session_options(settings, chat, self.lead_tools(chat, false));
         if let Some(session) = self.live.guard().get(&chat.key).filter(|s| s.key == key) {
             let turn = session.turn.guard();
             let steer =
@@ -1051,53 +1055,70 @@ fn answer_allows(answer: &Answer) -> bool {
     }
 }
 
-pub const HISTORY_BUDGET: usize = 64_000;
+pub const HISTORY_BUDGET: usize = 16_000;
 
-/// The first user message plus the newest whole messages that fit `limit`
-/// characters, and how many were left out.
-pub fn budget_history(history: &[(Role, String)], limit: usize) -> (Vec<(Role, String)>, usize) {
-    if history.is_empty() {
-        return (Vec::new(), 0);
-    }
-    let first_ix = history.iter().position(|(r, _)| *r == Role::User).unwrap_or(0);
-    let first = &history[first_ix];
-    let mut used = first.1.chars().count();
-    let mut from = history.len();
-    for (i, (_, text)) in history.iter().enumerate().skip(first_ix + 1).rev() {
-        used += text.chars().count();
-        if used > limit {
-            break;
+/// Which messages fit `limit` chars: the first user message and the latest exchange always,
+/// then whole messages newest-first.
+fn budget_mask(history: &[(Role, String)], limit: usize) -> Vec<bool> {
+    let n = history.len();
+    let len = |i: usize| history[i].1.chars().count();
+    let mut keep = vec![false; n];
+    let mut used = 0;
+    let first = history.iter().position(|(r, _)| *r == Role::User);
+    let last_user = history.iter().rposition(|(r, _)| *r == Role::User);
+    let last_reply = history.iter().rposition(|(r, _)| *r == Role::Assistant);
+    for i in [first, last_user, last_reply].into_iter().flatten() {
+        if !keep[i] {
+            keep[i] = true;
+            used += len(i);
         }
-        from = i;
     }
-    let mut kept = vec![first.clone()];
-    kept.extend_from_slice(&history[from.max(first_ix + 1)..]);
+    for i in (0..n).rev() {
+        if !keep[i] && used + len(i) <= limit {
+            keep[i] = true;
+            used += len(i);
+        }
+    }
+    keep
+}
+
+/// The messages `budget_mask` keeps, in order, and how many were left out.
+pub fn budget_history(history: &[(Role, String)], limit: usize) -> (Vec<(Role, String)>, usize) {
+    let keep = budget_mask(history, limit);
+    let kept: Vec<_> =
+        history.iter().zip(&keep).filter(|(_, k)| **k).map(|(h, _)| h.clone()).collect();
     let omitted = history.len() - kept.len();
     (kept, omitted)
 }
 
-/// The visible transcript joined with the new message, so a stateless
-/// CLI prompt still sees the conversation.
-fn context_prompt(history: &[(Role, String)], text: &str) -> String {
+/// The transcript joined with the new message, so a fresh CLI session still sees the
+/// conversation. Messages keep their numbers; `read_history` (when `tool`) returns them in full.
+fn context_prompt(history: &[(Role, String)], text: &str, tool: bool) -> String {
     if history.is_empty() {
         return text.to_string();
     }
-    let (history, omitted) = budget_history(history, HISTORY_BUDGET);
-    let mut out = String::from("<conversation_so_far>\n");
-    for (i, (role, line)) in history.iter().enumerate() {
-        out.push_str(match role {
-            Role::User => "User: ",
-            Role::Assistant => "Assistant: ",
-        });
-        out.push_str(line);
-        out.push('\n');
-        if i == 0 && omitted > 0 {
-            out.push_str(&format!("({omitted} earlier messages omitted)\n"));
-        }
+    let n = history.len();
+    let keep = budget_mask(history, HISTORY_BUDGET);
+    let omitted = keep.iter().filter(|k| !**k).count();
+    let mut out = format!("Earlier conversation in this chat: messages 0-{}", n - 1);
+    if omitted > 0 {
+        out.push_str(&format!(", {omitted} omitted to save space"));
     }
-    out.push_str(
-        "</conversation_so_far>\n\nTreat the conversation above as context only. Your task now:\n",
-    );
+    out.push_str(". Tool calls and their output aren't included");
+    if tool {
+        out.push_str(
+            "; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls",
+        );
+    }
+    out.push_str(". Treat it as context only, not a new request; files on disk are the source of truth.\n\n<conversation_so_far>\n");
+    for (i, (role, line)) in history.iter().enumerate().filter(|(i, _)| keep[*i]) {
+        let who = match role {
+            Role::User => "User",
+            Role::Assistant => "Assistant",
+        };
+        out.push_str(&format!("[{i}] {who}: {line}\n"));
+    }
+    out.push_str("</conversation_so_far>\n\nYour task now:\n");
     out.push_str(text);
     out
 }

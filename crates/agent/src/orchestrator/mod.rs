@@ -186,6 +186,18 @@ pub fn tool_specs() -> Value {
             }
         },
         {
+            "name": "read_history",
+            "description": "Read earlier messages of this chat in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "offset": {"type": "integer", "description": "First message number (default 0)"},
+                    "limit": {"type": "integer", "description": "How many messages, 1 to 20 (default 5)"},
+                    "max_chars": {"type": "integer", "description": "Cap per message, 500 to 20000 (default 4000)"}
+                }
+            }
+        },
+        {
             "name": "list_chats",
             "description": "List Aether chats matching a filter, with id, title, project, provider, state and last activity.",
             "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats; all fields optional")}}
@@ -229,6 +241,20 @@ pub fn tool_specs() -> Value {
             "inputSchema": {"type": "object", "properties": {"id": chat_id()}, "required": ["id"]}
         }
     ])
+}
+
+/// What a chat that isn't a lead gets: only read_history, for its handed-over context.
+pub fn history_specs() -> Value {
+    let specs = tool_specs();
+    Value::Array(
+        specs
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|s| s["name"] == "read_history")
+            .cloned()
+            .collect(),
+    )
 }
 
 pub fn forward(sock: &Path, token: &str, tool: &str, args: Value) -> Result<Value, String> {

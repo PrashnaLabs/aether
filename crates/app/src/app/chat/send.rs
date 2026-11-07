@@ -9,7 +9,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{App, Context, SharedString, Window};
 
-use super::{Changed, btw_question, btw_rest, history};
+use super::{Changed, btw_question, btw_rest, seed_history};
 use crate::app::composer::attach::{delete_later, first_refusal, is_cli_command, shell_command};
 use crate::app::composer::quote::quoted;
 use crate::app::format::now_ms;
@@ -233,7 +233,7 @@ impl ChatApp {
         let queued = &mut chat.queue[i];
         queued.delivering = true;
         let (text, attachments) = (queued.text.clone(), queued.attachments.clone());
-        let (id, epoch, hist) = (chat.id, chat.epoch, history(&chat.messages));
+        let (id, epoch, hist) = (chat.id, chat.epoch, seed_history(&chat.messages));
         let (settings, session) = self.cli_request(ix);
         let reply = self.agent.steer(text.clone(), attachments.clone(), &settings, &hist, &session);
         cx.spawn_in(window, async move |this, cx| {
@@ -308,7 +308,7 @@ impl ChatApp {
             if self.chats[ix].is_agent() { self.agent_skills(provider) } else { Vec::new() };
         // Transcript before this turn; live CLI sessions keep their own
         // memory, so it only seeds a fresh one.
-        let hist = history(&self.chats[ix].messages);
+        let hist = seed_history(&self.chats[ix].messages);
         let chat = &mut self.chats[ix];
         let model = chat.model(&self.settings);
         let prev = chat.messages.len().checked_sub(1);

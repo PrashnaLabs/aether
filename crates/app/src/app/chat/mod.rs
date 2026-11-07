@@ -39,21 +39,104 @@ pub(super) fn fit_access(provider: Provider, current: AccessMode) -> AccessMode 
 
 /// The visible transcript, which seeds a fresh model session.
 fn history(messages: &[Message]) -> Vec<(Role, String)> {
+    messages.iter().map(|m| (m.role, plain_text(m))).filter(|(_, text)| !text.is_empty()).collect()
+}
+
+fn plain_text(m: &Message) -> String {
+    let mut text = m.text.clone();
+    if !m.attachments.is_empty() {
+        let names: Vec<&str> = m.attachments.iter().map(|a| a.name.as_str()).collect();
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&format!("[attached: {}]", names.join(", ")));
+    }
+    text
+}
+
+/// Transcript that seeds a fresh CLI session: one entry per message so the numbers match
+/// read_history; a reply with only tool calls says so.
+fn seed_history(messages: &[Message]) -> Vec<(Role, String)> {
     messages
         .iter()
         .map(|m| {
-            let mut text = m.text.clone();
-            if !m.attachments.is_empty() {
-                let names: Vec<&str> = m.attachments.iter().map(|a| a.name.as_str()).collect();
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(&format!("[attached: {}]", names.join(", ")));
-            }
+            let text = plain_text(m);
+            let text = if !text.trim().is_empty() {
+                text
+            } else if m.steps.iter().any(|s| matches!(s, Step::Tool(_))) {
+                "(tool calls only)".into()
+            } else {
+                "(no text)".into()
+            };
             (m.role, text)
         })
-        .filter(|(_, text)| !text.is_empty())
         .collect()
+}
+
+fn one_line(s: &str, max: usize) -> String {
+    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    match flat.char_indices().nth(max) {
+        Some((at, _)) => format!("{}…", &flat[..at]),
+        None => flat,
+    }
+}
+
+/// Last `max` chars of `s`, indented under its tool line.
+pub(in crate::app) fn tail(s: &str, max: usize) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let n = s.chars().count();
+    let cut: String = s.chars().skip(n.saturating_sub(max)).collect();
+    let body = if n > max { format!("…{cut}") } else { cut };
+    Some(body.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"))
+}
+
+/// One tool call as text for read_history; outputs keep their last `max` chars.
+pub(in crate::app) fn tool_record(c: &aether_core::ToolCall, max: usize) -> Option<String> {
+    use aether_core::{ToolDetail as D, ToolStatus};
+    let (line, output) = match &c.detail {
+        D::Command { command, output, exit_code, .. } => {
+            let exit = exit_code.map(|e| format!(" → exit {e}")).unwrap_or_default();
+            (format!("Ran `{}`{exit}", one_line(command, 500)), tail(output, max))
+        }
+        D::Read { path, range } => (
+            format!("Read {path}{}", range.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()),
+            None,
+        ),
+        D::Edit { path, diff, added, removed } => {
+            (format!("Edited {path} (+{added} −{removed})"), tail(diff, max))
+        }
+        D::Search { pattern, path, matches, output } => {
+            let place = path.as_ref().map(|p| format!(" in {p}")).unwrap_or_default();
+            let hits = matches.map(|m| format!(" → {m} matches")).unwrap_or_default();
+            (format!("Searched `{}`{place}{hits}", one_line(pattern, 200)), tail(output, max))
+        }
+        D::Web { target, output } => {
+            (format!("Fetched {}", one_line(target, 300)), tail(output, max))
+        }
+        D::Task { description, output, .. } => {
+            (format!("Subagent: {}", one_line(description, 200)), tail(output, max))
+        }
+        D::Plan { .. } => return None,
+        D::Other { name, output, .. } => (name.clone(), tail(output, max)),
+        D::Plain(_) => (one_line(&c.title, 200), None),
+    };
+    let mut out = format!("- {line}");
+    if c.status == ToolStatus::Failed {
+        let why = c
+            .error
+            .as_deref()
+            .and_then(|e| e.lines().next())
+            .map(|e| format!(": {}", one_line(e, 200)))
+            .unwrap_or_default();
+        out.push_str(&format!(" (failed{why})"));
+    }
+    if let Some(body) = output {
+        out.push_str(&format!("\n  output:\n{body}"));
+    }
+    Some(out)
 }
 
 /// Which rows of the message an update touched it may have resized; rows whose

@@ -255,3 +255,59 @@ fn card_delete_scopes_to_the_lead_and_reports(cx: &mut TestAppContext) {
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn read_history_pages_this_chats_messages_with_tools(cx: &mut TestAppContext) {
+    use aether_core::{ToolCall, ToolDetail, Update};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let reply = &mut app.chats[1].messages[1];
+            reply.apply(Update::Tool(ToolCall::new(
+                "1",
+                "T",
+                ToolDetail::Read { path: "README.md".into(), range: None },
+            )));
+            let page = app.read_history(1, &json!({"offset": 1, "limit": 1})).unwrap();
+            assert_eq!(page["total"], 2);
+            assert_eq!(page["messages"][0]["n"], 1);
+            assert_eq!(page["messages"][0]["role"], "assistant");
+            assert_eq!(page["messages"][0]["tools"], json!(["- Read README.md"]));
+            assert!(page.get("next_offset").is_none());
+            let first = app.read_history(1, &json!({"limit": 1, "max_chars": 1})).unwrap();
+            assert_eq!(first["next_offset"], 1);
+            assert_eq!(first["messages"][0]["text"], "q");
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
+    let window = app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let mut call = |lead: &str, tool: &str| {
+                let (reply, answer) = std::sync::mpsc::channel();
+                let call = aether_agent::orchestrator::OrchCall {
+                    lead: lead.into(),
+                    tool: tool.into(),
+                    args: json!({}),
+                    reply,
+                };
+                app.orchestrate(call, window, cx);
+                answer.try_recv().unwrap()
+            };
+            let names = |v: Value| {
+                v.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| s["name"].as_str().unwrap().to_string())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(names(call("20", "list_tools").unwrap()), ["read_history"]);
+            assert!(names(call("10", "list_tools").unwrap()).len() > 1);
+            assert!(call("20", "read_history").is_ok());
+            assert_eq!(call("20", "list_chats").unwrap_err(), "lead chat not found");
+        })
+        .unwrap();
+}

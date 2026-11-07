@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use aether_agent::orchestrator::OrchCall;
+use aether_agent::orchestrator::{OrchCall, history_specs, tool_specs};
 use aether_core::{AccessMode, Message, Provider, Role, ToolDetail};
 use aether_driver::ProviderProbe;
 use aether_driver::antigravity::AgyEntry;
@@ -249,9 +249,13 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = match self.chats.iter().position(|c| c.lead && c.id.to_string() == call.lead) {
+        let result = match self.chats.iter().position(|c| c.id.to_string() == call.lead) {
             None => Err("lead chat not found".to_string()),
             Some(ix) => match call.tool.as_str() {
+                "list_tools" if self.chats[ix].lead => Ok(tool_specs()),
+                "list_tools" => Ok(history_specs()),
+                "read_history" => self.read_history(ix, &call.args),
+                _ if !self.chats[ix].lead => Err("lead chat not found".to_string()),
                 "list_agents" => Ok(self.list_agents(ix)),
                 "spawn_agent" => self.spawn_agent(ix, &call.args, window, cx),
                 "read_agent" => self.read_agent(ix, &call.args),

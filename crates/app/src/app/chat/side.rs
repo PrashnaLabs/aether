@@ -7,7 +7,7 @@ use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex, v_flex};
 use gpui_kit::{Context, SharedString, div, prelude::*, px};
 
-use super::history;
+use super::seed_history;
 use crate::app::ChatApp;
 
 const MAX_CARDS: usize = 3;
@@ -114,7 +114,7 @@ impl ChatApp {
         let Some(ix) = self.chats.iter().position(|c| c.id == id) else { return };
         let chat = &self.chats[ix];
         let key = side_key(id, n);
-        let hist = side_history(history(&chat.messages));
+        let hist = side_history(seed_history(&chat.messages));
         let (settings, mut session) = self.cli_request(ix);
         session.key = key.clone();
         session.access = AccessMode::ReadOnly;

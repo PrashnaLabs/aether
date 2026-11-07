@@ -439,6 +439,54 @@ impl ChatApp {
     }
 }
 
+impl ChatApp {
+    /// This chat's messages `offset..offset+limit` in full, tool calls included.
+    pub(super) fn read_history(&self, ix: usize, args: &Value) -> Result<Value, String> {
+        let int = |k: &str, default: i64, lo: i64, hi: i64| {
+            args[k].as_i64().unwrap_or(default).clamp(lo, hi) as usize
+        };
+        let (offset, limit) = (int("offset", 0, 0, i64::MAX), int("limit", 5, 1, 20));
+        let max = int("max_chars", 4_000, 500, 20_000);
+        let messages = &self.chats[ix].messages;
+        let items: Vec<Value> = messages
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(limit)
+            .map(|(i, m)| {
+                let mut text: String = m.text.chars().take(max).collect();
+                let more = m.text.chars().count().saturating_sub(max);
+                if more > 0 {
+                    text.push_str(&format!("… ({more} more chars)"));
+                }
+                let tools: Vec<String> = m
+                    .steps
+                    .iter()
+                    .filter_map(|s| match s {
+                        aether_core::Step::Tool(c) => super::chat::tool_record(c, max),
+                        _ => None,
+                    })
+                    .collect();
+                let role = if m.role == Role::User { "user" } else { "assistant" };
+                let mut item = json!({"n": i, "role": role, "text": text});
+                if !tools.is_empty() {
+                    item["tools"] = tools.into();
+                }
+                if let Some(e) = &m.error {
+                    item["error"] = e.lines().next().unwrap_or_default().into();
+                }
+                item
+            })
+            .collect();
+        let next = offset + items.len();
+        let mut reply = json!({"total": messages.len(), "messages": items});
+        if next < messages.len() {
+            reply["next_offset"] = next.into();
+        }
+        Ok(reply)
+    }
+}
+
 /// Which cards delete_cards takes; `project` `None` is the lead's own.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct CardFilter {
