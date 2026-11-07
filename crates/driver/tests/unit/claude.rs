@@ -840,6 +840,7 @@ fn steer_missed_by_the_last_call_keeps_the_turn_open_for_its_own_result() {
     assert!(!s.active);
 }
 
+#[cfg(unix)]
 #[test]
 fn exit_error_carries_status_and_stderr_tail() {
     use std::os::unix::process::ExitStatusExt;

@@ -408,6 +408,7 @@ fn stage_unstage_and_commit_round_trip_in_a_temp_repo() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+#[cfg(unix)]
 #[test]
 fn failing_hooks_and_pushes_report_what_git_said() {
     let base = std::env::temp_dir().join(format!("aether-git-push-{}", std::process::id()));

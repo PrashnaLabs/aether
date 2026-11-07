@@ -255,6 +255,7 @@ fn sh(dir: &Path, args: &[&str]) -> bool {
     git::run(dir, &all, SLOW).is_ok_and(|out| out.ok)
 }
 
+#[cfg(unix)]
 #[test]
 fn worktrees_round_trip_in_a_temp_repo() {
     let base = std::env::temp_dir().join(format!("aether-worktree-{}", std::process::id()));
@@ -558,6 +559,7 @@ fn removal_is_refused_for_main_and_locked_and_prunes_missing() {
     assert_eq!(Listed { managed: true, ..user }.remove_action(), Ok("Remove worktree…"));
 }
 
+#[cfg(unix)]
 #[test]
 fn user_worktrees_remove_clean_refuse_dirty_force_once_and_keep_locked() {
     let Some((base, repo, root)) = temp_repo("remove-user") else {

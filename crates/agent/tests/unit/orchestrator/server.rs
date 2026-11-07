@@ -44,6 +44,7 @@ fn unknown_token_is_refused_without_reaching_app() {
     assert!(rx.try_recv().is_err(), "nothing queued");
 }
 
+#[cfg(unix)]
 #[test]
 fn stale_socket_file_is_replaced_and_mode_is_0600() {
     use std::os::unix::fs::PermissionsExt;
@@ -93,6 +94,7 @@ fn live_socket_is_not_stolen() {
     app.join().unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn oversize_line_is_dropped_without_reaching_app() {
     use std::io::{Read, Write};

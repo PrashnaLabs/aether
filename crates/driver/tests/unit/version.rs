@@ -47,6 +47,7 @@ fn gate_announces_then_warns_or_refuses() {
     assert!(rx.try_recv().is_err());
 }
 
+#[cfg(unix)]
 fn script(body: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -57,6 +58,7 @@ fn script(body: &str) -> std::path::PathBuf {
     path
 }
 
+#[cfg(unix)]
 #[test]
 fn cli_version_runs_with_the_repaired_path() {
     let path = aether_core::repaired_path();
@@ -64,6 +66,7 @@ fn cli_version_runs_with_the_repaired_path() {
     assert_eq!(cli_version(&bin), Some("1.2.3".into()));
 }
 
+#[cfg(unix)]
 #[test]
 fn cli_version_gives_up_on_a_silent_cli() {
     let bin = script("exec sleep 30");
