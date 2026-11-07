@@ -98,7 +98,7 @@ impl ChatApp {
                 cx,
             );
         }
-        let title = chat.title.to_string();
+        let (id, title) = (chat.id, chat.title.to_string());
         let mut text = "This removes the chat and its history. This can't be undone.".to_string();
         if chat.has_worktree(&self.missing_folders, &self.settings.workspace_root) {
             text.push_str(
@@ -118,7 +118,11 @@ impl ChatApp {
                 .ok_text("Delete")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
-                    view.update(cx, |this, cx| this.delete_chat(ix, window, cx));
+                    view.update(cx, |this, cx| {
+                        if let Some(ix) = this.chat_ix(id) {
+                            this.delete_chat(ix, window, cx);
+                        }
+                    });
                     true
                 })
         });

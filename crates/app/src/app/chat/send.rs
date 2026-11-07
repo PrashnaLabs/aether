@@ -632,7 +632,7 @@ impl ChatApp {
         if self.chats[self.active].cancel.is_none() {
             return self.stop_chat(self.active, cx);
         }
-        let view = cx.entity();
+        let (view, id) = (cx.entity(), self.chats[self.active].id);
         aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
             let view = view.clone();
             alert
@@ -644,7 +644,11 @@ impl ChatApp {
                 .ok_text("Stop")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, _window, cx| {
-                    view.update(cx, |this, cx| this.stop_chat(this.active, cx));
+                    view.update(cx, |this, cx| {
+                        if let Some(ix) = this.chat_ix(id) {
+                            this.stop_chat(ix, cx);
+                        }
+                    });
                     true
                 })
         });
