@@ -21,6 +21,24 @@ fn with(mut m: CliModel, context: Option<u64>, efforts: Option<&[&str]>) -> CliM
     m
 }
 
+#[cfg(windows)]
+fn cmd_opts() -> DriverStartOptions {
+    DriverStartOptions { binary: std::env::var("ComSpec").unwrap(), ..sh_opts() }
+}
+
+/// A program the probe can run: exits at once with no output.
+#[cfg(windows)]
+fn fake_binary() -> String {
+    let path = std::env::temp_dir().join(format!("aether-fake-cli-{}.cmd", std::process::id()));
+    std::fs::write(&path, "@exit /b 0\r\n").unwrap();
+    path.display().to_string()
+}
+
+#[cfg(not(windows))]
+fn fake_binary() -> String {
+    "/bin/sh".into()
+}
+
 fn sh_opts() -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
@@ -166,7 +184,6 @@ fn opencode_list_keeps_slash_ids_only() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn claude_falls_back_to_named_aliases_only_when_found() {
     let missing =
@@ -175,7 +192,7 @@ fn claude_falls_back_to_named_aliases_only_when_found() {
         probe(Provider::Claude, &missing),
         ProviderProbe { status: "Not installed".into(), ..ProviderProbe::default() }
     );
-    let found = Settings { claude_binary: "/bin/sh".into(), ..Settings::default() };
+    let found = Settings { claude_binary: fake_binary(), ..Settings::default() };
     let probe = probe(Provider::Claude, &found);
     assert!(probe.installed);
     assert_eq!(
@@ -250,17 +267,17 @@ fn rpc_kills_the_probe_process_group() {
     assert!(!alive(), "grandchild {pid} survived");
 }
 
-#[cfg(unix)]
 #[test]
 fn hung_list_command_times_out() {
-    let opts = sh_opts();
+    #[cfg(unix)]
+    let (opts, hang, quick, out) = (sh_opts(), ["-c", "sleep 5"], ["-c", "echo a/b"], "a/b\n");
+    #[cfg(windows)]
+    let (opts, hang, quick, out) =
+        (cmd_opts(), ["/C", "ping -n 6 127.0.0.1"], ["/C", "echo a/b"], "a/b\r\n");
     let start = Instant::now();
-    assert_eq!(list_output(&opts, "sh", &["-c", "sleep 5"], Duration::from_millis(200)), None);
+    assert_eq!(list_output(&opts, "sh", &hang, Duration::from_millis(200)), None);
     assert!(start.elapsed() < Duration::from_secs(3));
-    assert_eq!(
-        list_output(&opts, "sh", &["-c", "echo a/b"], Duration::from_secs(5)).as_deref(),
-        Some("a/b\n")
-    );
+    assert_eq!(list_output(&opts, "sh", &quick, Duration::from_secs(5)).as_deref(), Some(out));
 }
 
 #[test]

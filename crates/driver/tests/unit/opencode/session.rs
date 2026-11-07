@@ -12,7 +12,6 @@ fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
     assert!(lost_resume(false, true).is_none());
 }
 
-#[cfg(unix)]
 #[test]
 fn create_body_carries_location_and_model_ref() {
     let opts = DriverStartOptions {
@@ -28,14 +27,17 @@ fn create_body_carries_location_and_model_ref() {
         background: Vec::new(),
         lead: None,
     };
-    let dir = aether_core::attachments_dir().unwrap().join("*").to_string_lossy().into_owned();
-    let files =
-        serde_json::json!({"action": "external_directory", "resource": dir, "effect": "allow"});
+    let location: std::path::PathBuf =
+        std::path::Path::new("/tmp/aether-no-such-dir-xyz").components().collect();
+    let dir = location.to_string_lossy().into_owned();
+    let attachments =
+        aether_core::attachments_dir().unwrap().join("*").to_string_lossy().into_owned();
+    let files = serde_json::json!({"action": "external_directory", "resource": attachments, "effect": "allow"});
     assert_eq!(
         create_body("ses_1", &opts),
         serde_json::json!({
             "id": "ses_1",
-            "location": {"directory": "/tmp/aether-no-such-dir-xyz"},
+            "location": {"directory": dir},
             "agent": "build",
             "permissions": [
                 {"action": "edit", "resource": "*", "effect": "ask"},

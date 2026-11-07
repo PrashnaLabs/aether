@@ -40,12 +40,11 @@ fn describe_hides_env() {
     assert!(d.contains("/bin/codex") && d.contains("app-server"));
 }
 
-#[cfg(unix)]
 #[test]
 fn command_strips_lead_env() {
     let opts = DriverStartOptions {
         ephemeral: false,
-        binary: "/bin/sh".into(),
+        binary: std::env::current_exe().unwrap().to_string_lossy().into_owned(),
         cwd: "/tmp".into(),
         model: String::new(),
         effort: String::new(),
