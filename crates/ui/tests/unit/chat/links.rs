@@ -10,6 +10,12 @@ fn project(name: &str) -> PathBuf {
     dir
 }
 
+/// `file:///C:/x` on Windows, `file:///x` elsewhere.
+fn file_url(path: &Path) -> String {
+    let path = path.display().to_string().replace('\\', "/");
+    format!("file:///{}", path.trim_start_matches('/'))
+}
+
 fn at(path: PathBuf, line: Option<usize>, col: Option<usize>) -> Option<FileLink> {
     Some(FileLink { path, line, col })
 }
@@ -28,28 +34,26 @@ fn suffixes_give_line_and_column() {
     assert_eq!(parse("src/a.rs#L12C3"), at(a, Some(12), Some(3)));
 }
 
-#[cfg(unix)]
 #[test]
 fn file_urls_are_percent_decoded() {
     let dir = project("url");
-    let url = format!("file://{}#L4", dir.join("my%20file.rs").display());
+    let url = format!("{}#L4", file_url(&dir.join("my%20file.rs")));
     assert_eq!(parse_file_link(&url, None), at(dir.join("my file.rs"), Some(4), None));
-    let url = format!("file://{}:12", dir.join("my%20file.rs").display());
+    let url = format!("{}:12", file_url(&dir.join("my%20file.rs")));
     assert_eq!(parse_file_link(&url, None), at(dir.join("my file.rs"), Some(12), None));
-    let url = format!("file://{}#L12C3", dir.join("my%20file.rs").display());
+    let url = format!("{}#L12C3", file_url(&dir.join("my%20file.rs")));
     assert_eq!(parse_file_link(&url, None), at(dir.join("my file.rs"), Some(12), Some(3)));
-    let url = format!("file://{}", dir.join("src/a.rs").display());
+    let url = file_url(&dir.join("src").join("a.rs"));
     assert_eq!(parse_file_link(&url, None), at(dir.join("src/a.rs"), None, None));
 }
 
-#[cfg(unix)]
 #[test]
 fn file_urls_take_localhost_but_no_other_host() {
     let dir = project("host");
     let a = dir.join("src/a.rs");
-    let url = format!("file://localhost{}#L4", a.display());
+    let url = format!("{}#L4", file_url(&a).replacen("file://", "file://localhost", 1));
     assert_eq!(parse_file_link(&url, None), at(a.clone(), Some(4), None));
-    let url = format!("file://server{}", a.display());
+    let url = file_url(&a).replacen("file://", "file://server", 1);
     assert_eq!(parse_file_link(&url, None), None);
     assert_eq!(parse_file_link("file://src/a.rs", Some(&dir)), None);
 }
@@ -84,11 +88,10 @@ fn a_colon_name_that_exists_keeps_its_suffix() {
     assert_eq!(parse_file_link("odd:12", Some(&dir)), at(dir.join("odd:12"), None, None));
 }
 
-#[cfg(unix)]
 #[test]
 fn inline_code_naming_a_file_becomes_a_link() {
     let dir = project("inline");
-    let a = dir.join("src/a.rs").display().to_string();
+    let a = dir.join("src").join("a.rs").display().to_string().replace('\\', "/");
     let linked = link_inline_code("See `src/a.rs:4` and `src/b.rs`.", &dir);
     assert_eq!(linked, format!("See [`src/a.rs:4`](<{a}#L4>) and `src/b.rs`."));
 
