@@ -81,5 +81,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check
         run: cargo check --locked --workspace
+      - name: Keep LF in test repos
+        run: git config --global core.autocrlf false
       - name: Test
         run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
