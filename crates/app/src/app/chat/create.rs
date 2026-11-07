@@ -173,6 +173,7 @@ impl ChatApp {
             m.interrupt(if handoff.is_some() { "Handed off" } else { "Copied" });
             m.finish();
         }
+        let handoff_from = handoff.is_some().then_some(source.id);
         let (provider, provider_model, access, effort, title, draft) = match handoff {
             Some((target, model)) => {
                 if CLIS.contains(&target) && cwd.is_empty() {
@@ -268,6 +269,7 @@ impl ChatApp {
                 parent: None,
                 lead: false,
                 lead_seen: None,
+                handoff_from,
             },
         );
         let at = ix + 1;
@@ -412,6 +414,7 @@ impl ChatApp {
             parent: None,
             lead: false,
             lead_seen: None,
+            handoff_from: None,
         });
         self.persist(self.chats.len() - 1);
         self.select(self.chats.len() - 1, window, cx);
@@ -486,6 +489,7 @@ impl ChatApp {
             parent: None,
             lead: false,
             lead_seen: None,
+            handoff_from: None,
         });
         self.persist(self.chats.len() - 1);
         self.select(self.chats.len() - 1, window, cx);
@@ -522,6 +526,7 @@ impl ChatApp {
             lead,
             lead_seen,
             pending_deliveries,
+            handoff_from,
         } in saved
         {
             let session = self.next_session_id();
@@ -580,6 +585,7 @@ impl ChatApp {
                 parent,
                 lead,
                 lead_seen,
+                handoff_from,
                 queue: pending_deliveries
                     .into_iter()
                     .map(|d| Queued {
@@ -685,6 +691,7 @@ impl ChatApp {
             parent: None,
             lead: false,
             lead_seen: None,
+            handoff_from: None,
         });
         let at = self.chats.len() - 1;
         self.persist(at);

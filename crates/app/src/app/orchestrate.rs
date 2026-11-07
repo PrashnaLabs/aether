@@ -752,6 +752,7 @@ impl ChatApp {
             parent: Some(parent),
             lead: false,
             lead_seen: None,
+            handoff_from: None,
         });
         Ok(self.chats.len() - 1)
     }

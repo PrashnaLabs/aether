@@ -31,6 +31,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: Some(3),
     };
     let older = SavedChat {
         id: 3,
@@ -51,6 +52,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: None,
     };
     for chat in [&chat, &older] {
         rt.block_on(save(&store.pool, chat)).unwrap();
@@ -72,6 +74,8 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
     assert_eq!(chats[1].project, "/code/p");
     assert_eq!(chats[1].worktree_path, "/w/p-1/fix");
     assert_eq!(chats[1].worktree_branch, "aether/fix");
+    assert_eq!(chats[1].handoff_from, Some(3));
+    assert_eq!(chats[0].handoff_from, None);
     assert!(chats[0].project.is_empty() && chats[0].worktree_path.is_empty());
     let reply = &chats[1].messages[1];
     assert_eq!(reply.text, "**Hi**");
@@ -173,6 +177,7 @@ fn ids_include_every_row() {
             lead: false,
             lead_seen: None,
             pending_deliveries: vec![],
+            handoff_from: None,
         };
         rt.block_on(save(&store.pool, &chat)).unwrap();
     }
@@ -207,6 +212,7 @@ fn flush_returns_once_queued_saves_are_written() {
             lead: false,
             lead_seen: None,
             pending_deliveries: vec![],
+            handoff_from: None,
         });
     }
     store.flush();
@@ -251,6 +257,7 @@ fn parent_and_lead_round_trip() {
         lead: true,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: None,
     });
     store.flush();
     drop(store);
@@ -312,6 +319,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         lead: false,
         lead_seen: Some(3),
         pending_deliveries: vec![],
+        handoff_from: None,
     });
     store.save(SavedChat {
         id: 5,
@@ -336,6 +344,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
             reply_ix: Some(3),
             text: "[Aether child result] Agent 9 done".into(),
         }],
+        handoff_from: None,
     });
     store.flush();
     drop(store);

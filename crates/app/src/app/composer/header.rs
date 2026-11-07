@@ -289,6 +289,34 @@ impl ChatApp {
                     this.open_chat(lead_id, window, cx)
                 }))
         });
+        let handoff = chat.handoff_from.and_then(|id| self.chat_ix(id)).map(|ix| {
+            let source = &self.chats[ix];
+            let (source_id, ring, fill) = (source.id, cx.theme().ring, overlay(cx));
+            div()
+                .id("handoff-from")
+                .on_mouse_down(MouseButton::Right, crate::session_workspace::block_session_menu)
+                .role(Role::Link)
+                .tab_index(0)
+                .aria_label(format!("Open source chat {}", source.title))
+                .min_w_0()
+                .truncate()
+                .px(px(4.))
+                .corner(px(6.))
+                .border_1()
+                .border_color(transparent_black())
+                .focus_visible(move |s| s.border_color(ring))
+                .hover(move |s| s.bg(fill))
+                .active(move |s| s.bg(fill))
+                .text_sm()
+                .text_color(muted)
+                .cursor_pointer()
+                .child(format!("from {}", source.title))
+                .on_click(self.session_listener(cx, move |this, _, window, cx| {
+                    if let Some(ix) = this.chat_ix(source_id) {
+                        this.select(ix, window, cx)
+                    }
+                }))
+        });
         let workspace_btn = (is_agent && show_tools).then(|| {
             let open = pop.is_some();
             let toggle = icon_chip("workspace-toggle", open, cx)
@@ -356,7 +384,11 @@ impl ChatApp {
                             .when(delegated.is_some(), |h| {
                                 h.child(div().flex_none().text_sm().text_color(muted).child("·"))
                             })
-                            .children(delegated),
+                            .children(delegated)
+                            .when(handoff.is_some(), |h| {
+                                h.child(div().flex_none().text_sm().text_color(muted).child("·"))
+                            })
+                            .children(handoff),
                     ),
             )
             .child(

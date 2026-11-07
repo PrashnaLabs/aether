@@ -26,7 +26,8 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS chats (
     parent INTEGER,
     lead INTEGER NOT NULL DEFAULT 0,
     lead_seen INTEGER,
-    pending_deliveries TEXT NOT NULL DEFAULT '[]'
+    pending_deliveries TEXT NOT NULL DEFAULT '[]',
+    handoff_from INTEGER
 )";
 
 const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
@@ -66,6 +67,8 @@ pub struct SavedChat {
     pub lead_seen: Option<usize>,
     /// Child results queued for this lead but not yet delivered as a turn.
     pub pending_deliveries: Vec<SavedDelivery>,
+    /// Chat this one was handed off from.
+    pub handoff_from: Option<i64>,
 }
 
 /// A child result waiting to be handed to its lead.
@@ -185,6 +188,7 @@ impl Store {
                     "pending_deliveries",
                     "ALTER TABLE chats ADD COLUMN pending_deliveries TEXT NOT NULL DEFAULT '[]'",
                 ),
+                ("handoff_from", "ALTER TABLE chats ADD COLUMN handoff_from INTEGER"),
             ] {
                 if !cols.iter().any(|c| c == col) {
                     sqlx::query(add).execute(&pool).await?;
@@ -228,7 +232,7 @@ impl Store {
     /// Every chat whose row and messages still parse, oldest first.
     pub fn load(&self) -> sqlx::Result<Vec<SavedChat>> {
         let rows = self.rt.block_on(
-            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries FROM chats ORDER BY id")
+            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from FROM chats ORDER BY id")
                 .fetch_all(&self.pool),
         )?;
         Ok(rows
@@ -258,6 +262,7 @@ impl Store {
                         .ok()?
                         .and_then(|v| usize::try_from(v).ok()),
                     pending_deliveries: parse_pending_deliveries(&text("pending_deliveries")?),
+                    handoff_from: row.try_get("handoff_from").ok()?,
                 })
             })
             .collect())
@@ -356,7 +361,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     let pending_deliveries = serde_json::to_string(&chat.pending_deliveries)
         .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
     sqlx::query(
-        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, messages = excluded.messages,
          pinned = excluded.pinned, archived = excluded.archived,
          provider = excluded.provider, provider_model = excluded.provider_model,
@@ -364,7 +369,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
          effort = excluded.effort, cwd = excluded.cwd, project = excluded.project,
          worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
          parent = excluded.parent, lead = excluded.lead, lead_seen = excluded.lead_seen,
-         pending_deliveries = excluded.pending_deliveries",
+         pending_deliveries = excluded.pending_deliveries, handoff_from = excluded.handoff_from",
     )
     .bind(chat.id)
     .bind(&chat.title)
@@ -384,6 +389,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     .bind(i64::from(chat.lead))
     .bind(chat.lead_seen.map(i64::try_from).transpose().ok().flatten())
     .bind(pending_deliveries)
+    .bind(chat.handoff_from)
     .execute(pool)
     .await?;
     Ok(())

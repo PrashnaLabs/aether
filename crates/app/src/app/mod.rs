@@ -149,6 +149,8 @@ pub(crate) struct Chat {
     pub(crate) lead: bool,
     /// Newest reply of this child its lead has read with read_agent.
     pub(crate) lead_seen: Option<usize>,
+    /// Chat this one was handed off from.
+    pub(crate) handoff_from: Option<i64>,
     /// Draft only: base branch for a worktree made at first send; `None` works locally.
     pub(crate) new_worktree: Option<String>,
     /// Draft only: live worktree to share at first send; `None` unless picked. Disarms `new_worktree`.
@@ -871,6 +873,7 @@ pub(super) fn chat_with(title: &str, texts: &[&str]) -> Chat {
         parent: None,
         lead: false,
         lead_seen: None,
+        handoff_from: None,
     }
 }
 

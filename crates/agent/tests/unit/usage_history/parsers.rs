@@ -105,6 +105,7 @@ fn opencode_and_saved_chats_convert_into_usage_records() {
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],
+        handoff_from: None,
     };
     let records = collect_saved_chat_records(&[chat]);
     assert_eq!(records.len(), 1);

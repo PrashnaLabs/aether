@@ -260,6 +260,36 @@ fn handoff_copies_the_transcript_to_a_fresh_chat_on_the_target(cx: &mut gpui_kit
 }
 
 #[gpui_kit::test]
+fn a_handoff_links_back_to_its_source_and_a_copy_does_not(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut source = chat_with("Fix bug", &["hi", "done"]);
+            source.cwd = "/w/a".into();
+            let source_id = source.id;
+            app.chats = vec![source];
+            app.active = 0;
+            app.handoff_chat(0, Provider::Codex, "gpt-x".into(), window, cx);
+            app.duplicate_chat(0, window, cx);
+            assert_eq!(app.chats[1].title, "Fix bug copy");
+            assert_eq!(app.chats[1].handoff_from, None);
+            assert_eq!(app.chats[2].handoff_from, Some(source_id));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn handoff_finishes_a_running_reply_and_expires_its_requests(cx: &mut gpui_kit::TestAppContext) {
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {

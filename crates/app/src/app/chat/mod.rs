@@ -431,6 +431,7 @@ impl ChatApp {
                 parent: chat.parent,
                 lead: chat.lead,
                 lead_seen: chat.lead_seen,
+                handoff_from: chat.handoff_from,
                 pending_deliveries: chat
                     .queue
                     .iter()
