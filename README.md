@@ -173,6 +173,7 @@ artifacts and SHA-256 checksum files to `dist/`.
 | --- | --- | --- |
 | macOS, Apple Silicon or Intel | `Aether-<version>-macos-<arch>.dmg` | `--format app`, `--format tar` |
 | Linux, x86_64 or aarch64, glibc | `Aether-<version>-linux-<arch>.tar.gz` | `--format deb` |
+| Windows, x86_64 | `Aether-<version>-windows-<arch>.zip` | |
 
 The DMG includes an Applications shortcut. Drag Aether into Applications.
 `--format app` writes `dist/Aether.app`, which can be launched with
@@ -284,3 +285,11 @@ not in public issues.
 
 Aether is released under the [MIT License](LICENSE). Bundled third-party
 assets keep their own licenses, listed under [Credits](#credits).
+
+## Built by Prashna Labs
+
+Aether is made by [Prashna Labs](https://prashnalabs.com/?utm_source=aether&utm_medium=readme),
+an AI company in Kathmandu, Nepal. We also make
+[DurbarAI](https://durbarai.prashnalabs.com/?utm_source=aether&utm_medium=readme),
+a self-hosted runtime for running AI agents in production, with approvals and
+an audit log.

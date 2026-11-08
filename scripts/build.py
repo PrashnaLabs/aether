@@ -13,10 +13,22 @@ import subprocess
 import tarfile
 import tempfile
 import tomllib
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ICONS = ROOT / "crates/app/assets/app-icons"
 APP_ID = "dev.aether.Aether"
+
+
+def env_value(key, path=ROOT / ".env"):
+    """Real environment first (CI), then the untracked .env for local builds."""
+    if key in os.environ:
+        return os.environ[key]
+    for line in path.read_text().splitlines() if path.is_file() else ():
+        name, sep, value = line.partition("=")
+        if sep and name.strip() == key:
+            return value.strip().strip("'\"")
+    return None
 
 
 def run(*args, **kwargs):
@@ -86,14 +98,14 @@ def linux(binary, stage):
          stage / f"usr/share/icons/hicolor/scalable/apps/{APP_ID}.svg")
 
 
-def debian(stage, artifact, version, arch):
+def debian(stage, artifact, version, arch, maintainer):
     # Resolve actual linked libraries against the host distribution's packages.
     # The executable lives under usr/bin because dpkg-shlibdeps searches there.
     debian_dir = stage / "debian"
     debian_dir.mkdir()
     (debian_dir / "control").write_text(
         "Source: aether\nSection: devel\nPriority: optional\n"
-        "Maintainer: Aether contributors <noreply@localhost>\n"
+        f"Maintainer: {maintainer}\n"
         "Standards-Version: 4.7.0\n\nPackage: aether\nArchitecture: any\n"
         "Description: Agent workspace\n"
     )
@@ -109,9 +121,10 @@ def debian(stage, artifact, version, arch):
     control = stage / "DEBIAN/control"
     control.parent.mkdir()
     control.write_text(
-        f"Package: aether\nVersion: {version}\nArchitecture: {arch}\n"
+        # "~" sorts a pre-release (0.1.0~alpha) before its final 0.1.0; "-" would mean a revision.
+        f"Package: aether\nVersion: {version.replace('-', '~')}\nArchitecture: {arch}\n"
         "Section: devel\nPriority: optional\n"
-        "Maintainer: Aether contributors <noreply@localhost>\n"
+        f"Maintainer: {maintainer}\n"
         f"Depends: {depends}\n"
         "Recommends: git, ca-certificates, mesa-vulkan-drivers\n"
         "Homepage: https://aether.prashnalabs.com\n"
@@ -124,21 +137,22 @@ def debian(stage, artifact, version, arch):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--format", choices=("app", "dmg", "tar", "deb"),
-                        help="Default: dmg on macOS, tar on Linux")
+    parser.add_argument("--format", choices=("app", "dmg", "tar", "deb", "zip"),
+                        help="Default: dmg on macOS, tar on Linux, zip on Windows")
     parser.add_argument("--sign-identity", default=os.environ.get("APPLE_SIGNING_IDENTITY"))
     parser.add_argument("--notary-profile", default=os.environ.get("APPLE_NOTARY_PROFILE"),
                         help="Keychain profile previously created with notarytool store-credentials")
     args = parser.parse_args()
     system = platform.system()
-    fmt = args.format or ("dmg" if system == "Darwin" else "tar")
-    if system not in ("Darwin", "Linux"):
-        parser.error("build on macOS or Linux")
-    if fmt not in (("app", "dmg", "tar") if system == "Darwin" else ("tar", "deb")):
+    formats = {"Darwin": ("dmg", "app", "tar"), "Linux": ("tar", "deb"), "Windows": ("zip",)}
+    if system not in formats:
+        parser.error("build on macOS, Linux or Windows")
+    fmt = args.format or formats[system][0]
+    if fmt not in formats[system]:
         parser.error(f"{fmt} is unsupported on {system}")
     if args.notary_profile and (not args.sign_identity or fmt != "dmg"):
         parser.error("notarization requires --sign-identity and --format dmg")
-    if system == "Linux" and (args.sign_identity or args.notary_profile):
+    if system != "Darwin" and (args.sign_identity or args.notary_profile):
         parser.error("Apple signing options require macOS")
     tools = ["cargo"]
     if system == "Darwin":
@@ -149,6 +163,9 @@ def main():
             tools += ["xcrun"]
     elif fmt == "deb":
         tools += ["dpkg-deb", "dpkg-shlibdeps"]
+        maintainer = env_value("AETHER_MAINTAINER")
+        if not maintainer:
+            parser.error('deb needs AETHER_MAINTAINER="Name <email>" in the environment or .env')
     for tool in tools:
         if not shutil.which(tool):
             parser.error(f"required tool is missing: {tool}")
@@ -161,7 +178,8 @@ def main():
     if arch not in ("aarch64", "x86_64"):
         parser.error(f"unsupported CPU architecture: {arch}")
     # Explicit target prevents a user's Cargo default target from cross-compiling.
-    target = f"{arch}-{'apple-darwin' if system == 'Darwin' else 'unknown-linux-gnu'}"
+    target = arch + {"Darwin": "-apple-darwin", "Linux": "-unknown-linux-gnu",
+                     "Windows": "-pc-windows-msvc"}[system]
     result = run("cargo", "build", "--locked", "--release", "-p", "aether", "--target", target,
                  "--message-format=json-render-diagnostics", stdout=subprocess.PIPE, text=True)
     binaries = [Path(message["executable"]) for line in result.stdout.splitlines()
@@ -171,13 +189,17 @@ def main():
         raise RuntimeError("Cargo did not report exactly one Aether executable")
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
-    stem = f"Aether-{version}-{'macos' if system == 'Darwin' else 'linux'}-{arch}"
+    os_name = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}[system]
+    stem = f"Aether-{version}-{os_name}-{arch}"
     artifact = dist / ("Aether.app" if fmt == "app" else f"{stem}.{'tar.gz' if fmt == 'tar' else fmt}")
     with tempfile.TemporaryDirectory(prefix="aether-build-") as temp:
         stage = Path(temp)
         stage.chmod(0o755)
         if system == "Darwin":
             app = macos(binaries[0], stage, version, args.sign_identity)
+        elif system == "Windows":
+            copy(binaries[0], stage / "aether.exe")
+            copy(ROOT / "LICENSE", stage / "LICENSE.txt")
         else:
             linux(binaries[0], stage)
         if fmt == "app":
@@ -201,8 +223,12 @@ def main():
             with tarfile.open(artifact, "w:gz") as archive:
                 for child in sorted(stage.iterdir()):
                     archive.add(child, arcname=f"{stem}/{child.name}")
+        elif fmt == "zip":
+            with zipfile.ZipFile(artifact, "w", zipfile.ZIP_DEFLATED) as archive:
+                for child in sorted(stage.iterdir()):
+                    archive.write(child, f"{stem}/{child.name}")
         else:
-            debian(stage, artifact, version, {"x86_64": "amd64", "aarch64": "arm64"}[arch])
+            debian(stage, artifact, version, {"x86_64": "amd64", "aarch64": "arm64"}[arch], maintainer)
     if artifact.is_file():
         with artifact.open("rb") as file:
             digest = hashlib.file_digest(file, "sha256").hexdigest()

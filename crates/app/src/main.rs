@@ -1,3 +1,6 @@
+// No console window for release builds. `aether mcp` still talks over the pipes its parent passes.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod actions;
 mod agents_view;
 mod app;

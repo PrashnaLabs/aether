@@ -3,14 +3,21 @@ name: Build
 on:
   push:
     branches: [main, master]
-    tags: ['v*']
+    tags: ['v*', 'alpha-*', 'beta-*']
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to the same branch or PR cancels the older run; tag runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 env:
+  # Pushes and PRs test; tags (and manual runs) build installers. Tag a commit main already tested.
+  RELEASE: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
@@ -23,10 +30,14 @@ jobs:
         include:
           - os: macos-15
             arch: arm64
+            test: true
+          # Intel only packages: arm64 already tests the macOS code.
           - os: macos-15-intel
             arch: x86_64
+            test: false
           - os: ubuntu-24.04
             arch: x86_64
+            test: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +58,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Test
+        if: matrix.test && env.RELEASE != 'true'
         run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
       - name: Backtrace test abort
         if: failure() && runner.os == 'Linux'
@@ -69,23 +81,61 @@ jobs:
       - name: Validate desktop entry
         if: runner.os == 'Linux'
         run: desktop-file-validate packaging/linux/dev.aether.Aether.desktop
+      # Release tags only: secrets are never exposed to pull request builds.
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && github.ref_type == 'tag'
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "::warning::APPLE_CERTIFICATE_P12 not set; macOS build stays ad-hoc signed and not notarized"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 16)
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -s "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2; exit}')
+          [ -n "$identity" ] || { echo "::error::No Developer ID Application certificate in APPLE_CERTIFICATE_P12"; exit 1; }
+          xcrun notarytool store-credentials aether-notary \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "APPLE_NOTARY_PROFILE=aether-notary" >> "$GITHUB_ENV"
       - name: Package
+        if: env.RELEASE == 'true'
         run: python3 scripts/build.py
       - name: Package Debian installer
-        if: runner.os == 'Linux'
+        if: env.RELEASE == 'true' && runner.os == 'Linux'
+        env:
+          AETHER_MAINTAINER: ${{ vars.AETHER_MAINTAINER }}
         run: python3 scripts/build.py --format deb
       - uses: actions/upload-artifact@v4
+        if: env.RELEASE == 'true'
         with:
           name: Aether-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
-  windows-check:
+  windows:
     runs-on: windows-2025
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: '.python-version'
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -93,9 +143,37 @@ jobs:
           rustup toolchain install "$toolchain" --profile minimal --component clippy
           rustup default "$toolchain"
       - uses: Swatinem/rust-cache@v2
-      - name: Check
-        run: cargo check --locked --workspace
       - name: Keep LF in test repos
+        if: env.RELEASE != 'true'
         run: git config --global core.autocrlf false
       - name: Test
+        if: env.RELEASE != 'true'
         run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
+      - name: Package
+        if: env.RELEASE == 'true'
+        run: python scripts/build.py
+      - uses: actions/upload-artifact@v4
+        if: env.RELEASE == 'true'
+        with:
+          name: Aether-windows-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [build, windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--generate-notes --verify-tag)
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
