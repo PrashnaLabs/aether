@@ -6,7 +6,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, ClickEvent, Role, ScrollHandle, SharedString, Window, canvas, div,
-    linear_color_stop, linear_gradient, point, prelude::*, px, transparent_black,
+    linear_color_stop, linear_gradient, point, prelude::*, px,
 };
 
 use super::ClickHandler;
@@ -16,8 +16,7 @@ const ARROW_TOP: f32 = 39.;
 const ARROW_INSET: f32 = 16.;
 const FADE_WIDTH: f32 = 48.;
 
-/// A preview box above a centered label. The ring sits in the box's padding,
-/// so a selected card takes up the same space as any other.
+/// A preview box with a subtle selection border above a centered label.
 #[derive(IntoElement)]
 pub struct ChoiceCard {
     id: SharedString,
@@ -86,23 +85,22 @@ impl RenderOnce for ChoiceCard {
                     .aria_selected(self.selected)
                     .tab_index(0)
                     .cursor_pointer()
-                    .p(px(2.))
-                    .corner(px(16.))
-                    .border_2()
+                    .corner(px(10.))
+                    .border_1()
                     .border_color(if self.selected {
-                        theme.foreground
+                        theme.foreground.opacity(0.3)
                     } else {
-                        transparent_black()
+                        theme.border
                     })
+                    .when(self.selected, |card| card.bg(theme.accent))
+                    .hover(|card| card.bg(theme.accent))
                     .focus_visible(move |s| s.border_color(ring))
                     .when_some(on_click, |card, handler| {
                         card.on_click(move |event, window, cx| handler(event, window, cx))
                     })
                     .child(
                         div()
-                            .corner(px(12.))
-                            .border_1()
-                            .border_color(theme.border)
+                            .corner(px(9.))
                             .overflow_hidden()
                             .children(self.preview),
                     ),
@@ -151,7 +149,7 @@ impl RenderOnce for CardRow {
         h_flex()
             .w_full()
             .items_start()
-            .gap_1()
+            .gap_3()
             .children(self.cards.into_iter().map(|card| div().flex_1().min_w_0().child(card)))
     }
 }

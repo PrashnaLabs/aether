@@ -243,8 +243,6 @@ impl ChatApp {
                 .items_center()
                 .content_center()
                 .justify_center()
-                .corner(px(11.))
-                .bg(cx.theme().muted)
                 .text_color(fg)
                 .children(
                     PREVIEW_ICONS
@@ -297,7 +295,7 @@ impl ChatApp {
         let line = cx.theme().muted_foreground;
         let cards = CornerStyle::ALL.map(|style| {
             let preview =
-                div().h(px(76.)).w_full().relative().corner(px(11.)).bg(cx.theme().muted).child(
+                div().h(px(76.)).w_full().relative().child(
                     div()
                         .absolute()
                         .top(px(24.))
