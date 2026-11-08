@@ -131,13 +131,37 @@ impl RenderOnce for UserMessage {
                 cx,
             )
         });
+        let long = self.text.lines().count() > 8;
+        let expanded_state = window.use_keyed_state(
+            SharedString::from(format!("{}-expanded", self.id)),
+            cx,
+            |_, _| false,
+        );
+        let expanded = *expanded_state.read(cx);
         let text = (!self.text.is_empty()).then(|| {
-            SelectableText::new(SharedString::from(format!("{}-text", self.id)), self.text)
+            div()
+                .when(long && !expanded, |d| d.max_h(px(182.)).overflow_hidden())
+                .child(SelectableText::new(
+                    SharedString::from(format!("{}-text", self.id)),
+                    self.text.clone(),
+                ))
+        });
+        let toggle = long.then(|| {
+            crate::components::button(SharedString::from(format!("{}-toggle", self.id)))
+                .ghost()
+                .xsmall()
+                .icon(if expanded {
+                    Lucide::ChevronUp
+                } else {
+                    Lucide::ChevronDown
+                })
+                .label(if expanded { "Show less" } else { "Show more" })
+                .on_click(move |_, _, cx| expanded_state.update(cx, |open, _| *open = !*open))
         });
         let bubble = Bubble::new()
             .alignment(MessageAlignment::End)
             .with_variant(BubbleVariant::Secondary)
-            .child(v_flex().gap_2().children(strip).children(text));
+            .child(v_flex().gap_2().children(strip).children(text).children(toggle));
         Column::new()
             .px_0()
             .group("message")
