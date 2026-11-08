@@ -416,7 +416,7 @@ static SETTING_CATALOG: &[SettingItem] = &[
     },
     SettingItem {
         id: "api-key",
-        tab: SettingsTab::Account,
+        tab: SettingsTab::Model,
         title: "API key",
         description: "Stored in your system keychain, never in the settings file.",
         keywords: &["openrouter", "credentials", "token", "authentication", "secure"],

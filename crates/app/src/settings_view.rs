@@ -44,11 +44,10 @@ pub(crate) enum SettingsTab {
     Worktrees,
     Tools,
     Terminal,
-    Account,
 }
 
 impl SettingsTab {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Appearance,
         Self::BottomBar,
         Self::Tiling,
@@ -58,7 +57,6 @@ impl SettingsTab {
         Self::Worktrees,
         Self::Tools,
         Self::Terminal,
-        Self::Account,
     ];
 
     pub(crate) fn label(self) -> &'static str {
@@ -67,12 +65,11 @@ impl SettingsTab {
             Self::BottomBar => "Bottom Bar",
             Self::Tiling => "Tiling",
             Self::Composer => "Composer",
-            Self::Model => "Model",
+            Self::Model => "Direct Chat",
             Self::Providers => "Providers",
             Self::Worktrees => "Worktrees",
             Self::Tools => "Tools",
             Self::Terminal => "Terminal",
-            Self::Account => "Account",
         }
     }
 }
@@ -294,19 +291,18 @@ impl ChatApp {
         let active = self.settings.corner_style;
         let line = cx.theme().muted_foreground;
         let cards = CornerStyle::ALL.map(|style| {
-            let preview =
-                div().h(px(76.)).w_full().relative().child(
-                    div()
-                        .absolute()
-                        .top(px(24.))
-                        .left(px(40.))
-                        .right_0()
-                        .bottom_0()
-                        .border_t_2()
-                        .border_l_2()
-                        .border_color(line)
-                        .rounded_tl(px(16. * style.scale())),
-                );
+            let preview = div().h(px(76.)).w_full().relative().child(
+                div()
+                    .absolute()
+                    .top(px(24.))
+                    .left(px(40.))
+                    .right_0()
+                    .bottom_0()
+                    .border_t_2()
+                    .border_l_2()
+                    .border_color(line)
+                    .rounded_tl(px(16. * style.scale())),
+            );
             ChoiceCard::new(format!("corners-card-{}", style.label().to_lowercase()), style.label())
                 .selected(style == active)
                 .preview(preview)
@@ -964,6 +960,37 @@ impl ChatApp {
             }
             SettingsTab::Model => {
                 use gpui_kit::assets::IconName as Lucide;
+                page = page.when(show("api-key"), |page| { page.child(SettingsSection::new("OpenRouter API key").icon(Icon::new(Lucide::KeyRound)).when(show("api-key"), |section| { section.child(div().id("api-key").debug_selector(|| "api-key".into()).child(SettingsRow::new("API key")
+                            .description(
+                                "Stored in your system keychain, never in the settings file.",
+                            )
+                            .stacked()
+                            .control(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .child(div().flex_1().child(field(&self.key_input).aria_label("OpenRouter API key")))
+                                            .child(
+                                                aether_ui::button("save-key")
+                                                    .primary()
+                                                    .small()
+                                                    .label("Save")
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.save_key(window, cx)
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(self.key_status.clone()),
+                                    ),
+                            ))) })) });
                 page = page
                     .when(show("default-model"), |page| {
                         page.child(
@@ -1067,6 +1094,8 @@ impl ChatApp {
                     });
             }
             SettingsTab::Providers => {
+                let mut coding_agents = SettingsSection::new("Coding agents")
+                    .icon(Icon::new(gpui_kit::assets::IconName::Bot));
                 if matches.is_none() {
                     let cards = CLIS.into_iter().map(|provider| {
                         let installed =
@@ -1113,21 +1142,15 @@ impl ChatApp {
                             cx.notify();
                         }))
                     });
-                    page = page.child(
-                        SettingsSection::new("Coding agents")
-                            .icon(Icon::new(gpui_kit::assets::IconName::Bot))
-                            .child(
-                                div().p_4().child(
-                                    CardCarousel::new(
-                                        "provider-cards",
-                                        CLIS.iter()
-                                            .position(|p| *p == self.settings_provider)
-                                            .unwrap_or(0),
-                                    )
-                                    .compact()
-                                    .children(cards),
-                                ),
-                            ),
+                    coding_agents = coding_agents.child(
+                        div().p_4().child(
+                            CardCarousel::new(
+                                "provider-cards",
+                                CLIS.iter().position(|p| *p == self.settings_provider).unwrap_or(0),
+                            )
+                            .compact()
+                            .children(cards),
+                        ),
                     );
                 }
                 let root = settings.workspace_root.clone();
@@ -1177,7 +1200,7 @@ impl ChatApp {
                                         ),
                                 ))) })) })
                     .when(show("claude") || show("codex") || show("pi") || show("opencode") || show("antigravity"), |page| { page.child(CLIS.into_iter().filter(|p| show(p.key()) && (matches.is_some() || *p == self.settings_provider)).fold(
-                        SettingsSection::new("Agent configuration").icon(Icon::new(gpui_kit::assets::IconName::Settings)),
+                        coding_agents,
                         |section, p| {
                             let binary = DriverStartOptions::for_provider(settings, p, "").binary;
                             let access = settings.default_access(p);
@@ -1500,39 +1523,6 @@ impl ChatApp {
                                             })),
                                     ))) })) });
             }
-            SettingsTab::Account => {
-                page = page.when(show("api-key"), |page| { page.child(SettingsSection::new("OpenRouter").when(show("api-key"), |section| { section.child(div().id("api-key").debug_selector(|| "api-key".into()).child(SettingsRow::new("API key")
-                            .description(
-                                "Stored in your system keychain, never in the settings file.",
-                            )
-                            .stacked()
-                            .control(
-                                v_flex()
-                                    .gap_2()
-                                    .child(
-                                        h_flex()
-                                            .gap_2()
-                                            .child(div().flex_1().child(field(&self.key_input).aria_label("OpenRouter API key")))
-                                            .child(
-                                                aether_ui::button("save-key")
-                                                    .primary()
-                                                    .small()
-                                                    .label("Save")
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.save_key(window, cx)
-                                                        },
-                                                    )),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .child(self.key_status.clone()),
-                                    ),
-                            ))) })) });
-            }
         }
         page
     }
@@ -1809,7 +1799,6 @@ impl SettingsTab {
             Self::Worktrees => "Manage isolated checkouts used by your chats.",
             Self::Tools => "Control tool permissions and planning.",
             Self::Terminal => "Set the terminal's colors, font, cursor and keys.",
-            Self::Account => "Manage your OpenRouter credentials.",
         }
     }
 
@@ -1825,7 +1814,6 @@ impl SettingsTab {
             Self::Worktrees => Lucide::GitFork,
             Self::Tools => Lucide::Wrench,
             Self::Terminal => Lucide::SquareTerminal,
-            Self::Account => Lucide::KeyRound,
         }
     }
 }
@@ -1888,9 +1876,25 @@ impl ChatApp {
                 cx.listener(|this, _: &SettingsPrevious, _, cx| this.cycle_settings_tab(false, cx)),
             );
         for (label, tabs) in [
-            ("General", &SettingsTab::ALL[0..5]),
-            ("Developer", &SettingsTab::ALL[5..8]),
-            ("Account & Security", &SettingsTab::ALL[8..9]),
+            (
+                "General",
+                &[
+                    SettingsTab::Appearance,
+                    SettingsTab::BottomBar,
+                    SettingsTab::Tiling,
+                    SettingsTab::Composer,
+                    SettingsTab::Model,
+                ][..],
+            ),
+            (
+                "Developer",
+                &[
+                    SettingsTab::Providers,
+                    SettingsTab::Worktrees,
+                    SettingsTab::Tools,
+                    SettingsTab::Terminal,
+                ][..],
+            ),
         ] {
             let mut group = v_flex()
                 .gap_1()

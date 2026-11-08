@@ -94,7 +94,7 @@ impl ChatApp {
                         .border_1()
                         .border_color(theme.border)
                         .shadow_lg()
-                        .bg(theme.background)
+                        .bg(theme.background.opacity(1.))
                         .key_context(DRAFT_EDITOR_CONTEXT)
                         .on_action(self.session_listener(
                             cx,
@@ -146,13 +146,11 @@ impl ChatApp {
                                 ),
                         )
                         .child(
-                            div().flex_1().min_h_0().w_full().flex().justify_center().child(
-                                div().h_full().w_full().max_w(px(760.)).p_4().child(
-                                    Editor::new(&editor)
-                                        .h(relative(1.))
-                                        .appearance(false)
-                                        .bordered(false),
-                                ),
+                            div().flex_1().min_h_0().w_full().px_2().py_3().child(
+                                Editor::new(&editor)
+                                    .h(relative(1.))
+                                    .appearance(false)
+                                    .bordered(false),
                             ),
                         ),
                 )

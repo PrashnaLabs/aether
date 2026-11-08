@@ -61,9 +61,9 @@ fn worktree_rows_remove_or_prune_unless_main_locked_or_busy() {
 #[test]
 fn settings_tabs_cycle_with_wrap_around() {
     use SettingsTab::*;
-    assert_eq!(next_settings_tab(Appearance, false), Account);
-    assert_eq!(next_settings_tab(Appearance, true), Tiling);
-    assert_eq!(next_settings_tab(Account, true), Appearance);
+    assert_eq!(next_settings_tab(Appearance, false), Terminal);
+    assert_eq!(next_settings_tab(Appearance, true), BottomBar);
+    assert_eq!(next_settings_tab(Terminal, true), Appearance);
     assert_eq!(next_settings_tab(Worktrees, false), Providers);
 }
 
@@ -745,7 +745,7 @@ fn settings_sidebar_keys_wrap_without_stealing_input_arrows(cx: &mut gpui_kit::T
     .unwrap();
     let mut visual = gpui_kit::VisualTestContext::from_window(window, cx);
     visual.simulate_keystrokes("up");
-    visual.read(|cx| assert_eq!(app.read(cx).settings_tab, SettingsTab::Account));
+    visual.read(|cx| assert_eq!(app.read(cx).settings_tab, SettingsTab::Terminal));
     visual.simulate_keystrokes("down");
     visual.read(|cx| assert_eq!(app.read(cx).settings_tab, SettingsTab::Appearance));
     visual.simulate_keystrokes("secondary-k");

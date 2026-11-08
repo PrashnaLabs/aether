@@ -47,7 +47,7 @@ fn chat_layout_searches_into_appearance() {
 fn search_settings_matches_title_description_and_keywords() {
     assert!(!all_setting_items().is_empty());
     assert!(search_settings("THEME").iter().any(|m| m.id == "theme"));
-    assert!(search_settings("keychain").iter().any(|m| m.tab == SettingsTab::Account));
+    assert!(search_settings("keychain").iter().any(|m| m.tab == SettingsTab::Model));
     assert!(search_settings("claude").iter().any(|m| m.tab == SettingsTab::Providers));
     assert!(search_settings("nonexistentxyz123").is_empty());
 }
@@ -66,7 +66,7 @@ fn tab_match_count_aggregates_per_category() {
     let matches = search_settings("font");
     assert_eq!(tab_match_count(SettingsTab::Appearance, &matches), 2);
     assert_eq!(tab_match_count(SettingsTab::Terminal, &matches), 2);
-    assert_eq!(tab_match_count(SettingsTab::Account, &matches), 0);
+    assert_eq!(tab_match_count(SettingsTab::Model, &matches), 0);
 }
 
 #[test]
