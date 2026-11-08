@@ -739,6 +739,22 @@ impl ChatApp {
         app.load_open_apps(cx);
         cx.spawn_in(window, async move |this, cx| {
             loop {
+                cx.background_executor().timer(Duration::from_secs(6)).await;
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        if window.is_window_active() && this.composer.read(cx).value().is_empty() {
+                            this.sync_placeholder(window, cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
                 cx.background_executor().timer(Duration::from_secs(30)).await;
                 let tick = this.update_in(cx, |this, window, cx| {
                     if window.is_window_active() {

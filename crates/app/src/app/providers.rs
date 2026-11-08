@@ -246,7 +246,20 @@ impl ChatApp {
             }
             true => Busy::Working,
         };
-        let text = busy_placeholder(chat.provider.short_label(), busy);
+        let tips = [
+            "Tip: @tag a file to include it as context.",
+            "Tip: Type / to browse available commands.",
+            "Tip: Press Ctrl+G to edit a longer draft.",
+            "Tip: Use the attachment button to add images and files.",
+            "Tip: Change your chat layout from the workspace menu.",
+            "Tip: Customize visible items in Settings → Bottom Bar.",
+        ];
+        let phase = (super::now_ms() / 6_000) as usize;
+        let text = if busy == Busy::Waiting || phase % 2 == 0 {
+            busy_placeholder(chat.provider.short_label(), busy)
+        } else {
+            tips[(phase / 2) % tips.len()].to_string()
+        };
         if self.composer.read(cx).presentation().placeholder().as_ref() != text.as_str() {
             self.composer.update(cx, |s, cx| s.set_placeholder(text, window, cx));
         }
