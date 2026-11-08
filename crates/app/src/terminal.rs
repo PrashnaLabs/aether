@@ -24,13 +24,11 @@ pub(crate) struct Drawer {
     pub(crate) _events: Subscription,
 }
 
-/// Attaches tmux session `aether-<id>`, first creating it with Neovim in pane 1 and
-/// the CLI resuming `session` in pane 2. Without tmux, runs the CLI alone.
+/// Resumes the CLI session directly in the chat's project folder.
 pub(crate) fn resume_command(
     s: &Settings,
     provider: Provider,
     session: &str,
-    id: i64,
     folder: &Path,
 ) -> Option<String> {
     let (name, flag, binary) = match provider {
@@ -51,18 +49,8 @@ pub(crate) fn resume_command(
         None => binary.clone(),
     };
     let cli = format!("{} {flag} {}", q(&bin), q(session));
-    let (tmux, dir) = (format!("aether-{id}"), q(&folder.display().to_string()));
-    // zsh expands an unquoted leading `=word` to a command path
-    let (exact, window) = (q(&format!("={tmux}")), q(&format!("={tmux}:")));
-    Some(format!(
-        "if command -v tmux >/dev/null; then \
-         tmux has-session -t {exact} 2>/dev/null || \
-         {{ tmux new-session -d -s {tmux} -c {dir} nvim && \
-         tmux split-window -h -t {window} -c {dir} {pane}; }}; \
-         env -u TMUX -u TMUX_PANE tmux attach-session -t {exact}; \
-         else {cli}; fi",
-        pane = q(&cli)
-    ))
+    let dir = q(&folder.display().to_string());
+    Some(format!("cd {dir} && {cli}"))
 }
 
 impl ChatApp {
@@ -208,7 +196,7 @@ impl ChatApp {
             return None;
         }
         let folder = self.folder_of(chat).filter(|f| !self.missing_folders.contains(f))?;
-        resume_command(&self.settings, chat.provider, &chat.cli_session, chat.id, &folder)
+        resume_command(&self.settings, chat.provider, &chat.cli_session, &folder)
     }
 
     /// Hands chat `ix` to its CLI on the terminal page; Aether lets go of the session first.

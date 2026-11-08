@@ -326,8 +326,8 @@ static SETTING_CATALOG: &[SettingItem] = &[
     SettingItem {
         id: "reasoning",
         tab: SettingsTab::Model,
-        title: "Reasoning",
-        description: "How hard the model thinks before answering. Higher is slower and costs more. Off stops asking, though some models still reason by default.",
+        title: "Reasoning effort",
+        description: "How much the OpenRouter model thinks before answering. Higher effort can take longer and cost more.",
         keywords: &["effort", "budget", "thinking"],
     },
     SettingItem {

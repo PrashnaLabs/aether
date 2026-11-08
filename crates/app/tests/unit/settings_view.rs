@@ -886,3 +886,41 @@ fn scheme_change_keeps_translucency(cx: &mut gpui_kit::TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn model_reasoning_cards_change_effort_and_preserve_search(cx: &mut gpui_kit::TestAppContext) {
+    let window = settings_test_window(cx);
+    let app = window.root(cx).unwrap();
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings_tab = SettingsTab::Model;
+            cx.notify();
+        });
+        let _ = window.draw(cx);
+    });
+    settle(&mut visual);
+    assert!(visual.debug_bounds("default-model").is_some());
+    assert!(visual.debug_bounds("web-search").is_some());
+    for (id, effort) in [
+        ("reasoning-high", Reasoning::High),
+        ("reasoning-off", Reasoning::Off),
+        ("reasoning-medium", Reasoning::Medium),
+        ("reasoning-low", Reasoning::Low),
+    ] {
+        let card = visual.debug_bounds(id).unwrap();
+        visual.simulate_click(card.center(), gpui_kit::Modifiers::default());
+        visual.read(|cx| assert_eq!(app.read(cx).settings.reasoning, effort));
+        settle(&mut visual);
+    }
+    visual.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings_search_input.update(cx, |input, cx| {
+                input.set_value("custom instructions", window, cx);
+            });
+        });
+        let _ = window.draw(cx);
+    });
+    assert!(visual.debug_bounds("instructions").is_some());
+    assert!(visual.debug_bounds("reasoning").is_none());
+}

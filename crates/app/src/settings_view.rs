@@ -333,7 +333,6 @@ impl ChatApp {
     ) -> impl IntoElement {
         let settings = &self.settings;
         let muted = cx.theme().muted_foreground;
-        let reasoning = Reasoning::ALL.iter().position(|r| *r == settings.reasoning).unwrap_or(0);
         let show = |id: &str| {
             matches.is_none_or(|items| items.iter().any(|item| item.tab == tab && item.id == id))
         };
@@ -966,50 +965,108 @@ impl ChatApp {
                 });
             }
             SettingsTab::Model => {
+                use gpui_kit::assets::IconName as Lucide;
                 page = page
-                    .when(show("default-model") || show("reasoning") || show("web-search"), |page| { page.child(SettingsSection::new("Model")
-                            .when(show("default-model"), |section| { section.child(div().id("default-model").debug_selector(|| "default-model".into()).child(SettingsRow::new("Default model")
-                                    .description(
-                                        "Used for new OpenRouter chats. Also changeable from the composer.",
+                    .when(show("default-model"), |page| {
+                        page.child(
+                            SettingsSection::new("Default model")
+                                .icon(aether_ui::provider_icon(aether_core::Provider::OpenRouter))
+                                .child(
+                                    div().id("default-model")
+                                        .debug_selector(|| "default-model".into())
+                                        .child(
+                                            SettingsRow::new("OpenRouter model")
+                                                .description("Used for new OpenRouter chats. You can choose another model in the composer.")
+                                                .stacked()
+                                                .control(AgentSelector::new(&self.default_model)),
+                                        ),
+                                ),
+                        )
+                    })
+                    .when(show("reasoning") || show("web-search"), |page| {
+                        page.child(
+                            SettingsSection::new("Response behavior")
+                                .icon(Icon::new(Lucide::Lightbulb))
+                                .when(show("reasoning"), |section| {
+                                    let cards = [
+                                        (Reasoning::Off, "Off", Lucide::CircleSlash),
+                                        (Reasoning::Low, "Low", Lucide::Zap),
+                                        (Reasoning::Medium, "Medium", Lucide::Gauge),
+                                        (Reasoning::High, "High", Lucide::Lightbulb),
+                                    ].map(|(effort, label, icon)| {
+                                        ChoiceCard::new(format!("reasoning-{}", label.to_lowercase()), label)
+                                            .selected(settings.reasoning == effort)
+                                            .preview(
+                                                h_flex().h(px(48.)).justify_center()
+                                                    .child(Icon::new(icon).size(px(22.))),
+                                            )
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.update_settings(cx, |s| s.reasoning = effort);
+                                            }))
+                                    });
+                                    let hint = match settings.reasoning {
+                                        Reasoning::Off => "No reasoning requested. Some models still reason by default.",
+                                        Reasoning::Low => "Less reasoning for faster responses and lower cost.",
+                                        Reasoning::Medium => "A balance of reasoning depth, response time and cost.",
+                                        Reasoning::High => "More reasoning for complex tasks. Responses can take longer and cost more.",
+                                    };
+                                    section.child(
+                                        div().id("reasoning")
+                                            .debug_selector(|| "reasoning".into())
+                                            .child(
+                                                SettingsRow::new("Reasoning effort")
+                                                    .description("How much the OpenRouter model thinks before answering.")
+                                                    .stacked()
+                                                    .control(
+                                                        v_flex().gap_3()
+                                                            .child(
+                                                                h_flex().w_full().max_w(px(560.)).gap_3()
+                                                                    .children(cards.into_iter().map(|card| {
+                                                                        div().flex_1().min_w_0().child(card)
+                                                                    })),
+                                                            )
+                                                            .child(div().text_xs().text_color(muted).child(hint)),
+                                                    ),
+                                            ),
                                     )
-                                    .control(AgentSelector::new(&self.default_model)))) })
-                            .when(show("reasoning"), |section| { section.child(div().id("reasoning").debug_selector(|| "reasoning".into()).child(SettingsRow::new("Reasoning")
-                                    .description(
-                                        "How hard the model thinks before answering. Higher is slower and costs more. \
-                                         Off stops asking, though some models still reason by default.",
+                                })
+                                .when(show("web-search"), |section| {
+                                    section.child(
+                                        div().id("web-search")
+                                            .debug_selector(|| "web-search".into())
+                                            .child(
+                                                SettingsRow::new("Web search")
+                                                    .icon(Icon::new(Lucide::Search))
+                                                    .description("Allow DuckDuckGo searches. Also available from the Search chip in the composer.")
+                                                    .control(
+                                                        Switch::new("web-search-setting")
+                                                            .checked(settings.web_search)
+                                                            .accessibility_label("Web search")
+                                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                                                this.update_settings(cx, |s| s.web_search = *checked);
+                                                            })),
+                                                    ),
+                                            ),
                                     )
-                                    .control(
-                                        Segmented::new("reasoning")
-                                            .option("Off")
-                                            .option("Low")
-                                            .option("Medium")
-                                            .option("High")
-                                            .selected(reasoning)
-                                            .on_change(cx.listener(|this, ix: &usize, _, cx| {
-                                                this.update_settings(cx, |s| {
-                                                    s.reasoning = Reasoning::ALL[*ix]
-                                                });
-                                            })),
-                                    ))) })
-                            .when(show("web-search"), |section| { section.child(div().id("web-search").debug_selector(|| "web-search".into()).child(SettingsRow::new("Web search")
-                                    .description(
-                                        "Let the assistant search DuckDuckGo. Same as the Search chip.",
-                                    )
-                                    .control(
-                                        Switch::new("web-search-setting")
-                                            .checked(settings.web_search)
-                                            .accessibility_label("Web search")
-                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                                let checked = *checked;
-                                                this.update_settings(cx, |s| {
-                                                    s.web_search = checked
-                                                });
-                                            })),
-                                    ))) })) })
-                    .when(show("instructions"), |page| { page.child(SettingsSection::new("Custom instructions").when(show("instructions"), |section| { section.child(div().id("instructions").debug_selector(|| "instructions".into()).child(SettingsRow::new("Instructions")
-                                .description("Added to every conversation.")
-                                .stacked()
-                                .control(field_area(&self.instructions).aria_label("Custom instructions")))) })) });
+                                }),
+                        )
+                    })
+                    .when(show("instructions"), |page| {
+                        page.child(
+                            SettingsSection::new("Custom instructions")
+                                .icon(Icon::new(Lucide::TextQuote))
+                                .child(
+                                    div().id("instructions")
+                                        .debug_selector(|| "instructions".into())
+                                        .child(
+                                            SettingsRow::new("Instructions")
+                                                .description("Added to every conversation. Set your preferred tone, format or conventions here.")
+                                                .stacked()
+                                                .control(field_area(&self.instructions).aria_label("Custom instructions")),
+                                        ),
+                                ),
+                        )
+                    });
             }
             SettingsTab::Providers => {
                 if matches.is_none() {
@@ -1749,7 +1806,7 @@ impl SettingsTab {
             Self::BottomBar => "Choose bottom bar entries, agent usage and clock formats.",
             Self::Tiling => "Arrange docked session panes in the window.",
             Self::Composer => "Set up dictation in the message box.",
-            Self::Model => "Choose defaults for new conversations.",
+            Self::Model => "Set your default model, response behavior and custom instructions.",
             Self::Providers => "Configure coding agents and their workspace.",
             Self::Worktrees => "Manage isolated checkouts used by your chats.",
             Self::Tools => "Control tool permissions and planning.",
