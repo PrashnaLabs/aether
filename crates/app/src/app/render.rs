@@ -282,7 +282,8 @@ impl Render for ChatApp {
                                     target_os = "macos",
                                     target_os = "linux",
                                     target_os = "windows"
-                                )) && (self.settings.sidebar_collapsed || chromeless)
+                                )) && self.settings.sidebar_collapsed
+                                    && !chromeless
                                     && !window.is_fullscreen(),
                                 |main| {
                                     main.child(

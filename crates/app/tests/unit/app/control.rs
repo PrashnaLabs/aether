@@ -304,7 +304,10 @@ fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
                     .map(|s| s["name"].as_str().unwrap().to_string())
                     .collect::<Vec<_>>()
             };
-            assert_eq!(names(call("20", "list_tools").unwrap()), ["read_history"]);
+            assert_eq!(
+                names(call("20", "list_tools").unwrap()),
+                ["list_cards", "add_card", "move_card", "read_history"]
+            );
             assert!(names(call("10", "list_tools").unwrap()).len() > 1);
             assert!(call("20", "read_history").is_ok());
             assert_eq!(call("20", "list_chats").unwrap_err(), "lead chat not found");

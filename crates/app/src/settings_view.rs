@@ -1296,7 +1296,7 @@ impl ChatApp {
                                             this.update_settings(cx, |s| s.notes_enabled = checked);
                                         })))
                                         .when(settings.notes_enabled, |row| row.child(
-                                            aether_ui::button("notes-advanced-toggle").ghost().small()
+                                            aether_ui::button("notes-advanced-toggle").debug_selector(|| "notes-advanced-toggle".into()).ghost().small()
                                                 .icon(if expanded { gpui_kit::assets::IconName::ChevronUp } else { gpui_kit::assets::IconName::ChevronDown })
                                                 .accessibility_label("Advanced notes settings")
                                                 .tooltip(if expanded { "Hide advanced settings" } else { "Show advanced settings" })

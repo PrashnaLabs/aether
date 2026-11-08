@@ -84,6 +84,7 @@ impl ChatApp {
                 .p_4()
                 .child(
                     v_flex()
+                        .debug_selector(|| "draft-editor-dialog".into())
                         .w_full()
                         .max_w(px(860.))
                         .h(relative(0.8))

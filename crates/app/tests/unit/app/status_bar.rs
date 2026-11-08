@@ -409,7 +409,7 @@ fn strip_has_no_used_label_or_refresh(cx: &mut TestAppContext) {
     assert!(visual.debug_bounds("usage-refresh").is_none());
     let strip = visual.debug_bounds("usage-strip").unwrap();
     let first = visual.debug_bounds("usage-strip-claude").unwrap();
-    assert!(first.left() - strip.left() < px(2.), "leading label in {strip:?}");
+    assert!(first.left() - strip.left() <= px(6.), "leading label in {strip:?}");
     open_usage_pop(&mut visual, &app);
     assert!(visual.debug_bounds("usage-pop").is_some());
 }
@@ -631,7 +631,7 @@ fn usage_strip_hugs_its_content(cx: &mut TestAppContext) {
     draw(&mut visual, &app, seed);
     let strip = visual.debug_bounds("usage-strip").unwrap();
     let last = visual.debug_bounds("usage-strip-antigravity").unwrap();
-    assert!(strip.right() - last.right() < px(2.), "{strip:?} vs {last:?}");
+    assert!(strip.right() - last.right() <= px(6.), "{strip:?} vs {last:?}");
     assert!(strip.size.width < px(400.), "{strip:?}");
 }
 

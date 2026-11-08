@@ -98,7 +98,7 @@ fn effective_drawer_height_uses_three_quarters_viewport_when_maximized() {
 #[test]
 fn global_terminal_workspace_defaults_sidebar_to_hidden() {
     let mut model = WorkspaceModel::new();
-    assert!(model.sidebar_open);
-    model.sidebar_open = false;
     assert!(!model.sidebar_open);
+    model.sidebar_open = true;
+    assert!(model.sidebar_open);
 }
