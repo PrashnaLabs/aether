@@ -98,12 +98,7 @@ impl RenderOnce for ChoiceCard {
                     .when_some(on_click, |card, handler| {
                         card.on_click(move |event, window, cx| handler(event, window, cx))
                     })
-                    .child(
-                        div()
-                            .corner(px(9.))
-                            .overflow_hidden()
-                            .children(self.preview),
-                    ),
+                    .child(div().corner(px(9.)).overflow_hidden().children(self.preview)),
             )
             .child(
                 h_flex()

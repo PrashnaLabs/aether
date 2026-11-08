@@ -144,14 +144,9 @@ impl ChatApp {
                                         )),
                                 ),
                         )
-                        .child(
-                            div().flex_1().min_h_0().w_full().px_2().py_3().child(
-                                Editor::new(&editor)
-                                    .h(relative(1.))
-                                    .appearance(false)
-                                    .bordered(false),
-                            ),
-                        ),
+                        .child(div().flex_1().min_h_0().w_full().px_2().py_3().child(
+                            Editor::new(&editor).h(relative(1.)).appearance(false).bordered(false),
+                        )),
                 )
                 .into_any_element(),
         )

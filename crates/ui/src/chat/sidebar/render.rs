@@ -133,7 +133,10 @@ impl RenderOnce for ChatSidebar {
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .when(!cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")), |header| header.pt_3().px_3())
+                    .when(
+                        !cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+                        |header| header.pt_3().px_3(),
+                    )
                     .child(
                         h_flex()
                             .w_full()
@@ -193,7 +196,11 @@ impl RenderOnce for ChatSidebar {
                             ),
                     )
                     .map(|header| {
-                        if cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")) {
+                        if cfg!(any(
+                            target_os = "macos",
+                            target_os = "linux",
+                            target_os = "windows"
+                        )) {
                             gpui_kit::component::TitleBar::new()
                                 .h(px(36.))
                                 .when(window.is_fullscreen(), |bar| bar.pl_0())

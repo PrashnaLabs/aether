@@ -5,9 +5,7 @@ use aether_ui::{field, field_area, overlay, overlay_strong, provider_icon};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_kit::component::{
-    ActiveTheme, Icon, Sizable, checkbox::Checkbox, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, checkbox::Checkbox, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, ClickEvent, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*,
     px,

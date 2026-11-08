@@ -119,4 +119,3 @@ fn btw_panel_matches_tab_bar_height_and_uses_shared_composer(cx: &mut gpui_kit::
     assert_eq!(title.size.height, px(38.));
     assert!(visual.debug_bounds("btw-composer").is_some());
 }
-

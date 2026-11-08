@@ -278,8 +278,11 @@ impl Render for ChatApp {
                             .min_w_0()
                             .min_h_0()
                             .when(
-                                cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows"))
-                                    && (self.settings.sidebar_collapsed || chromeless)
+                                cfg!(any(
+                                    target_os = "macos",
+                                    target_os = "linux",
+                                    target_os = "windows"
+                                )) && (self.settings.sidebar_collapsed || chromeless)
                                     && !window.is_fullscreen(),
                                 |main| {
                                     main.child(

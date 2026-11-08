@@ -77,7 +77,11 @@ fn main() {
                         .into_rgba8(),
                 )),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                app_owns_titlebar_drag: cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+                app_owns_titlebar_drag: cfg!(any(
+                    target_os = "macos",
+                    target_os = "linux",
+                    target_os = "windows"
+                )),
                 window_decorations: cfg!(target_os = "linux")
                     .then_some(gpui_kit::WindowDecorations::Client),
                 titlebar: Some(TitlebarOptions {

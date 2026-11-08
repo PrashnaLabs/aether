@@ -74,7 +74,7 @@ fn non_lead_chat_gets_no_lead_tools() {
     let plain = names(&tools.enabled(&settings, &[], gate(), None));
     assert!(!plain.contains(&"list_agents".to_string()));
     let (tx, _rx) = mpsc::unbounded();
-    let lead = names(&tools.enabled(&settings, &[], gate(), Some(("c".into(), tx, pend()))));
+    let lead = names(&tools.enabled(&settings, &[], gate(), Some(("c".into(), tx, pend(), true))));
     assert!(lead.contains(&"list_agents".to_string()));
 }
 
