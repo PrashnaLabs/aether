@@ -251,7 +251,7 @@ impl WorkspaceModel {
         Self {
             groups: vec![initial_group],
             active_group: initial_group_id,
-            sidebar_open: true,
+            sidebar_open: false,
             maximized: false,
             next_group_id: 2,
             next_pane_id: 2,

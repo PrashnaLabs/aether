@@ -97,7 +97,11 @@ impl WorkspacePopover {
             PopView::Script(_) => Some(&self.script_name),
             PopView::Branch => Some(&self.branch_query),
             PopView::Publish => Some(&self.publish_name),
-            PopView::Main | PopView::Location | PopView::Apps | PopView::Remote => None,
+            PopView::Main
+            | PopView::Location
+            | PopView::Apps
+            | PopView::Remote
+            | PopView::ChatLayout => None,
         }
     }
 }

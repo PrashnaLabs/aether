@@ -1,7 +1,7 @@
 use aether_ui::theme::Corners;
 use std::path::{Path, PathBuf};
 
-use aether_core::home_dir;
+use aether_core::{ChatLayout, home_dir};
 use aether_git::{Status, StatusError};
 use aether_ui::{row_style, theme};
 use gpui_kit::assets::IconName as Lucide;
@@ -119,6 +119,32 @@ impl ChatApp {
         let at = self.pop_where();
         let view = self.workspace_pop.view;
         let mut body = match view {
+            PopView::ChatLayout => {
+                let handles = self.workspace_pop.rows(4, cx).to_vec();
+                [
+                    (ChatLayout::Tabbed, "Tabbed", Lucide::PanelBottom),
+                    (ChatLayout::Sidebar, "Sidebar", Lucide::PanelRight),
+                    (ChatLayout::Split, "Split", Lucide::Columns2),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(ix, (layout, label, mark))| {
+                    row(("pop-layout-option", ix), &handles[ix + 1], label.into(), None, cx)
+                        .child(icon(mark, cx).when(layout == ChatLayout::Tabbed, |icon| {
+                            icon.rotate(gpui_kit::Radians(std::f32::consts::PI))
+                        }))
+                        .child(text(label, None, cx))
+                        .when(self.settings.chat_layout == layout, |r| {
+                            r.child(icon(Lucide::Check, cx))
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.close_workspace_pop(window, cx);
+                            this.update_settings(cx, |s| s.chat_layout = layout);
+                        }))
+                        .into_any_element()
+                })
+                .collect()
+            }
             PopView::Location => self.pop_location(at, cx),
             PopView::Apps => self.pop_apps(at, cx),
             PopView::Branch => self.pop_branch(at, cx),
@@ -192,7 +218,7 @@ impl ChatApp {
         let trouble = git_trouble(read);
         let scripts = self.pop_project_scripts(&at);
         let g = 4 + scripts.len();
-        let h = self.workspace_pop.rows(g + if not_repo { 3 } else { 5 }, cx).to_vec();
+        let h = self.workspace_pop.rows(g + if not_repo { 4 } else { 6 }, cx).to_vec();
         let script_rows = self.pop_script_rows(&at, &state, scripts, &h[3..g], cx);
         let folder = at.folder;
 
@@ -246,7 +272,7 @@ impl ChatApp {
             }
         });
         let resume =
-            row("pop-resume", &h[h.len() - 1], "Resume in terminal".into(), resume_off, cx)
+            row("pop-resume", &h[h.len() - 2], "Resume in terminal".into(), resume_off, cx)
                 .child(icon(Lucide::SquareTerminal, cx))
                 .child(text("Resume in terminal", resume_off.map(Into::into), cx))
                 .when(resume_off.is_none(), |r| {
@@ -256,6 +282,14 @@ impl ChatApp {
                     }))
                 })
                 .into_any_element();
+        let layout = row("pop-chat-layout", &h[h.len() - 1], "Chat layout".into(), None, cx)
+            .child(icon(Lucide::LayoutDashboard, cx))
+            .child(text("Chat layout", None, cx))
+            .child(icon(Lucide::ChevronRight, cx))
+            .on_click(
+                cx.listener(|this, _, window, cx| this.pop_view(PopView::ChatLayout, window, cx)),
+            )
+            .into_any_element();
         let top_rows = [
             machine_row.into_any_element(),
             h_flex().child(open_row).child(caret).into_any_element(),
@@ -264,7 +298,7 @@ impl ChatApp {
         .chain(script_rows);
         if let (true, Some(folder)) = (not_repo, folder) {
             let init = self.pop_init_row(&h[g], folder, cx);
-            return top_rows.chain([init, browse.into_any_element(), resume]).collect();
+            return top_rows.chain([init, browse.into_any_element(), resume, layout]).collect();
         }
 
         let reading = "Reading git status…";
@@ -306,6 +340,7 @@ impl ChatApp {
                 browse.into_any_element(),
                 changes_row.into_any_element(),
                 resume,
+                layout,
             ])
             .collect()
     }
