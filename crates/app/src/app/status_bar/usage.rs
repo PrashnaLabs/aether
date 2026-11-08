@@ -514,9 +514,6 @@ impl ChatApp {
                     .p(px(10.))
                     .gap(px(10.))
                     .corner(px(10.))
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(overlay(cx))
                     .when(!u.plan_name.is_empty(), |card| {
                         card.child(div().font_medium().text_color(fg).child(u.plan_name.clone()))
                     })
