@@ -237,8 +237,18 @@ impl RenderOnce for CardCarousel {
         };
         let measured = scroll.clone();
         div()
+            .id(SharedString::from(format!("{}-scroll-container", self.id)))
             .relative()
             .w_full()
+            .on_scroll_wheel(|event, _, cx| {
+                let horizontal = match event.delta {
+                    gpui_kit::ScrollDelta::Pixels(delta) => delta.x.abs() > delta.y.abs(),
+                    gpui_kit::ScrollDelta::Lines(delta) => delta.x.abs() > delta.y.abs(),
+                };
+                if horizontal {
+                    cx.stop_propagation();
+                }
+            })
             .child(
                 h_flex()
                     .id(self.id.clone())
