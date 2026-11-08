@@ -10,7 +10,14 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch or PR cancels the older run; tag runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 env:
+  # Pushes and PRs test; tags (and manual runs) build installers. Tag a commit main already tested.
+  RELEASE: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
@@ -23,10 +30,14 @@ jobs:
         include:
           - os: macos-15
             arch: arm64
+            test: true
+          # Intel only packages: arm64 already tests the macOS code.
           - os: macos-15-intel
             arch: x86_64
+            test: false
           - os: ubuntu-24.04
             arch: x86_64
+            test: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +58,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Test
+        if: matrix.test && env.RELEASE != 'true'
         run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
       - name: Backtrace test abort
         if: failure() && runner.os == 'Linux'
@@ -71,7 +83,7 @@ jobs:
         run: desktop-file-validate packaging/linux/dev.aether.Aether.desktop
       # Release tags only: secrets are never exposed to pull request builds.
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
+        if: runner.os == 'macOS' && github.ref_type == 'tag'
         env:
           CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -101,13 +113,15 @@ jobs:
           echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "APPLE_NOTARY_PROFILE=aether-notary" >> "$GITHUB_ENV"
       - name: Package
+        if: env.RELEASE == 'true'
         run: python3 scripts/build.py
       - name: Package Debian installer
-        if: runner.os == 'Linux'
+        if: env.RELEASE == 'true' && runner.os == 'Linux'
         env:
           AETHER_MAINTAINER: ${{ vars.AETHER_MAINTAINER }}
         run: python3 scripts/build.py --format deb
       - uses: actions/upload-artifact@v4
+        if: env.RELEASE == 'true'
         with:
           name: Aether-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
@@ -129,15 +143,17 @@ jobs:
           rustup toolchain install "$toolchain" --profile minimal --component clippy
           rustup default "$toolchain"
       - uses: Swatinem/rust-cache@v2
-      - name: Check
-        run: cargo check --locked --workspace
       - name: Keep LF in test repos
+        if: env.RELEASE != 'true'
         run: git config --global core.autocrlf false
       - name: Test
+        if: env.RELEASE != 'true'
         run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
       - name: Package
+        if: env.RELEASE == 'true'
         run: python scripts/build.py
       - uses: actions/upload-artifact@v4
+        if: env.RELEASE == 'true'
         with:
           name: Aether-windows-x86_64
           path: dist/*
@@ -145,7 +161,7 @@ jobs:
 
   release:
     needs: [build, windows]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
