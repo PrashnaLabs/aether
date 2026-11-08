@@ -271,52 +271,74 @@ impl Render for ChatApp {
                     .when(!self.settings.sidebar_collapsed && !chromeless, |root| {
                         root.child(self.render_sidebar(cx))
                     })
-                    .child(v_flex().flex_1().h_full().min_w_0().min_h_0().map(|main| {
-                        if let Some(view) = fullscreen {
-                            return main.child(aether_terminal::dark(
-                                view.cached(gpui_kit::StyleRefinement::default().size_full()),
-                                cx,
-                            ));
-                        }
-                        if terminal_maximized && let Some(drawer) = drawer {
-                            return main.child(drawer);
-                        }
-                        let Some(body) = body else { return main.children(side) };
-                        main.child(
-                            // Non-chat pages retain their normal header and content.
-                            h_flex()
-                                .relative()
-                                .flex_1()
-                                .min_h_0()
-                                .w_full()
-                                .child(
-                                    v_flex()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .h_full()
+                            .min_w_0()
+                            .min_h_0()
+                            .when(
+                                cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows"))
+                                    && (self.settings.sidebar_collapsed || chromeless)
+                                    && !window.is_fullscreen(),
+                                |main| {
+                                    main.child(
+                                        gpui_kit::component::TitleBar::new()
+                                            .h(gpui_kit::px(36.))
+                                            .bg(cx.theme().background)
+                                            .border_0(),
+                                    )
+                                },
+                            )
+                            .map(|main| {
+                                if let Some(view) = fullscreen {
+                                    return main.child(aether_terminal::dark(
+                                        view.cached(
+                                            gpui_kit::StyleRefinement::default().size_full(),
+                                        ),
+                                        cx,
+                                    ));
+                                }
+                                if terminal_maximized && let Some(drawer) = drawer {
+                                    return main.child(drawer);
+                                }
+                                let Some(body) = body else { return main.children(side) };
+                                main.child(
+                                    // Non-chat pages retain their normal header and content.
+                                    h_flex()
                                         .relative()
                                         .flex_1()
-                                        .h_full()
-                                        .min_w_0()
-                                        .children(header)
-                                        .child(v_flex().flex_1().min_h_0().min_w_0().map(
-                                            |column| {
-                                                match drawer {
-                                                    // the body shrinks and clips so a tall drawer never pushes off-screen
-                                                    Some(drawer) => column
-                                                        .child(
-                                                            v_flex()
-                                                                .flex_1()
-                                                                .min_h_0()
-                                                                .overflow_hidden()
-                                                                .child(body),
-                                                        )
-                                                        .child(drawer),
-                                                    None => column.child(body),
-                                                }
-                                            },
-                                        )),
+                                        .min_h_0()
+                                        .w_full()
+                                        .child(
+                                            v_flex()
+                                                .relative()
+                                                .flex_1()
+                                                .h_full()
+                                                .min_w_0()
+                                                .children(header)
+                                                .child(v_flex().flex_1().min_h_0().min_w_0().map(
+                                                    |column| {
+                                                        match drawer {
+                                                            // the body shrinks and clips so a tall drawer never pushes off-screen
+                                                            Some(drawer) => column
+                                                                .child(
+                                                                    v_flex()
+                                                                        .flex_1()
+                                                                        .min_h_0()
+                                                                        .overflow_hidden()
+                                                                        .child(body),
+                                                                )
+                                                                .child(drawer),
+                                                            None => column.child(body),
+                                                        }
+                                                    },
+                                                )),
+                                        )
+                                        .children(side),
                                 )
-                                .children(side),
-                        )
-                    })),
+                            }),
+                    ),
             )
             .child(self.render_global_status_bar(&view_handle, window, cx))
             .children(self.render_watch(window, cx))

@@ -77,9 +77,14 @@ fn main() {
                         .into_rgba8(),
                 )),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                app_owns_titlebar_drag: cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+                window_decorations: cfg!(target_os = "linux")
+                    .then_some(gpui_kit::WindowDecorations::Client),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Aether".into()),
-                    ..Default::default()
+                    appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
+                    traffic_light_position: cfg!(target_os = "macos")
+                        .then(|| gpui_kit::point(px(12.), px(11.))),
                 }),
                 ..Default::default()
             },
