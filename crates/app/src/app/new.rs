@@ -606,6 +606,7 @@ impl ChatApp {
             btw: HashMap::new(),
             btw_open: false,
             btw_input,
+            file_selection_bar: None,
             selection_bar: None,
             copied: None,
             sessions_made: 0,

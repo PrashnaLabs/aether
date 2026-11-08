@@ -617,6 +617,7 @@ pub(crate) struct ChatApp {
     pub(crate) btw_open: bool,
     pub(crate) btw_input: Entity<TextareaState>,
     /// Chat, window point and text of the reply selection the toolbar acts on.
+    pub(crate) file_selection_bar: Option<(gpui_kit::Point<gpui_kit::Pixels>, std::path::PathBuf)>,
     selection_bar: Option<(i64, gpui_kit::Point<gpui_kit::Pixels>, SharedString)>,
     /// (chat, message) whose Copy button reads "Copied" until the timer clears it.
     copied: Option<(usize, usize)>,

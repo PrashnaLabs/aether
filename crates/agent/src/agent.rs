@@ -256,8 +256,14 @@ impl Agent {
     fn lead_tools(&self, chat: &ChatSession, seeded: bool) -> Option<LeadTools> {
         let specs = match (chat.lead, seeded) {
             (true, _) => crate::orchestrator::tool_specs(),
-            (false, true) => crate::orchestrator::history_specs(),
-            (false, false) => return None,
+            (false, true) => {
+                let mut specs = crate::orchestrator::board_specs();
+                specs.as_array_mut().unwrap().extend(
+                    crate::orchestrator::history_specs().as_array().unwrap().iter().cloned(),
+                );
+                specs
+            }
+            (false, false) => crate::orchestrator::board_specs(),
         };
         Some(LeadTools {
             exe: std::env::current_exe().ok()?,
@@ -578,7 +584,7 @@ impl Agent {
                 settings,
                 &skills,
                 gate,
-                chat.lead.then(|| (chat.key.clone(), self.orch.clone(), self.orch_pending.clone())),
+                Some((chat.key.clone(), self.orch.clone(), self.orch_pending.clone(), chat.lead)),
             ),
             skills,
             invoked,

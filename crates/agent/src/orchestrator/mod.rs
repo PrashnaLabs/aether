@@ -268,6 +268,19 @@ pub fn history_specs() -> Value {
     )
 }
 
+/// Project board tools available to every chat.
+pub fn board_specs() -> Value {
+    Value::Array(
+        tool_specs()
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| matches!(s["name"].as_str(), Some("list_cards" | "add_card" | "move_card")))
+            .cloned()
+            .collect(),
+    )
+}
+
 pub fn forward(sock: &Path, token: &str, tool: &str, args: Value) -> Result<Value, String> {
     let mut stream = connect(sock).map_err(|_| "Aether isn't running".to_string())?;
     let timeout = Duration::from_secs(35);

@@ -692,8 +692,12 @@ impl ChatApp {
         }
         let active = self.right_surface.unwrap_or(Surface::Terminal);
         if active == surface {
-            let tabs =
-                Surface::tabs(self.btw_open, self.right_review_open, self.right_browser_open, self.board_tab);
+            let tabs = Surface::tabs(
+                self.btw_open,
+                self.right_review_open,
+                self.right_browser_open,
+                self.board_tab,
+            );
             self.right_surface = tabs.first().copied();
         }
         cx.notify();
@@ -727,7 +731,12 @@ impl ChatApp {
     }
 
     fn right_panel_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let tabs = Surface::tabs(self.btw_open, self.right_review_open, self.right_browser_open, self.board_tab);
+        let tabs = Surface::tabs(
+            self.btw_open,
+            self.right_review_open,
+            self.right_browser_open,
+            self.board_tab,
+        );
         let active = self.right_surface.filter(|s| tabs.contains(s)).unwrap_or(Surface::Terminal);
         let mut bar = TabBar::new("right-panel-tab-bar")
             .tabs_id("right-panel-tabs")
@@ -857,7 +866,12 @@ impl ChatApp {
                 .tooltip("Expand panel")
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_right_panel(cx))),
         );
-        let tabs = Surface::tabs(self.btw_open, self.right_review_open, self.right_browser_open, self.board_tab);
+        let tabs = Surface::tabs(
+            self.btw_open,
+            self.right_review_open,
+            self.right_browser_open,
+            self.board_tab,
+        );
         for (index, surface) in tabs.into_iter().enumerate() {
             let active = self.right_surface == Some(surface);
             rail = rail.child(
@@ -932,6 +946,8 @@ impl ChatApp {
             let (resize, resize_end) = (cx.entity(), cx.entity());
             v_flex()
                 .id("right-panel")
+                .min_w_0()
+                .overflow_hidden()
                 .flex_none()
                 .relative()
                 .flex_basis(relative(right_panel_share(self.settings.right_panel_share)))
@@ -1061,16 +1077,14 @@ impl ChatApp {
                 .min_h_0()
                 .border_l_1()
                 .border_color(cx.theme().sidebar_border)
-                .on_drag_move(
-                    move |e: &DragMoveEvent<std::rc::Rc<RightPanelResize>>, _, cx| {
-                        let width = f32::from(e.bounds.right()) - f32::from(e.event.position.x);
-                        resize.update(cx, |this, cx| {
-                            this.right_panel_resizing = true;
-                            this.settings.btw_width = btw_width(width);
-                            cx.notify();
-                        })
-                    },
-                )
+                .on_drag_move(move |e: &DragMoveEvent<std::rc::Rc<RightPanelResize>>, _, cx| {
+                    let width = f32::from(e.bounds.right()) - f32::from(e.event.position.x);
+                    resize.update(cx, |this, cx| {
+                        this.right_panel_resizing = true;
+                        this.settings.btw_width = btw_width(width);
+                        cx.notify();
+                    })
+                })
                 .capture_any_mouse_up(move |_, _, cx| {
                     resize_end.update(cx, |this, _| {
                         if std::mem::take(&mut this.right_panel_resizing) {

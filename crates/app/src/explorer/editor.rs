@@ -360,6 +360,52 @@ impl ChatApp {
             .flex_1()
             .h_full()
             .min_w_0()
+            .on_mouse_up(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|_this, ev: &gpui_kit::MouseUpEvent, window, cx| {
+                    let at = ev.position;
+                    cx.defer_in(window, move |this, _, cx| {
+                        let explorer = this.active_project_explorer(cx);
+                        this.file_selection_bar =
+                            explorer.read(cx).active_buffer().and_then(|buffer| {
+                                let (editor, _) = this.explorer_editors.get(&buffer.id)?;
+                                (!editor.read(cx).selected_range().is_empty())
+                                    .then(|| (at, buffer.path.clone()))
+                            });
+                        cx.notify();
+                    });
+                }),
+            )
+            .children(self.file_selection_bar.clone().map(|(at, path)| {
+                gpui_kit::deferred(
+                    gpui_kit::anchored()
+                        .position(point(at.x, at.y - px(8.)))
+                        .anchor(gpui_kit::Anchor::BottomCenter)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(
+                            div()
+                                .occlude()
+                                .p_1()
+                                .bg(cx.theme().popover)
+                                .border_1()
+                                .border_color(border)
+                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                    this.file_selection_bar = None;
+                                    cx.notify();
+                                }))
+                                .child(
+                                    aether_ui::button("file-selection-ask-agent")
+                                        .ghost()
+                                        .xsmall()
+                                        .label("Ask agent")
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.file_selection_bar = None;
+                                            this.ask_agent_about_file(path.clone(), window, cx);
+                                        })),
+                                ),
+                        ),
+                )
+            }))
             .child(tab_bar)
             .when_some(conflict, |el, conflict| el.child(self.render_disk_banner(conflict, cx)))
             .child(if preview {
