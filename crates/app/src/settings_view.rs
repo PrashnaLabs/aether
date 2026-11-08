@@ -1809,7 +1809,7 @@ impl SettingsTab {
             Self::BottomBar => Lucide::PanelBottom,
             Self::Tiling => Lucide::LayoutDashboard,
             Self::Composer => Lucide::MessageSquare,
-            Self::Model => Lucide::Cpu,
+            Self::Model => Lucide::MessageCircle,
             Self::Providers => Lucide::Bot,
             Self::Worktrees => Lucide::GitFork,
             Self::Tools => Lucide::Wrench,

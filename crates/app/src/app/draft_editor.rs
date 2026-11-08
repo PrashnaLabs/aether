@@ -82,7 +82,6 @@ impl ChatApp {
                 .items_center()
                 .justify_center()
                 .p_4()
-                .bg(gpui_kit::black().opacity(0.45))
                 .child(
                     v_flex()
                         .w_full()
@@ -94,7 +93,7 @@ impl ChatApp {
                         .border_1()
                         .border_color(theme.border)
                         .shadow_lg()
-                        .bg(theme.background.opacity(1.))
+                        .bg(theme.background.alpha(1.))
                         .key_context(DRAFT_EDITOR_CONTEXT)
                         .on_action(self.session_listener(
                             cx,
