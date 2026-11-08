@@ -1138,9 +1138,10 @@ impl ChatApp {
                     "notes-session",
                     "notes-socket",
                 ];
-                let show_note = |id: &str| settings.notes_enabled && show(id);
+                let expanded = self.notes_advanced_open || matches.is_some();
+                let show_note = |id: &str| settings.notes_enabled && expanded && show(id);
                 page = page.when(show("notes-enabled") || notes_ids.into_iter().any(show_note), |page| {
-                    let mut section = SettingsSection::new("Notes").when(show("notes-enabled"), |section| section.child(
+                    let mut section = SettingsSection::new("Notes").icon(Icon::new(gpui_kit::assets::IconName::BookOpen)).when(show("notes-enabled"), |section| section.child(
                         div().id("notes-enabled").debug_selector(|| "notes-enabled".into()).child(
                             SettingsRow::new("Enable notes")
                                 .description("Shows Notes in the sidebar and palette, its shortcuts, and Save to note in menus.")
@@ -1150,11 +1151,22 @@ impl ChatApp {
                                         .accessibility_label("Enable notes")
                                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                             let checked = *checked;
+                                            this.notes_advanced_open = false;
                                             this.update_settings(cx, |s| s.notes_enabled = checked);
                                         })),
                                 ),
                         ),
                     ));
+                    if settings.notes_enabled {
+                        section = section.child(h_flex().justify_start().px_3().py_2().child(
+                            aether_ui::button("notes-advanced-toggle").ghost().small()
+                                .icon(if expanded { gpui_kit::assets::IconName::ChevronDown } else { gpui_kit::assets::IconName::ChevronRight })
+                                .label("Advanced settings")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.notes_advanced_open = !this.notes_advanced_open;
+                                    cx.notify();
+                                }))));
+                    }
                     for (id, key, title, description) in [
                         ("notes-directory", "directory", "Notes directory", "Changing this folder leaves existing files in place. Save or close modified notes first."),
                         ("notes-nvim", "nvim", "Neovim executable", "Binary path or command resolved using PATH."),
@@ -1201,7 +1213,7 @@ impl ChatApp {
                         section.child(div().text_sm().text_color(aether_ui::theme::danger_text(cx)).child(error))
                     }))
                 });
-                page = page.when(show("hackernews-enabled"), |page| page.child(SettingsSection::new("Hacker News").child(
+                page = page.when(show("hackernews-enabled"), |page| page.child(SettingsSection::new("Hacker News").icon(Icon::new(gpui_kit::assets::IconName::Flame)).child(
                     div().id("hackernews-enabled").debug_selector(|| "hackernews-enabled".into()).child(
                         SettingsRow::new("Enable Hacker News")
                             .description("Shows Hacker News in the sidebar and palette, and its shortcuts.")
@@ -1222,7 +1234,7 @@ impl ChatApp {
                     ]
                     .into_iter()
                     .filter(|(tool, _, _)| show(tool))
-                    .fold(SettingsSection::new("Tool approvals"), |section, (tool, title, description)| {
+                    .fold(SettingsSection::new("Tool approvals").icon(Icon::new(gpui_kit::assets::IconName::Wrench)), |section, (tool, title, description)| {
                         let policy = settings.tool_policy(tool);
                         section.child(
                             SettingsRow::new(title)
