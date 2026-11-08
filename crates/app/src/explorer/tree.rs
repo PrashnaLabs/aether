@@ -503,8 +503,8 @@ impl ChatApp {
             return true;
         }
         let root = self.notes_explorer(cx).read(cx).root.clone();
-        let allowed =
-            path.starts_with(&root) && path.canonicalize().is_ok_and(|canonical| canonical == path);
+        let allowed = path.starts_with(&root)
+            && aether_core::canonicalize(path).is_ok_and(|canonical| canonical == path);
         if !allowed {
             self.notes.error = Some("Symlink note paths are not allowed.".into());
             cx.notify();

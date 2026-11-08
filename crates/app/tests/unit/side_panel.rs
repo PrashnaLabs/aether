@@ -188,5 +188,5 @@ fn fixed_workspace_tabs_preserve_chat_drafts_and_explorer_buffers(
             );
         })
         .unwrap();
-    std::fs::remove_dir_all(folder).unwrap();
+    let _ = std::fs::remove_dir_all(folder);
 }

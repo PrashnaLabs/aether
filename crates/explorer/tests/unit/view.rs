@@ -140,6 +140,7 @@ fn renamed_paths_retarget_their_tabs() {
     state.retarget_tabs(Path::new("/r/dir"), Path::new("/r/new"));
     state.retarget_tabs(Path::new("/r/other.rs"), Path::new("/r/x.rs"));
     let paths: Vec<_> = state.tabs.iter().map(|t| t.path.to_str().unwrap()).collect();
-    assert_eq!(paths, ["/r/new/a.rs", "/r/x.rs", "/r/dirt.rs"]);
+    let moved = Path::new("/r/new").join("a.rs");
+    assert_eq!(paths, [moved.to_str().unwrap(), "/r/x.rs", "/r/dirt.rs"]);
     assert_eq!(state.tabs[1].title, "x.rs");
 }

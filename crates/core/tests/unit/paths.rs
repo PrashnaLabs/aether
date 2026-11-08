@@ -9,6 +9,7 @@ fn explicit_override_missing_returns_none() {
     assert!(find_binary("sh", "/definitely/not/here-xyz").is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn login_shell_path_is_cached_and_repaired_path_has_extras() {
     assert_eq!(login_shell_path(), login_shell_path());

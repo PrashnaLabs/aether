@@ -11,7 +11,7 @@ const STDERR_TAIL: usize = 40;
 
 pub fn command(opts: &DriverStartOptions, name: &str) -> Option<Command> {
     let bin = find_binary(name, &opts.binary)?;
-    let mut cmd = Command::new(bin);
+    let mut cmd = aether_core::command(bin);
     cmd.current_dir(&opts.cwd);
     cmd.env("PATH", repaired_path());
     for key in

@@ -9,7 +9,9 @@ use aether_ui::ChatStatus;
 use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
-use super::{Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir};
+use super::{
+    Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir,
+};
 use crate::board::model::{Col, lead_move, open_lines};
 use crate::session_workspace::SplitAxis;
 
@@ -326,7 +328,14 @@ impl ChatApp {
                 format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
             })?,
         };
-        let id = self.board_add(title.clone(), text("body"), col, self.lead_project(lead_ix), None, true);
+        let id = self.board_add(
+            title.clone(),
+            text("body"),
+            col,
+            self.lead_project(lead_ix),
+            None,
+            true,
+        );
         Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
     }
 
@@ -644,16 +653,14 @@ impl ChatApp {
                 self.board_link(id, child_id);
                 id
             }
-            None => {
-                self.board_add(
+            None => self.board_add(
                 a.title.clone(),
                 a.task.clone(),
                 Col::Doing,
                 project,
                 Some(child_id),
                 true,
-            )
-            }
+            ),
         };
         let mut reply = json!({
             "id": child_id,

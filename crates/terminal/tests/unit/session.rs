@@ -46,6 +46,7 @@ fn env_sets_terminal_type_path_and_a_missing_locale() {
     assert!(!env.contains_key("LANG"));
 }
 
+#[cfg(unix)]
 #[test]
 fn other_terminals_variables_are_dropped() {
     let names = [
@@ -119,6 +120,8 @@ fn session_update_theme_updates_palette_and_flags_dirty() {
             cell_height: 10,
         }),
         palette: Mutex::new(initial_palette),
+        #[cfg(windows)]
+        job: Mutex::new(None),
     });
     let config = Config { scrolling_history: 100, ..Config::default() };
     let dims = TermSize::new(10, 10);
@@ -141,8 +144,68 @@ fn session_update_theme_updates_palette_and_flags_dirty() {
     assert!(!session.terminate());
 }
 
+#[cfg(unix)]
 #[test]
 fn command_args_pass_command_verbatim() {
     let cmd = r#"echo 'a b' && FOO="$HOME" ls | wc -l"#;
-    assert_eq!(command_args(cmd), vec!["-lc".to_string(), cmd.to_string()]);
+    assert_eq!(command_args("/bin/zsh", cmd), vec!["-lc".to_string(), cmd.to_string()]);
+}
+
+#[test]
+fn powershell_is_told_from_cmd_by_program_name() {
+    assert!(is_powershell(r"C:\Program Files\PowerShell\7\pwsh.exe"));
+    assert!(is_powershell("powershell"));
+    assert!(is_powershell("/usr/bin/pwsh"));
+    assert!(!is_powershell(r"C:\Windows\System32\cmd.exe"));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_shells_run_a_command_and_quote_the_program() {
+    assert_eq!(
+        command_args(r"C:\x\pwsh.exe", "dir"),
+        ["-NoLogo".to_string(), "-Command".into(), "dir".into()]
+    );
+    assert_eq!(command_args("cmd.exe", "dir /b"), ["/C".to_string(), "dir /b".into()]);
+    assert_eq!(login_args("cmd.exe"), Vec::<String>::new());
+    let (program, args) = launch(r"C:\Program Files\x\pwsh.exe", vec![], vec!["A".into()]);
+    assert_eq!(program, "\"C:\\Program Files\\x\\pwsh.exe\"");
+    assert!(args.is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_shell_output_reaches_the_grid() {
+    let size = WindowSize { num_lines: 8, num_cols: 60, cell_width: 8, cell_height: 18 };
+    let palette = Palette::new(false, Rgb { r: 0, g: 0, b: 0 }, Rgb { r: 255, g: 255, b: 255 });
+    let session =
+        Session::spawn_command(&std::env::temp_dir(), "echo aether-ok", size, palette).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !session.notices().any(|n| matches!(n, Notice::Exited(_))) {
+        assert!(Instant::now() < deadline, "shell never exited");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let frame = super::super::grid::snapshot(&session.term.lock(), &palette, false);
+    let rows: Vec<_> = frame.rows.iter().map(|r| r.text.as_str()).collect();
+    assert!(rows.iter().any(|r| r.contains("aether-ok")), "{rows:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_names_the_program_the_shell_is_running() {
+    let size = WindowSize { num_lines: 8, num_cols: 60, cell_width: 8, cell_height: 18 };
+    let palette = Palette::new(false, Rgb { r: 0, g: 0, b: 0 }, Rgb { r: 255, g: 255, b: 255 });
+    let session =
+        Session::spawn_command(&std::env::temp_dir(), "ping -n 20 127.0.0.1", size, palette)
+            .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let job = loop {
+        if let Some(job) = session.running_job() {
+            break job;
+        }
+        assert!(Instant::now() < deadline, "no running program was reported");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(job.to_lowercase(), "ping");
+    assert!(session.terminate());
 }

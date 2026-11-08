@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use futures::channel::mpsc::UnboundedSender;
@@ -39,7 +39,7 @@ pub fn cli_version(binary: &Path) -> Option<String> {
 }
 
 fn run_version(binary: &Path, timeout: Duration) -> Option<String> {
-    let mut child = Command::new(binary)
+    let mut child = aether_core::command(binary)
         .arg("--version")
         .env("PATH", repaired_path())
         .stdin(Stdio::null())

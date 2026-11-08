@@ -495,11 +495,7 @@ fn rpc(mut cmd: Command, requests: &[(&str, Value)], timeout: Duration) -> Vec<V
 fn kill_group(child: &mut Child) {
     let pid = child.id();
     if pid > 1 {
-        let _ = Command::new("/bin/kill")
-            .args(["-KILL", &format!("-{pid}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        aether_core::signal_process(pid, "KILL", true);
     }
     let _ = child.kill();
     let _ = child.wait();

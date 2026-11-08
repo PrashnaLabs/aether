@@ -126,7 +126,7 @@ fn image_viewer_routes_local_images_and_escape_restores_focus_without_stopping(
         );
     });
     let count = visual.read(|cx| app.read(cx).chats.len());
-    visual.simulate_keystrokes("cmd-n cmd-k cmd-p");
+    visual.simulate_keystrokes("secondary-n secondary-k secondary-p");
     visual.read(|cx| {
         assert_eq!(app.read(cx).chats.len(), count, "New Chat must not run behind the viewer");
         assert!(!app.read(cx).palette_open);
@@ -183,7 +183,7 @@ fn image_viewer_routes_local_images_and_escape_restores_focus_without_stopping(
     });
     visual.run_until_parked();
     let count = visual.read(|cx| app.read(cx).chats.len());
-    visual.simulate_keystrokes("cmd-n");
+    visual.simulate_keystrokes("secondary-n");
     visual.read(|cx| {
         assert_eq!(
             app.read(cx).chats.len(),

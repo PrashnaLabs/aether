@@ -206,8 +206,52 @@ pub(crate) fn icon_cache() -> PathBuf {
     aether_core::config_dir().unwrap_or_else(std::env::temp_dir).join("cache/open-in")
 }
 
+/// Install paths under `%LOCALAPPDATA%\Programs`, `%LOCALAPPDATA%` and the Program Files dirs.
+#[cfg(windows)]
+const WINDOWS_EXES: [(&str, &str); 10] = [
+    ("vscode", r"Microsoft VS Code\Code.exe"),
+    ("vscode-insiders", r"Microsoft VS Code Insiders\Code - Insiders.exe"),
+    ("cursor", r"cursor\Cursor.exe"),
+    ("windsurf", r"Windsurf\Windsurf.exe"),
+    ("sublime", r"Sublime Text\sublime_text.exe"),
+    ("chrome", r"Google\Chrome\Application\chrome.exe"),
+    ("edge", r"Microsoft\Edge\Application\msedge.exe"),
+    ("firefox", r"Mozilla Firefox\firefox.exe"),
+    ("brave", r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ("vivaldi", r"Vivaldi\Application\vivaldi.exe"),
+];
+
+#[cfg(windows)]
+fn discover_windows(known: &[Known]) -> Vec<OpenApp> {
+    let env = |key: &str| std::env::var_os(key).map(PathBuf::from);
+    let local = env("LOCALAPPDATA");
+    let roots: Vec<PathBuf> = [
+        local.as_ref().map(|d| d.join("Programs")),
+        local,
+        env("ProgramFiles"),
+        env("ProgramFiles(x86)"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    known
+        .iter()
+        .filter_map(|k| {
+            if k.id == FINDER_ID {
+                let bundle = env("SystemRoot")?.join("explorer.exe");
+                return Some(OpenApp { id: k.id, name: "File Explorer", bundle, icon: None });
+            }
+            let exe = WINDOWS_EXES.iter().find(|(id, _)| *id == k.id)?.1;
+            let bundle = roots.iter().map(|r| r.join(exe)).find(|p| p.exists())?;
+            Some(OpenApp { id: k.id, name: k.name, bundle, icon: None })
+        })
+        .collect()
+}
+
 /// Blocking: probes the filesystem only. Run off the UI thread.
 pub(crate) fn discover(known: &[Known], home: &Path) -> Vec<OpenApp> {
+    #[cfg(windows)]
+    return discover_windows(known);
     if !cfg!(target_os = "macos") {
         return Vec::new();
     }
@@ -249,6 +293,13 @@ pub(crate) fn open_url(app: &Path, url: &str) -> Result<(), String> {
     open_with(app, url.as_ref())
 }
 
+// explorer.exe exits 1 even when it worked, so only the spawn is checked
+#[cfg(windows)]
+fn open_with(app: &Path, target: &OsStr) -> Result<(), String> {
+    aether_core::command(app).arg(target).spawn().map(drop).map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
 fn open_with(app: &Path, target: &OsStr) -> Result<(), String> {
     let out = Command::new("/usr/bin/open")
         .arg("-a")

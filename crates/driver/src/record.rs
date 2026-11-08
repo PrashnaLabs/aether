@@ -34,7 +34,7 @@ impl Recorder {
             .append(true)
             .open(dir.join(format!("{provider}-{ms}.jsonl")))?;
         let mut cwds: Vec<String> =
-            cwd.canonicalize().into_iter().map(|p| p.display().to_string()).collect();
+            aether_core::canonicalize(cwd).into_iter().map(|p| p.display().to_string()).collect();
         if cwd.is_absolute() {
             cwds.push(cwd.display().to_string());
         }

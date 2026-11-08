@@ -47,7 +47,23 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Test
-        run: cargo test --locked --workspace -- --skip hackernews::client
+        run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client
+      - name: Backtrace test abort
+        if: failure() && runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y gdb >/dev/null
+          for bin in $(find target/debug/deps -maxdepth 1 -type f -executable -name 'aether-*' ! -name '*.so'); do
+            for try in 1 2 3 4 5 6; do
+              gdb -q -batch -ex 'set pagination off' -ex run -ex bt -ex 'thread apply all bt 25' \
+                --args "$bin" --skip hackernews::client > /tmp/gdb.log 2>&1
+              if grep -q SIGABRT /tmp/gdb.log; then
+                grep -vE '^test .* \.\.\. ok$|^\[New Thread|^\[Thread' /tmp/gdb.log
+                exit 0
+              fi
+            done
+          done
+          echo "no abort reproduced in 6 tries"
       - name: Validate packaging
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Validate desktop entry
@@ -63,3 +79,23 @@ jobs:
           name: Aether-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
+
+  windows-check:
+    runs-on: windows-2025
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          toolchain=$(python -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$toolchain" --profile minimal --component clippy
+          rustup default "$toolchain"
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --locked --workspace
+      - name: Keep LF in test repos
+        run: git config --global core.autocrlf false
+      - name: Test
+        run: cargo test --locked --workspace --no-fail-fast -- --skip hackernews::client

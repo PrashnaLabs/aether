@@ -610,14 +610,9 @@ impl ChatApp {
             })
             .ok();
         });
-        if let Some(bar) = self.bulk_bar(
-            "archive-bulk",
-            picked,
-            ids,
-            &[Bulk::Unarchive, Bulk::Delete],
-            false,
-            cx,
-        ) {
+        if let Some(bar) =
+            self.bulk_bar("archive-bulk", picked, ids, &[Bulk::Unarchive, Bulk::Delete], false, cx)
+        {
             sidebar = sidebar.bulk_bar(bar);
         }
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {

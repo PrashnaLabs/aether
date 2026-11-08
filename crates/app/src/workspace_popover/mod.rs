@@ -1,7 +1,6 @@
 use crate::session_workspace::WindowId;
 use aether_ui::theme::Corners;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use aether_git::Branches;
 use aether_ui::{TriggerBounds, popup_height, room};
@@ -105,7 +104,7 @@ impl WorkspacePopover {
 
 fn read_machine() -> Option<String> {
     let run = |program: &str, args: &[&str]| {
-        let out = Command::new(program).args(args).output().ok()?;
+        let out = aether_core::command(program).args(args).output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
     let scutil =

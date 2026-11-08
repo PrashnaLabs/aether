@@ -140,6 +140,7 @@ fn forward_without_listener_says_aether_isnt_running() {
     );
 }
 
+#[cfg(unix)]
 fn serve_once(name: &str, reply: &'static str) -> std::path::PathBuf {
     use std::io::{BufRead, BufReader, Write};
     let p = std::env::temp_dir().join(format!("aether-orch-{name}-{}.sock", std::process::id()));
@@ -157,6 +158,7 @@ fn serve_once(name: &str, reply: &'static str) -> std::path::PathBuf {
     p
 }
 
+#[cfg(unix)]
 #[test]
 fn forward_maps_server_replies() {
     let p = serve_once("ok", r#"{"ok":true,"result":{"n":1}}"#);

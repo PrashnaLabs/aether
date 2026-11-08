@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind, Result};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// `dir/name`, when `name` is a single file or folder name.
 fn child(dir: &Path, name: &str) -> Result<PathBuf> {
@@ -45,8 +45,8 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 #[cfg(not(unix))]
-fn same_file(_: &Path, _: &Path) -> bool {
-    false
+fn same_file(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 /// Moves `path` to the Trash with `/usr/bin/trash` on macOS or `gio trash`
@@ -59,7 +59,7 @@ pub fn trash(path: &Path) -> std::result::Result<(), String> {
     };
     let tool =
         tool.ok_or("No trash command found (/usr/bin/trash or gio), so nothing was deleted.")?;
-    let out = Command::new(&tool)
+    let out = aether_core::command(&tool)
         .args(args)
         .arg(path)
         .stdin(Stdio::null())

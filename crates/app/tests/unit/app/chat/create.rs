@@ -207,6 +207,7 @@ fn switching_chats_always_lands_on_the_chat_tab(cx: &mut gpui_kit::TestAppContex
 
 #[gpui_kit::test]
 fn handoff_copies_the_transcript_to_a_fresh_chat_on_the_target(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {
         ChatApp::with_state(
@@ -266,6 +267,7 @@ fn handoff_copies_the_transcript_to_a_fresh_chat_on_the_target(cx: &mut gpui_kit
 
 #[gpui_kit::test]
 fn a_handoff_links_back_to_its_source_and_a_copy_does_not(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {
         ChatApp::with_state(
@@ -296,6 +298,7 @@ fn a_handoff_links_back_to_its_source_and_a_copy_does_not(cx: &mut gpui_kit::Tes
 
 #[gpui_kit::test]
 fn handoff_finishes_a_running_reply_and_expires_its_requests(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {
         ChatApp::with_state(
@@ -475,6 +478,7 @@ fn switching_agents_keeps_the_chat_and_marks_the_handoff(cx: &mut gpui_kit::Test
 
 #[gpui_kit::test]
 fn handoff_switches_in_place_and_the_sidebar_copies(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {
         ChatApp::with_state(

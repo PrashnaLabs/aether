@@ -149,8 +149,12 @@ fn fake_agent(
     (Agent::with_factory(factory, idle).unwrap(), log, spawns)
 }
 
+fn any_binary() -> String {
+    std::env::current_exe().unwrap().to_string_lossy().into_owned()
+}
+
 fn cli_settings() -> Settings {
-    Settings { provider: Provider::Claude, claude_binary: "/bin/sh".into(), ..Settings::default() }
+    Settings { provider: Provider::Claude, claude_binary: any_binary(), ..Settings::default() }
 }
 
 fn chat(effort: &str) -> ChatSession {
@@ -740,7 +744,7 @@ fn cli_prompt_lists_files_the_agent_cannot_take_inline() {
     let (agent, log, _) = fake_agent(true, Duration::from_secs(600));
     let s = Settings {
         provider: Provider::Antigravity,
-        antigravity_binary: "/bin/sh".into(),
+        antigravity_binary: any_binary(),
         ..Settings::default()
     };
     let files = vec![png("/x/a.png")];

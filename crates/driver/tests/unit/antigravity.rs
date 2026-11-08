@@ -1,6 +1,8 @@
 use super::*;
 use crate::record::fixtures;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::record::last_calls;
@@ -436,6 +438,7 @@ fn terminal_only_prompt_is_refused_without_a_process() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn denying_the_retry_or_cancelling_it_ends_the_turn() {
     let waiting =
@@ -452,6 +455,7 @@ fn denying_the_retry_or_cancelling_it_ends_the_turn() {
 }
 
 /// Fake agy: echoes its args as a delta; without full access every turn hits a denied command.
+#[cfg(unix)]
 const FAKE: &str = r#"#!/bin/sh
 echo '{"event":"init","conversation_id":"c1"}'
 trap 'echo "{\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"error\":\"interrupted\"}}"; exit 1' INT
@@ -466,6 +470,7 @@ while read -r line; do
 done
 "#;
 
+#[cfg(unix)]
 fn fake_agy(name: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("aether-fake-agy-{}-{name}", std::process::id()));
@@ -476,6 +481,7 @@ fn fake_agy(name: &str) -> PathBuf {
     path
 }
 
+#[cfg(unix)]
 fn until(rx: &mut UnboundedReceiver<Update>, stop: fn(&Update) -> bool) -> Vec<Update> {
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut out = Vec::new();
@@ -504,6 +510,7 @@ fn delta(out: &[Update]) -> String {
         .collect()
 }
 
+#[cfg(unix)]
 fn ask_id(out: &[Update]) -> u64 {
     out.iter()
         .find_map(|u| match u {
@@ -513,6 +520,7 @@ fn ask_id(out: &[Update]) -> u64 {
         .unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn approved_retry_respawns_with_full_access_then_back() {
     let bin = fake_agy("retry");
@@ -542,6 +550,7 @@ fn approved_retry_respawns_with_full_access_then_back() {
     let _ = std::fs::remove_dir_all(bin.parent().unwrap());
 }
 
+#[cfg(unix)]
 #[test]
 fn cancel_interrupts_the_process_and_next_prompt_respawns() {
     let bin = fake_agy("cancel");
@@ -683,6 +692,7 @@ fn steer_fixture_marks_the_steer_and_ends_once() {
     assert_eq!(out.iter().filter(|u| matches!(u, Update::Final(_))).count(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn rerun_answer_does_not_block_on_init() {
     let dir = std::env::temp_dir().join(format!("aether-slow-agy-{}", std::process::id()));
@@ -1024,6 +1034,7 @@ fn background_rows_stop_when_agy_exits_or_is_respawned() {
     assert!(s.tools.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn deny_then_next_prompt_still_gets_a_turn() {
     let bin = fake_agy("deny");
@@ -1276,6 +1287,7 @@ fn call_mcp_tool_without_a_tool_name_stays_call_mcp_tool() {
     assert!(input.contains("ServerName"), "{input}");
 }
 
+#[cfg(unix)]
 fn script_agy(name: &str, body: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("aether-script-agy-{}-{name}", std::process::id()));
@@ -1317,6 +1329,7 @@ fn agy_aether_entry_reads_only_the_aether_server() {
     assert_eq!(entry("off", Some(off)).map(|e| e.disabled), Some(true));
 }
 
+#[cfg(unix)]
 #[test]
 fn register_agy_aether_adds_without_env() {
     let (bin, log) = script_agy("add", "true");

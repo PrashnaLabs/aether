@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use crate::{Output, QUICK, STDERR_CAP, binary, drain, git_error, stop};
@@ -88,7 +88,7 @@ fn hunk_patch(diff: &str, ix: usize) -> Option<String> {
 fn run_stdin(top: &Path, args: &[&str], input: String) -> Result<Output, String> {
     let git = binary()
         .ok_or("Git isn't available. Install git or the Xcode Command Line Tools, then retry.")?;
-    let mut child = Command::new(git)
+    let mut child = aether_core::command(git)
         .current_dir(top)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")

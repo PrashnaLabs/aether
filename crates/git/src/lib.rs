@@ -153,7 +153,7 @@ fn run_with(
 ) -> Result<Output, String> {
     let git = binary()
         .ok_or("Git isn't available. Install git or the Xcode Command Line Tools, then retry.")?;
-    let mut child = Command::new(git)
+    let mut child = aether_core::command(git)
         .current_dir(cwd)
         // an inherited GIT_DIR would point every command at some other repo
         .env_remove("GIT_DIR")
@@ -206,11 +206,7 @@ fn run_with(
 /// SIGTERM first so git can clean up after itself (a half-made worktree, lock
 /// files), then SIGKILL if it hasn't exited after a short grace.
 fn stop(mut child: Child) {
-    let _ = Command::new("/bin/kill")
-        .args(["-TERM", &child.id().to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    aether_core::signal_process(child.id(), "TERM", false);
     let grace = Instant::now() + Duration::from_secs(2);
     while Instant::now() < grace {
         if let Ok(Some(_)) = child.try_wait() {

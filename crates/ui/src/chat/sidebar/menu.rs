@@ -152,17 +152,23 @@ pub(super) fn chat_menu(
         Some((targets, on_pick)) => {
             let id = chat.id;
             let icon = Some(Icon::new(Lucide::Forward));
-            menu.submenu_with_icon(icon, "Continue in new chat", window, cx, move |mut menu, _, _| {
-                for &target in &targets {
-                    let on_pick = on_pick.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(target.label())
-                            .icon(crate::provider_icon(target))
-                            .on_click(move |_, window, cx| on_pick(id, target, window, cx)),
-                    );
-                }
-                menu
-            })
+            menu.submenu_with_icon(
+                icon,
+                "Continue in new chat",
+                window,
+                cx,
+                move |mut menu, _, _| {
+                    for &target in &targets {
+                        let on_pick = on_pick.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(target.label())
+                                .icon(crate::provider_icon(target))
+                                .on_click(move |_, window, cx| on_pick(id, target, window, cx)),
+                        );
+                    }
+                    menu
+                },
+            )
         }
         _ => menu,
     };

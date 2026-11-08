@@ -122,13 +122,15 @@ pub fn effective_drawer_height(desired: f32, window: f32, min: f32, maximized: b
 }
 
 /// Resolves the working directory for the global terminal.
-/// Falls back to $HOME if workspace is empty or invalid.
+/// Falls back to the home folder if workspace is empty or invalid.
 pub fn resolve_global_folder(workspace: &str) -> PathBuf {
     let path = Path::new(workspace);
     if !workspace.is_empty() && path.is_dir() {
         path.to_path_buf()
     } else {
-        std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+        Some(aether_core::home_dir())
+            .filter(|home| !home.as_os_str().is_empty())
+            .unwrap_or_else(|| PathBuf::from("/"))
     }
 }
 

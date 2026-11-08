@@ -31,7 +31,7 @@ serde_json.workspace = true
 tokio.workspace = true
 
 # The browser panel embeds a native webview as a child of the window.
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux", windows))'.dependencies]
 wry.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -44,6 +44,9 @@ resvg = { version = "0.46", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
 
 
 [dev-dependencies]

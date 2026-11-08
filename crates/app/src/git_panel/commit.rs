@@ -555,18 +555,16 @@ impl ChatApp {
                     .text_xs()
                     .text_color(muted)
                     .child(div().flex_1().min_w_0().child(hint))
-                    .when(cfg!(unix), |row| {
-                        row.child(
-                            aether_ui::button("git-open-terminal")
-                                .outline()
-                                .xsmall()
-                                .icon(IconName::SquareTerminal)
-                                .label("Open terminal")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_terminal(window, cx)
-                                })),
-                        )
-                    })
+                    .child(
+                        aether_ui::button("git-open-terminal")
+                            .outline()
+                            .xsmall()
+                            .icon(IconName::SquareTerminal)
+                            .label("Open terminal")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_terminal(window, cx)),
+                            ),
+                    )
             });
         Some(
             v_flex()
