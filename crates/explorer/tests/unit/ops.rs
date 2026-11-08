@@ -52,3 +52,19 @@ fn case_only_rename_works_on_either_kind_of_disk() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[cfg(windows)]
+#[test]
+fn trash_sends_files_and_folders_to_the_recycle_bin() {
+    let dir = std::env::temp_dir().join(format!("aether-trash-{}", std::process::id()));
+    let folder = dir.join("it's a folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("inner.txt"), "x").unwrap();
+    let file = dir.join("a file.txt");
+    std::fs::write(&file, "x").unwrap();
+    trash(&file).unwrap();
+    trash(&folder).unwrap();
+    assert!(!file.exists() && !folder.exists());
+    assert!(trash(&dir.join("missing.txt")).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
