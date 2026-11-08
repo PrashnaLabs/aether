@@ -173,6 +173,7 @@ artifacts and SHA-256 checksum files to `dist/`.
 | --- | --- | --- |
 | macOS, Apple Silicon or Intel | `Aether-<version>-macos-<arch>.dmg` | `--format app`, `--format tar` |
 | Linux, x86_64 or aarch64, glibc | `Aether-<version>-linux-<arch>.tar.gz` | `--format deb` |
+| Windows, x86_64 | `Aether-<version>-windows-<arch>.zip` | |
 
 The DMG includes an Applications shortcut. Drag Aether into Applications.
 `--format app` writes `dist/Aether.app`, which can be launched with

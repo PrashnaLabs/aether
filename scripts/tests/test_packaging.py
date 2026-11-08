@@ -61,6 +61,15 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(offset, len(data))
         self.assertEqual(chunks, 7)
 
+    def test_env_value_reads_dotenv_when_environment_lacks_key(self):
+        env = self.root / ".env"
+        env.write_text('OTHER=x\nAETHER_TEST_KEY="Name <a@b.c>"\n')
+        self.assertEqual(build.env_value("AETHER_TEST_KEY", env), "Name <a@b.c>")
+        self.assertIsNone(build.env_value("AETHER_TEST_MISSING", env))
+        os.environ["AETHER_TEST_KEY"] = "from env"
+        self.addCleanup(os.environ.pop, "AETHER_TEST_KEY")
+        self.assertEqual(build.env_value("AETHER_TEST_KEY", env), "from env")
+
     def test_first_identity_reads_the_first_valid_certificate(self):
         hash = "A" * 40
         listing = f'  1) {hash} "Apple Development: a (B)"\n     1 valid identities found\n'
