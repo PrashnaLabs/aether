@@ -1146,27 +1146,26 @@ impl ChatApp {
                             SettingsRow::new("Enable notes")
                                 .description("Shows Notes in the sidebar and palette, its shortcuts, and Save to note in menus.")
                                 .control(
-                                    Switch::new("notes-enabled-setting")
+                                    h_flex().gap_2().items_center().child(Switch::new("notes-enabled-setting")
                                         .checked(settings.notes_enabled)
                                         .accessibility_label("Enable notes")
                                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                             let checked = *checked;
                                             this.notes_advanced_open = false;
                                             this.update_settings(cx, |s| s.notes_enabled = checked);
-                                        })),
+                                        })))
+                                        .when(settings.notes_enabled, |row| row.child(
+                                            aether_ui::button("notes-advanced-toggle").ghost().small()
+                                                .icon(if expanded { gpui_kit::assets::IconName::ChevronUp } else { gpui_kit::assets::IconName::ChevronDown })
+                                                .accessibility_label("Advanced notes settings")
+                                                .tooltip(if expanded { "Hide advanced settings" } else { "Show advanced settings" })
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.notes_advanced_open = !this.notes_advanced_open;
+                                                    cx.notify();
+                                                })))),
                                 ),
                         ),
                     ));
-                    if settings.notes_enabled {
-                        section = section.child(h_flex().justify_start().px_3().py_2().child(
-                            aether_ui::button("notes-advanced-toggle").ghost().small()
-                                .icon(if expanded { gpui_kit::assets::IconName::ChevronDown } else { gpui_kit::assets::IconName::ChevronRight })
-                                .label("Advanced settings")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.notes_advanced_open = !this.notes_advanced_open;
-                                    cx.notify();
-                                }))));
-                    }
                     for (id, key, title, description) in [
                         ("notes-directory", "directory", "Notes directory", "Changing this folder leaves existing files in place. Save or close modified notes first."),
                         ("notes-nvim", "nvim", "Neovim executable", "Binary path or command resolved using PATH."),
