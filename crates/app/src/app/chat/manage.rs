@@ -157,7 +157,7 @@ impl ChatApp {
             cancel.cancel();
         }
         self.agent.close_session(&chat.id.to_string());
-        self.drop_side_cards(chat.id);
+        self.drop_btw(chat.id);
         self.close_terminal(chat.id, cx);
         self.unwatch_chat(chat.id, cx);
         self.cancel_voice_of(chat.id, cx);

@@ -938,6 +938,9 @@ pub struct Settings {
     pub right_panel_share: f32,
     #[serde(default)]
     pub right_panel_collapsed: bool,
+    /// BTW sidebar width in px (Tabbed layout).
+    #[serde(default = "default_background_panel_width")]
+    pub btw_width: f32,
     #[serde(default)]
     pub tile_layout: TileLayout,
     /// Share of the width the Stack layout's first pane takes, 0.3–0.8.
@@ -1083,6 +1086,7 @@ impl Default for Settings {
             chat_layout: ChatLayout::Tabbed,
             right_panel_share: default_right_panel_share(),
             right_panel_collapsed: false,
+            btw_width: default_background_panel_width(),
             tile_layout: TileLayout::Manual,
             tile_ratio: 0.55,
             tile_gap: 0.,

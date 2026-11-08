@@ -387,7 +387,7 @@ impl ChatApp {
         };
         let id = chat.id;
         self.agent.close_session(&id.to_string());
-        self.drop_side_cards(id);
+        self.drop_btw(id);
         let session = (provider == Provider::OpenRouter).then(|| self.next_session_id());
         let chat = &mut self.chats[ix];
         if let Some(last) = chat.messages.last_mut() {

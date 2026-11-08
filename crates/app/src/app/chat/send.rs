@@ -109,7 +109,7 @@ impl ChatApp {
                 self.composer.update(cx, |s, cx| s.clean(window, cx));
                 self.composer_history_index = None;
                 self.composer_draft = None;
-                self.ask_side(self.active, question, cx);
+                self.ask_btw(self.active, question, cx);
             }
             return;
         }

@@ -1023,8 +1023,9 @@ impl RenderOnce for Composer {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let focused = self.input.focus_handle(cx).is_focused(window);
         let input = self.input.clone();
+        let key = input.entity_id();
         let spelling = window.use_keyed_state(
-            SharedString::from(format!("composer-spelling-{}", input.entity_id())),
+            SharedString::from(format!("composer-spelling-{key}")),
             cx,
             |_, cx| super::spellcheck::Spellcheck::new(input, cx),
         );
@@ -1034,7 +1035,7 @@ impl RenderOnce for Composer {
             if folded { 1. } else { 0. }
         } else {
             transition(
-                "composer-fold",
+                format!("composer-fold-{key}"),
                 if folded { 1. } else { 0. },
                 Transition::new(FOLD_TRANSITION),
                 window,
@@ -1045,7 +1046,7 @@ impl RenderOnce for Composer {
             if resting { 0.7 } else { 1. }
         } else {
             transition(
-                "composer-rest",
+                format!("composer-rest-{key}"),
                 if resting { 0.7 } else { 1. },
                 Transition::new(FOLD_TRANSITION),
                 window,
@@ -1055,7 +1056,7 @@ impl RenderOnce for Composer {
         let has_attachments = self.attachments.is_some();
         let scope = self.attach_scope;
         let last = window
-            .use_keyed_state("composer-attach-last", cx, |_, _| {
+            .use_keyed_state(format!("composer-attach-last-{key}"), cx, |_, _| {
                 Rc::new(RefCell::new(None::<(u64, AttachBuilder)>))
             })
             .read(cx)
@@ -1115,7 +1116,9 @@ impl RenderOnce for Composer {
                 )
         });
         let measurements = window
-            .use_keyed_state("composer-measurements", cx, |_, _| ComposerMeasurements::default())
+            .use_keyed_state(format!("composer-measurements-{key}"), cx, |_, _| {
+                ComposerMeasurements::default()
+            })
             .read(cx)
             .clone();
         let body_cell = measurements.body;

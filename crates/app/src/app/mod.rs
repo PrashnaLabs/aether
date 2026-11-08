@@ -611,9 +611,11 @@ pub(crate) struct ChatApp {
     pub(crate) attaching: HashMap<i64, usize>,
     /// Reply text each chat's next message quotes, by chat id.
     quotes: HashMap<i64, SharedString>,
-    /// In-memory `/btw` cards per chat id, oldest first; never saved.
-    pub(crate) side: HashMap<i64, Vec<chat::SideCard>>,
-    side_runs: u64,
+    /// In-memory `/btw` thread per chat id; one thread, many follow-ups; never saved.
+    pub(crate) btw: HashMap<i64, chat::BtwThread>,
+    /// Whether the BTW panel shows (right sidebar in Tabbed, a tab otherwise).
+    pub(crate) btw_open: bool,
+    pub(crate) btw_input: Entity<TextareaState>,
     /// Chat, window point and text of the reply selection the toolbar acts on.
     selection_bar: Option<(i64, gpui_kit::Point<gpui_kit::Pixels>, SharedString)>,
     /// (chat, message) whose Copy button reads "Copied" until the timer clears it.

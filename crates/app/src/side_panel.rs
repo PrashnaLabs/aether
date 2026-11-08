@@ -35,15 +35,19 @@ pub(crate) enum SideTab {
 pub(crate) enum Surface {
     Browser,
     Board,
+    Btw,
     Terminal,
     Files,
     Review,
 }
 
 impl Surface {
-    /// Tab order in the right panel: Terminal and Files fixed, Review then Browser closable.
-    pub(crate) fn tabs(review: bool, browser: bool, board: bool) -> Vec<Self> {
+    /// Tab order in the right panel: Terminal and Files fixed, BTW and Review then Browser closable.
+    pub(crate) fn tabs(btw: bool, review: bool, browser: bool, board: bool) -> Vec<Self> {
         let mut tabs = vec![Self::Terminal, Self::Files];
+        if btw {
+            tabs.push(Self::Btw);
+        }
         if review {
             tabs.push(Self::Review);
         }
@@ -57,11 +61,12 @@ impl Surface {
     }
 
     pub(crate) fn closable(self) -> bool {
-        matches!(self, Self::Review | Self::Browser | Self::Board)
+        matches!(self, Self::Btw | Self::Review | Self::Browser | Self::Board)
     }
 
     pub(crate) fn label(self) -> &'static str {
         match self {
+            Self::Btw => "By the way",
             Self::Browser => "Browser",
             Self::Board => "Board",
             Self::Terminal => "Terminal",
@@ -72,6 +77,7 @@ impl Surface {
 
     pub(crate) fn icon(self) -> Lucide {
         match self {
+            Self::Btw => Lucide::MessageCircle,
             Self::Browser => Lucide::Globe,
             Self::Board => Lucide::LayoutDashboard,
             Self::Terminal => Lucide::Terminal,
@@ -87,6 +93,7 @@ impl Surface {
             Self::Board => SideTab::Board,
             Self::Terminal => SideTab::Terminal,
             Self::Files | Self::Review => SideTab::Explorer,
+            Self::Btw => SideTab::Agent,
         }
     }
 
@@ -96,7 +103,7 @@ impl Surface {
             Self::Review => {
                 Some(if diff_open { ExplorerView::Diff } else { ExplorerView::Changes })
             }
-            Self::Browser | Self::Board | Self::Terminal => None,
+            Self::Browser | Self::Board | Self::Btw | Self::Terminal => None,
         }
     }
 }
@@ -126,6 +133,11 @@ pub(crate) fn chat_body_in_sidebar(layout: ChatLayout, side_open: bool) -> bool 
 /// Panel share bounds: chat 40% / panel 60% by default, capped 25–80%.
 pub(crate) fn right_panel_share(share: f32) -> f32 {
     share.clamp(0.25, 0.8)
+}
+
+/// BTW sidebar width bounds in px.
+pub(crate) fn btw_width(width: f32) -> f32 {
+    width.clamp(240., 640.)
 }
 
 fn right_panel_collapsed(layout: ChatLayout, collapsed: bool) -> bool {
@@ -601,6 +613,16 @@ impl ChatApp {
                     .anchor(Anchor::TopRight)
                     .when_some(pop, |p, pop| p.content(pop));
 
+            let btw = icon_chip("btw-toggle", self.btw_open, cx)
+                .selected(self.btw_open)
+                .icon(Lucide::MessageCircle)
+                .accessibility_label("By the way")
+                .tooltip("By the way")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.btw_open = !this.btw_open;
+                    cx.notify();
+                }));
+            bar = bar.action(btw);
             if let Some(toggle) = self.background_toggle(cx) {
                 bar = bar.action(toggle);
             }
@@ -645,6 +667,7 @@ impl ChatApp {
     ) {
         self.right_surface = Some(surface);
         match surface {
+            Surface::Btw => {}
             Surface::Browser => self.open_browser_tab(window, cx),
             Surface::Board => {}
             Surface::Terminal => self.open_terminal(window, cx),
@@ -658,6 +681,7 @@ impl ChatApp {
 
     pub(crate) fn close_surface(&mut self, surface: Surface, cx: &mut Context<Self>) {
         match surface {
+            Surface::Btw => self.btw_open = false,
             Surface::Review => self.right_review_open = false,
             Surface::Browser => {
                 self.right_browser_open = false;
@@ -669,10 +693,15 @@ impl ChatApp {
         let active = self.right_surface.unwrap_or(Surface::Terminal);
         if active == surface {
             let tabs =
-                Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
+                Surface::tabs(self.btw_open, self.right_review_open, self.right_browser_open, self.board_tab);
             self.right_surface = tabs.first().copied();
         }
         cx.notify();
+    }
+
+    pub(crate) fn open_btw_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.btw_open = true;
+        self.select_surface(Surface::Btw, window, cx);
     }
 
     fn toggle_right_panel(&mut self, cx: &mut Context<Self>) {
@@ -687,6 +716,7 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match surface {
+            Surface::Btw => self.render_btw_panel(cx),
             Surface::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
@@ -697,7 +727,7 @@ impl ChatApp {
     }
 
     fn right_panel_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let tabs = Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
+        let tabs = Surface::tabs(self.btw_open, self.right_review_open, self.right_browser_open, self.board_tab);
         let active = self.right_surface.filter(|s| tabs.contains(s)).unwrap_or(Surface::Terminal);
         let mut bar = TabBar::new("right-panel-tab-bar")
             .tabs_id("right-panel-tabs")
@@ -721,16 +751,26 @@ impl ChatApp {
             }
             bar = bar.tab(tab);
         }
+        let btw_open = self.btw_open;
         let review_open = self.right_review_open;
         let browser_open = self.right_browser_open;
         let board_open = self.board_tab;
         let add = {
             let view = cx.entity();
             move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                let v0 = view.clone();
                 let v1 = view.clone();
                 let v2 = view.clone();
                 let v3 = view.clone();
                 menu.item(
+                    PopupMenuItem::new("By the way")
+                        .icon(Lucide::MessageCircle)
+                        .disabled(btw_open)
+                        .on_click(move |_, window, cx| {
+                            v0.update(cx, |this, cx| this.open_btw_surface(window, cx))
+                        }),
+                )
+                .item(
                     PopupMenuItem::new("Review")
                         .icon(Lucide::FileDiff)
                         .disabled(review_open)
@@ -817,7 +857,7 @@ impl ChatApp {
                 .tooltip("Expand panel")
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_right_panel(cx))),
         );
-        let tabs = Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
+        let tabs = Surface::tabs(self.btw_open, self.right_review_open, self.right_browser_open, self.board_tab);
         for (index, surface) in tabs.into_iter().enumerate() {
             let active = self.right_surface == Some(surface);
             rail = rail.child(
@@ -1002,16 +1042,68 @@ impl ChatApp {
             SideTab::Board => self.render_board_tab(cx),
         };
         let bar = self.side_tab_bar(window, cx);
-        Some(
-            v_flex()
-                .id("chat-tabs")
-                .flex_1()
-                .min_w_0()
+        let workspace = v_flex()
+            .id("chat-tabs")
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .child(bar)
+            .child(content)
+            .into_any_element();
+        if self.btw_open {
+            let (resize, resize_end) = (cx.entity(), cx.entity());
+            let panel = v_flex()
+                .id("btw-sidebar")
+                .flex_none()
+                .relative()
+                .w(px(btw_width(self.settings.btw_width)))
                 .h_full()
-                .child(bar)
-                .child(content)
-                .into_any_element(),
-        )
+                .min_h_0()
+                .border_l_1()
+                .border_color(cx.theme().sidebar_border)
+                .on_drag_move(
+                    move |e: &DragMoveEvent<std::rc::Rc<RightPanelResize>>, _, cx| {
+                        let width = f32::from(e.bounds.right()) - f32::from(e.event.position.x);
+                        resize.update(cx, |this, cx| {
+                            this.right_panel_resizing = true;
+                            this.settings.btw_width = btw_width(width);
+                            cx.notify();
+                        })
+                    },
+                )
+                .capture_any_mouse_up(move |_, _, cx| {
+                    resize_end.update(cx, |this, _| {
+                        if std::mem::take(&mut this.right_panel_resizing) {
+                            crate::settings::save(&this.settings);
+                        }
+                    })
+                })
+                .child(
+                    resize_handle::<RightPanelResize, RightPanelResize>(
+                        "btw-resize",
+                        Axis::Horizontal,
+                    )
+                    .inside(HandleEdge::Leading)
+                    .with_appearance(resize_handle_appearance())
+                    .on_drag(RightPanelResize, |_: std::rc::Rc<RightPanelResize>, _, _, cx| {
+                        cx.new(|_| RightPanelResize)
+                    }),
+                )
+                .child(self.render_btw_panel(cx))
+                .into_any_element();
+            Some(
+                h_flex()
+                    .id("chat-tabbed-btw")
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(workspace)
+                    .child(panel)
+                    .into_any_element(),
+            )
+        } else {
+            Some(workspace)
+        }
     }
 }
 
