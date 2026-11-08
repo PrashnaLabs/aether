@@ -584,6 +584,7 @@ impl ChatApp {
             skills: aether_agent::skills::load_all(),
             skill_tab: SkillSource::Aether,
             settings_tab: SettingsTab::default(),
+            settings_provider: aether_core::Provider::Claude,
             notes_advanced_open: false,
             settings_search_input,
             font_select,

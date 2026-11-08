@@ -585,6 +585,7 @@ pub(crate) struct ChatApp {
     pub(crate) skills: Vec<Skill>,
     pub(crate) skill_tab: SkillSource,
     pub(crate) settings_tab: SettingsTab,
+    pub(crate) settings_provider: Provider,
     pub(crate) notes_advanced_open: bool,
     pub(crate) settings_search_input: Entity<InputState>,
     pub(crate) font_select: Entity<SelectState<SearchableVec<FontItem>>>,

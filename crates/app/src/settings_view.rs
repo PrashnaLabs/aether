@@ -1012,10 +1012,73 @@ impl ChatApp {
                                 .control(field_area(&self.instructions).aria_label("Custom instructions")))) })) });
             }
             SettingsTab::Providers => {
+                if matches.is_none() {
+                    let cards = CLIS.into_iter().map(|provider| {
+                        let installed =
+                            self.probes.get(&provider).is_some_and(|probe| probe.installed);
+                        let status = if self.probes.get(&provider).is_none() {
+                            "Checking…"
+                        } else if installed {
+                            "Available"
+                        } else {
+                            "Not installed"
+                        };
+                        ChoiceCard::new(
+                            format!("provider-card-{}", provider.key()),
+                            provider.label(),
+                        )
+                        .selected(self.settings_provider == provider)
+                        .preview(
+                            v_flex()
+                                .h(px(76.))
+                                .w_full()
+                                .gap_2()
+                                .items_center()
+                                .justify_center()
+                                .child(aether_ui::provider_icon(provider).size(px(24.)))
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(
+                                            Icon::new(if installed {
+                                                gpui_kit::assets::IconName::Check
+                                            } else {
+                                                gpui_kit::assets::IconName::Circle
+                                            })
+                                            .size(px(10.)),
+                                        )
+                                        .child(status),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.settings_provider = provider;
+                            cx.notify();
+                        }))
+                    });
+                    page = page.child(
+                        SettingsSection::new("Coding agents")
+                            .icon(Icon::new(gpui_kit::assets::IconName::Bot))
+                            .child(
+                                div().p_4().child(
+                                    CardCarousel::new(
+                                        "provider-cards",
+                                        CLIS.iter()
+                                            .position(|p| *p == self.settings_provider)
+                                            .unwrap_or(0),
+                                    )
+                                    .compact()
+                                    .children(cards),
+                                ),
+                            ),
+                    );
+                }
                 let root = settings.workspace_root.clone();
                 page = page
 
-                    .when(show("workspace"), |page| { page.child(SettingsSection::new("Workspace").when(show("workspace"), |section| { section.child(div().id("workspace").debug_selector(|| "workspace".into()).child(SettingsRow::new("Folder")
+                    .when(show("workspace"), |page| { page.child(SettingsSection::new("Workspace").icon(Icon::new(gpui_kit::assets::IconName::Folder)).when(show("workspace"), |section| { section.child(div().id("workspace").debug_selector(|| "workspace".into()).child(SettingsRow::new("Folder")
                                 .description(
                                     "Coding agents run here. Defaults to your home folder.",
                                 )
@@ -1058,8 +1121,8 @@ impl ChatApp {
                                                 })),
                                         ),
                                 ))) })) })
-                    .when(show("claude") || show("codex") || show("pi") || show("opencode") || show("antigravity"), |page| { page.child(CLIS.into_iter().filter(|p| show(p.key())).fold(
-                        SettingsSection::new("Coding agents"),
+                    .when(show("claude") || show("codex") || show("pi") || show("opencode") || show("antigravity"), |page| { page.child(CLIS.into_iter().filter(|p| show(p.key()) && (matches.is_some() || *p == self.settings_provider)).fold(
+                        SettingsSection::new("Agent configuration").icon(Icon::new(gpui_kit::assets::IconName::Settings)),
                         |section, p| {
                             let binary = DriverStartOptions::for_provider(settings, p, "").binary;
                             let access = settings.default_access(p);
@@ -1070,7 +1133,7 @@ impl ChatApp {
                             )
                             .accessibility_label(format!("{} default access mode", p.label()))
                             .dropdown_menu_with_anchor(
-                                Anchor::TopRight,
+                                Anchor::TopLeft,
                                 move |mut menu: PopupMenu, _, _| {
                                     menu = settings_dropdown_menu(menu);
                                     for &mode in AccessMode::for_provider(p) {
@@ -1097,8 +1160,8 @@ impl ChatApp {
                                     .description(provider_status(self.probes.get(&p), &binary))
                                     .stacked()
                                     .control(
-                                        h_flex()
-                                            .gap_3()
+                                        v_flex().gap_4()
+                                            .child(h_flex().gap_3()
                                             .child(labeled_input(
                                                 "Binary path",
                                                 &self.binary_inputs[&p],
@@ -1108,7 +1171,7 @@ impl ChatApp {
                                                 "Default model",
                                                 &self.model_inputs[&p],
                                                 muted,
-                                            ))
+                                            )))
                                             .child(
                                                 v_flex()
                                                     .gap_1()
@@ -1118,7 +1181,7 @@ impl ChatApp {
                                                             .text_color(muted)
                                                             .child("Default access mode"),
                                                     )
-                                                    .child(access_picker),
+                                                    .child(h_flex().child(access_picker)),
                                             ),
                                     ),
                             )
@@ -1644,6 +1707,7 @@ fn labeled_input(
 ) -> impl IntoElement {
     v_flex()
         .flex_1()
+        .min_w_0()
         .gap_1()
         .child(div().text_xs().text_color(muted).child(label))
         .child(field(input).aria_label(label))

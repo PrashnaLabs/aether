@@ -310,7 +310,7 @@ impl ChatApp {
                     .px_3()
                     .py_2()
                     .gap_2()
-                    .items_start()
+                    .items_center()
                     .text_xs()
                     .text_color(muted)
                     .child(Icon::new(Lucide::CircleCheck).size(rems(0.875)).flex_none())
