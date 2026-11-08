@@ -54,11 +54,8 @@ fn side_prompt(question: &str) -> String {
 
 /// Follow-ups carry earlier turns so the side session stays coherent.
 fn btw_prompt(thread: &BtwThread, question: &str) -> String {
-    let prior: Vec<String> = thread
-        .turns
-        .iter()
-        .map(|t| format!("Q: {}\nA: {}", t.question, t.answer))
-        .collect();
+    let prior: Vec<String> =
+        thread.turns.iter().map(|t| format!("Q: {}\nA: {}", t.question, t.answer)).collect();
     let question = if prior.is_empty() {
         question.to_string()
     } else {
@@ -90,12 +87,7 @@ fn empty_note(turn: &BtwTurn) -> Option<&'static str> {
 
 impl ChatApp {
     /// Asks one question in the chat's BTW thread, opening its panel.
-    pub(in crate::app) fn ask_btw(
-        &mut self,
-        ix: usize,
-        question: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::app) fn ask_btw(&mut self, ix: usize, question: String, cx: &mut Context<Self>) {
         let chat = &self.chats[ix];
         let id = chat.id;
         self.btw_open = true;
@@ -108,8 +100,7 @@ impl ChatApp {
         thread.running = true;
         if chat.provider == Provider::OpenRouter && self.api_key.is_none() {
             let thread = self.btw.get_mut(&id).expect("thread just inserted");
-            thread.turns[turn].error =
-                Some("No OpenRouter API key. Add one in Settings.".into());
+            thread.turns[turn].error = Some("No OpenRouter API key. Add one in Settings.".into());
             thread.turns[turn].running = false;
             thread.running = false;
             return cx.notify();
@@ -125,8 +116,7 @@ impl ChatApp {
                             return;
                         }
                         let last = matches!(update, Update::Final(_));
-                        if this.update(cx, |this, cx| this.apply_btw(id, turn, update, cx))
-                            .is_err()
+                        if this.update(cx, |this, cx| this.apply_btw(id, turn, update, cx)).is_err()
                         {
                             return;
                         }
@@ -208,11 +198,7 @@ impl ChatApp {
     }
 
     fn apply_btw(&mut self, id: i64, turn: usize, update: Update, cx: &mut Context<Self>) {
-        let Some(t) = self
-            .btw
-            .get_mut(&id)
-            .and_then(|thread| thread.turns.get_mut(turn))
-        else {
+        let Some(t) = self.btw.get_mut(&id).and_then(|thread| thread.turns.get_mut(turn)) else {
             return;
         };
         match update {
@@ -254,7 +240,7 @@ impl ChatApp {
     }
 
     /// Drops the chat's BTW thread and its side session.
-    pub(in crate::app) fn drop_btw(&mut self, id: i64) {
+    pub(crate) fn drop_btw(&mut self, id: i64) {
         if let Some(thread) = self.btw.remove(&id) {
             self.drop_thread(id, thread);
         }
@@ -281,27 +267,27 @@ impl ChatApp {
         let thread = self.btw.get(&id);
         let turns = thread.map_or(&[][..], |t| t.turns.as_slice());
         let running = thread.is_some_and(|t| t.running);
-        let body = v_flex().gap_1().children(turns.iter().enumerate().map(|(ix, turn)| {
-            let answer = v_flex()
-                .gap_1()
-                .when(!turn.answer.is_empty(), |d| {
-                    d.child(
-                        aether_ui::Markdown::new(
-                            format!("btw-{id}-{ix}"),
-                            SharedString::from(turn.answer.clone()),
+        let body = v_flex().w_full().min_w_0().gap_1().children(turns.iter().enumerate().map(
+            |(ix, turn)| {
+                let answer = v_flex()
+                    .min_w_0()
+                    .gap_1()
+                    .when(!turn.answer.is_empty(), |d| {
+                        d.child(
+                            aether_ui::Markdown::new(
+                                format!("btw-{id}-{ix}"),
+                                SharedString::from(turn.answer.clone()),
+                            )
+                            .live(turn.running),
                         )
-                        .live(turn.running),
-                    )
-                })
-                .when_some(empty_note(turn), |d, note| {
-                    d.child(div().text_color(cx.theme().muted_foreground).child(note))
-                })
-                .when_some(turn.error.clone(), |d, error| {
-                    d.child(div().text_color(aether_ui::theme::danger_text(cx)).child(error))
-                });
-            v_flex()
-                .gap_1()
-                .children([
+                    })
+                    .when_some(empty_note(turn), |d, note| {
+                        d.child(div().text_color(cx.theme().muted_foreground).child(note))
+                    })
+                    .when_some(turn.error.clone(), |d, error| {
+                        d.child(div().text_color(aether_ui::theme::danger_text(cx)).child(error))
+                    });
+                v_flex().w_full().min_w_0().gap_1().children([
                     aether_ui::UserMessage::new(
                         format!("btw-user-{id}-{ix}"),
                         turn.question.clone(),
@@ -309,67 +295,80 @@ impl ChatApp {
                     .into_any_element(),
                     answer.into_any_element(),
                 ])
-        }));
+            },
+        ));
         let empty = self.btw_input.read(cx).value().trim().is_empty();
-        let input = aether_ui::Composer::new(&self.btw_input)
-            .full_width(true)
-            .action(
-                aether_ui::SendButton::new()
-                    .disabled(empty || running)
-                    .on_send(cx.listener(|this, _, window, cx| this.submit_btw(window, cx))),
-            );
+        let input = aether_ui::Composer::new(&self.btw_input).full_width(true).action(
+            aether_ui::SendButton::new()
+                .disabled(empty || running)
+                .on_send(cx.listener(|this, _, window, cx| this.submit_btw(window, cx))),
+        );
         v_flex()
             .flex_1()
             .min_h_0()
             .h_full()
-            .child(
-                h_flex()
-                    .id("btw-title-bar")
-                    .debug_selector(|| "btw-title-bar".into())
-                    .flex_none()
-                    .h(px(38.))
-                    .px_2()
-                    .justify_between()
-                    .items_center()
-                    .gap_2()
-                    .border_b_1()
-                    .border_color(cx.theme().sidebar_border)
-                    .text_sm()
-                    .child(div().child("By the way"))
-                    .child(
-                        h_flex().gap_1().child(
-                            aether_ui::button("btw-clear")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::Trash)
-                                .accessibility_label("Clear BTW thread")
-                                .tooltip("Clear thread")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.drop_btw(id);
-                                    cx.notify();
-                                })),
+            .when(self.settings.chat_layout == aether_core::ChatLayout::Tabbed, |panel| {
+                panel.child(
+                    h_flex()
+                        .id("btw-title-bar")
+                        .debug_selector(|| "btw-title-bar".into())
+                        .flex_none()
+                        .h(px(38.))
+                        .px_2()
+                        .justify_between()
+                        .items_center()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(cx.theme().sidebar_border)
+                        .text_sm()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    gpui_kit::component::Icon::new(Lucide::MessageCircle)
+                                        .size(px(16.)),
+                                )
+                                .child("By the way"),
                         )
                         .child(
-                            aether_ui::button("btw-close")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::X)
-                                .accessibility_label("Close BTW panel")
-                                .tooltip("Close panel")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.btw_open = false;
-                                    cx.notify();
-                                })),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    aether_ui::button("btw-clear")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(Lucide::Trash)
+                                        .accessibility_label("Clear BTW thread")
+                                        .tooltip("Clear thread")
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.drop_btw(id);
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    aether_ui::button("btw-close")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(Lucide::X)
+                                        .accessibility_label("Close BTW panel")
+                                        .tooltip("Close panel")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.close_surface(Surface::Btw, cx);
+                                        })),
+                                ),
                         ),
-                    ),
-            )
+                )
+            })
             .child(
                 div()
                     .id("btw-scroll")
                     .flex_1()
+                    .min_w_0()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .p_2()
+                    .px_3()
+                    .py_2()
                     .child(body),
             )
             .child(

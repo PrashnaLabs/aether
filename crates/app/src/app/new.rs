@@ -92,7 +92,7 @@ impl ChatApp {
             s
         });
         let commit_tip = key_hint(&CommitChanges, cx)
-            .map_or("Message".into(), |k| format!("Message ({k} to commit)"));
+            .map_or("Commit message".into(), |k| format!("Commit message · {k}"));
         let commit_message =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8).placeholder(commit_tip));
         let scroller = cx.new(|cx| ChatScrollerState::new(0, cx));

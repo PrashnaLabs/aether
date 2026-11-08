@@ -486,7 +486,7 @@ impl ChatApp {
     }
 
     /// What Ask Agent inserts for `path`, relative to this chat's folder; the
-    /// active tab's selected lines come along fenced.
+    /// active tab's exact selected text comes along fenced.
     pub(crate) fn explorer_file_mention(&mut self, path: &Path, cx: &mut Context<Self>) -> String {
         let rel =
             path.strip_prefix(self.active_project_folder()).unwrap_or(path).display().to_string();
@@ -499,7 +499,7 @@ impl ChatApp {
             .map(|(editor, _)| editor.read(cx));
         let lines = editor.filter(|e| !e.selected_range().is_empty()).map(|e| {
             let (start, end) = selected_rows(e.text(), e.selected_range());
-            (start + 1, end + 1, e.text().slice_lines(start..end + 1).to_string())
+            (start + 1, end + 1, e.selected_text().to_string())
         });
         let lines = lines.as_ref().map(|(start, end, text)| (*start, *end, text.as_str()));
         file_mention(&rel, lines, language_from_path(path))

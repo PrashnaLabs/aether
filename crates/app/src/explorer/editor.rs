@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use aether_explorer::{DiskConflict, ExplorerSidebarTab};
 use aether_git::{Change, ChangeKind, Stat};
+use aether_ui::theme::Corners;
 use aether_ui::{
     DiffChange, DiffRow, Markdown, Tab, TabBar, file_icon, file_icon_color, parse_diff,
 };
@@ -383,9 +384,12 @@ impl ChatApp {
                         .anchor(gpui_kit::Anchor::BottomCenter)
                         .snap_to_window_with_margin(px(8.))
                         .child(
-                            div()
+                            h_flex()
+                                .gap_1()
                                 .occlude()
                                 .p_1()
+                                .corner(gpui_kit::rems(0.5))
+                                .shadow_lg()
                                 .bg(cx.theme().popover)
                                 .border_1()
                                 .border_color(border)
@@ -397,10 +401,37 @@ impl ChatApp {
                                     aether_ui::button("file-selection-ask-agent")
                                         .ghost()
                                         .xsmall()
+                                        .icon(Lucide::MessageCircle)
                                         .label("Ask agent")
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.file_selection_bar = None;
                                             this.ask_agent_about_file(path.clone(), window, cx);
+                                        })),
+                                )
+                                .child(
+                                    aether_ui::button("file-selection-copy")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Copy)
+                                        .label("Copy")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            let explorer = this.active_project_explorer(cx);
+                                            let text = explorer
+                                                .read(cx)
+                                                .active_buffer()
+                                                .and_then(|buffer| {
+                                                    this.explorer_editors.get(&buffer.id)
+                                                })
+                                                .map(|(editor, _)| {
+                                                    editor.read(cx).selected_text().to_string()
+                                                });
+                                            if let Some(text) = text {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    text,
+                                                ));
+                                            }
+                                            this.file_selection_bar = None;
+                                            cx.notify();
                                         })),
                                 ),
                         ),

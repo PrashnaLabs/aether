@@ -157,6 +157,8 @@ mod host {
 
     pub(super) struct Host {
         webview: wry::WebView,
+        #[cfg(target_os = "macos")]
+        container: objc2::rc::Retained<objc2_app_kit::NSView>,
         last_bounds: Cell<Option<(i32, i32, i32, i32)>>,
         visible: Cell<bool>,
     }
@@ -248,7 +250,33 @@ mod host {
                 }
             }
 
-            Ok(Self { webview, last_bounds: Cell::new(None), visible: Cell::new(false) })
+            #[cfg(target_os = "macos")]
+            #[allow(unsafe_code)]
+            let container = {
+                use objc2::{MainThreadMarker, MainThreadOnly};
+                use objc2_app_kit::NSView;
+                use wry::WebViewExtMacOS;
+                let wk = webview.webview();
+                let container = NSView::initWithFrame(
+                    NSView::alloc(MainThreadMarker::new().expect("browser on main thread")),
+                    objc2_foundation::NSRect::ZERO,
+                );
+                unsafe {
+                    let parent = wk.superview().expect("webview parent");
+                    container.setClipsToBounds(true);
+                    parent.addSubview(&container);
+                    wk.removeFromSuperview();
+                    container.addSubview(&wk);
+                }
+                container
+            };
+            Ok(Self {
+                webview,
+                #[cfg(target_os = "macos")]
+                container,
+                last_bounds: Cell::new(None),
+                visible: Cell::new(false),
+            })
         }
 
         /// gpui's window coordinates are top-left-origin logical points, which
@@ -266,15 +294,43 @@ mod host {
                 return;
             }
             self.last_bounds.set(Some((left, top, right, bottom)));
+            #[cfg(target_os = "macos")]
+            #[allow(unsafe_code)]
+            unsafe {
+                use objc2_foundation::{NSPoint, NSRect, NSSize};
+                let parent = self.container.superview().expect("browser container parent");
+                self.container.setFrame(NSRect::new(
+                    NSPoint::new(left as f64, parent.bounds().size.height - bottom as f64),
+                    NSSize::new(width as f64, height as f64),
+                ));
+            }
             let _ = self.webview.set_bounds(wry::Rect {
-                position: LogicalPosition::new(f64::from(left), f64::from(top)).into(),
+                position: {
+                    #[cfg(target_os = "macos")]
+                    {
+                        LogicalPosition::new(0.0, 0.0).into()
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        LogicalPosition::new(f64::from(left), f64::from(top)).into()
+                    }
+                },
                 size: LogicalSize::new(f64::from(width), f64::from(height)).into(),
             });
         }
 
         pub fn set_visible(&self, visible: bool) {
             if self.visible.replace(visible) != visible {
+                if !visible {
+                    // Hiding a WKWebView does not resign its native first responder.
+                    self.focus_parent();
+                }
                 let _ = self.webview.set_visible(visible);
+                #[cfg(target_os = "macos")]
+                {
+                    // The containing NSView must also stop intercepting input.
+                    self.container.setHidden(!visible);
+                }
             }
         }
 
@@ -309,18 +365,11 @@ mod host {
                         if is_visible {
                             let () = objc2::msg_send![&tool, close];
                         } else {
+                            let () = objc2::msg_send![&tool, detach];
                             let () = objc2::msg_send![&tool, show];
                             let () = objc2::msg_send![&tool, detach];
                         }
                     }
-                }
-                if let Some((left, top, right, bottom)) = self.last_bounds.get() {
-                    let width = (right - left).max(0);
-                    let height = (bottom - top).max(0);
-                    let _ = self.webview.set_bounds(wry::Rect {
-                        position: LogicalPosition::new(f64::from(left), f64::from(top)).into(),
-                        size: LogicalSize::new(f64::from(width), f64::from(height)).into(),
-                    });
                 }
                 self.last_bounds.set(None);
             }
@@ -406,11 +455,15 @@ impl Browser {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let address =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search or enter address"));
-        let subscription =
-            cx.subscribe_in(&address, window, |this, input, ev: &InputEvent, _, cx| match ev {
+        let subscription = cx.subscribe_in(
+            &address,
+            window,
+            |this, input, ev: &InputEvent, window, cx| match ev {
                 InputEvent::PressEnter { .. } => {
                     let raw = input.read(cx).value().to_string();
                     this.go(&raw, cx);
+                    // Native webview focus does not clear GPUI's focused input.
+                    window.blur(cx);
                     if let Some(host) = &this.host {
                         host.focus();
                     }
@@ -421,7 +474,8 @@ impl Browser {
                     }
                 }
                 _ => {}
-            });
+            },
+        );
         let open_menu = cx.new(|cx| ChoiceMenuState::new(cx).below());
         let pick = cx.subscribe(&open_menu, |this, _, ev: &ChoiceMenuEvent, cx| {
             let ChoiceMenuEvent::Pick(ix) = ev;
@@ -854,20 +908,15 @@ impl Render for Browser {
                     .min_w_0()
                     .child(field(&self.address).small().aria_label("Search or enter address")),
             )
-            .child(
-                aether_ui::button("browser-copy")
-                    .ghost()
-                    .small()
-                    .icon(Lucide::Copy)
-                    .accessibility_label("Copy page address")
-                    .tooltip("Copy address")
-                    .disabled(self.url.is_empty())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
-                            this.url.clone(),
-                        ));
-                    })),
-            )
+            .when(!self.url.is_empty(), |toolbar| {
+                toolbar.child(
+                    gpui_kit::component::clipboard::Clipboard::new("browser-copy")
+                        .small()
+                        .value(self.url.clone())
+                        .accessibility_label("Copy page address")
+                        .tooltip("Copy address"),
+                )
+            })
             .when(cfg!(any(target_os = "macos", windows)), |t| t.child(open_control))
             .child(
                 aether_ui::button("browser-devtools")
@@ -894,40 +943,51 @@ impl Render for Browser {
                 .border_color(border)
                 .child(e)
         });
-        v_flex().id("browser").size_full().bg(bg).child(toolbar).children(open_error).child(
-            div()
-                // clear of the panel's resize band, which a native view would cover
-                .ml(px(5.))
-                .mb(if self.watch_strip { WATCH_STRIP } else { px(0.) })
-                .relative()
-                .flex_1()
-                .min_h_0()
-                .child(
-                    canvas(
-                        move |bounds, window, cx| {
-                            if let Some(host) = &host {
-                                host.set_bounds(bounds);
-                            }
-                            view.update(cx, |browser, cx| browser.sync(bounds, window, cx))
-                        },
-                        |_, _, _, _| {},
-                    )
-                    .absolute()
-                    .size_full(),
-                )
-                .children(placeholder.map(|text| {
-                    div()
+        v_flex()
+            .id("browser")
+            .size_full()
+            .bg(bg)
+            .on_mouse_down_out(cx.listener(|this, _, _, _| {
+                if let Some(host) = &this.host {
+                    host.focus_parent();
+                }
+            }))
+            .child(toolbar)
+            .children(open_error)
+            .child(
+                div()
+                    // clear of the panel's resize band, which a native view would cover
+                    .ml(px(5.))
+                    .mb(if self.watch_strip { WATCH_STRIP } else { px(0.) })
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                if let Some(host) = &host {
+                                    host.set_bounds(bounds);
+                                }
+                                view.update(cx, |browser, cx| browser.sync(bounds, window, cx))
+                            },
+                            |_, _, _, _| {},
+                        )
                         .absolute()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .p_4()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(text)
-                })),
-        )
+                        .size_full(),
+                    )
+                    .children(placeholder.map(|text| {
+                        div()
+                            .absolute()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .p_4()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(text)
+                    })),
+            )
     }
 }
 
@@ -962,6 +1022,7 @@ impl ChatApp {
 
     /// Removes the browser tab, falling back to changes if it was showing.
     pub(crate) fn close_browser_tab(&mut self, cx: &mut Context<Self>) {
+        self.browser.update(cx, |browser, _| browser.set_shown(false));
         self.browser_open = false;
         if self.side_tab == SideTab::Browser {
             self.side_tab = SideTab::Agent;

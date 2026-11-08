@@ -726,7 +726,10 @@ impl ChatApp {
             }
             Surface::Board => self.render_board_tab(cx),
             Surface::Files | Surface::Review => self.render_explorer_page(window, cx),
-            Surface::Terminal => self.side_terminal_content(cx),
+            Surface::Terminal => {
+                self.drawer_for(self.active, window, cx);
+                self.side_terminal_content(cx)
+            }
         }
     }
 
@@ -751,6 +754,21 @@ impl ChatApp {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_surface(surface, window, cx)
                     }));
+            if surface == Surface::Btw {
+                let app = cx.entity();
+                let id = self.chats[self.active].id;
+                tab = tab.context_menu(move |menu, _, _| {
+                    let app = app.clone();
+                    menu.item(PopupMenuItem::new("Delete thread").icon(Lucide::Trash).on_click(
+                        move |_, _, cx| {
+                            app.update(cx, |this, cx| {
+                                this.drop_btw(id);
+                                this.close_surface(Surface::Btw, cx);
+                            })
+                        },
+                    ))
+                });
+            }
             if surface.closable() {
                 tab = tab.on_close(
                     ("right-panel-tab-close", index),
@@ -1036,6 +1054,7 @@ impl ChatApp {
                 v_flex().flex_1().min_h_0().w_full().children(agent).into_any_element()
             }
             SideTab::Terminal => {
+                self.drawer_for(self.active, window, cx);
                 let id = self.chats[self.active].id;
                 let view = self
                     .terminals
