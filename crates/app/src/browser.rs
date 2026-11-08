@@ -1034,6 +1034,7 @@ impl ChatApp {
     /// screen: not under the command palette, not on another page, not behind
     /// another tab or a closed panel.
     pub(crate) fn browser_content(&mut self, shown: bool, cx: &mut Context<Self>) -> AnyElement {
+        let shown = shown && self.draft_editor.is_none();
         self.browser.update(cx, |browser, _| browser.set_shown(shown));
         div().flex_1().min_h_0().w_full().child(self.browser.clone()).into_any_element()
     }

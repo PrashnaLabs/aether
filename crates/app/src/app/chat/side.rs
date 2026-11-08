@@ -3,6 +3,7 @@ use aether_core::{AccessMode, Answer, Provider, Role, Update};
 use futures::StreamExt;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex, v_flex};
 use gpui_kit::{AnyElement, Context, SharedString, Window, div, prelude::*, px};
 
@@ -322,41 +323,30 @@ impl ChatApp {
                         .border_color(cx.theme().sidebar_border)
                         .text_sm()
                         .child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    gpui_kit::component::Icon::new(Lucide::MessageCircle)
-                                        .size(px(16.)),
-                                )
-                                .child("By the way"),
-                        )
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .child(
-                                    aether_ui::button("btw-clear")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(Lucide::Trash)
-                                        .accessibility_label("Clear BTW thread")
-                                        .tooltip("Clear thread")
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.drop_btw(id);
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    aether_ui::button("btw-close")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(Lucide::X)
-                                        .accessibility_label("Close BTW panel")
-                                        .tooltip("Close panel")
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.close_surface(Surface::Btw, cx);
-                                        })),
-                                ),
+                            aether_ui::button("btw-menu")
+                                .ghost()
+                                .xsmall()
+                                .icon(Lucide::MessageCircle)
+                                .label("By the way")
+                                .dropdown_caret(true)
+                                .accessibility_label("By the way options")
+                                .tooltip("Thread options")
+                                .dropdown_menu({
+                                    let app = cx.entity();
+                                    move |menu, _, _| {
+                                        let app = app.clone();
+                                        menu.item(
+                                            PopupMenuItem::new("Clear thread")
+                                                .icon(Lucide::Trash)
+                                                .on_click(move |_, _, cx| {
+                                                    app.update(cx, |this, cx| {
+                                                        this.drop_btw(id);
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        )
+                                    }
+                                }),
                         ),
                 )
             })

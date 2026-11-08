@@ -15,7 +15,9 @@ fn end_position(text: &str) -> Position {
 
 impl ChatApp {
     pub(super) fn draft_editor_visible(&self, host: WindowId, cx: &gpui_kit::App) -> bool {
-        (!self.side_open() || self.side_tab_for(host) == crate::side_panel::SideTab::Agent)
+        (self.settings.chat_layout != aether_core::ChatLayout::Tabbed
+            || !self.side_open()
+            || self.side_tab_for(host) == crate::side_panel::SideTab::Agent)
             && !self.is_terminal_drawer_maximized(cx)
     }
 
@@ -76,46 +78,84 @@ impl ChatApp {
                 .debug_selector(|| "draft-editor".into())
                 .absolute()
                 .inset_0()
-                .bg(theme.background.alpha(1.))
-                .key_context(DRAFT_EDITOR_CONTEXT)
-                .on_action(self.session_listener(cx, |this, _: &DraftEditorDone, window, cx| {
-                    this.close_draft_editor(true, window, cx)
-                }))
-                .on_action(self.session_listener(cx, |this, _: &DraftEditorSend, window, cx| {
-                    this.send_from_draft_editor(window, cx)
-                }))
+                .occlude()
+                .items_center()
+                .justify_center()
+                .p_4()
+                .bg(gpui_kit::black().opacity(0.45))
                 .child(
-                    h_flex()
+                    v_flex()
                         .w_full()
-                        .px_4()
-                        .py_2()
-                        .gap_3()
-                        .items_center()
-                        .border_b_1()
+                        .max_w(px(860.))
+                        .h(relative(0.8))
+                        .min_h_0()
+                        .rounded_xl()
+                        .overflow_hidden()
+                        .border_1()
                         .border_color(theme.border)
-                        .child(div().text_sm().font_semibold().child("Edit draft"))
+                        .shadow_lg()
+                        .bg(theme.background)
+                        .key_context(DRAFT_EDITOR_CONTEXT)
+                        .on_action(self.session_listener(
+                            cx,
+                            |this, _: &DraftEditorDone, window, cx| {
+                                this.close_draft_editor(true, window, cx)
+                            },
+                        ))
+                        .on_action(self.session_listener(
+                            cx,
+                            |this, _: &DraftEditorSend, window, cx| {
+                                this.send_from_draft_editor(window, cx)
+                            },
+                        ))
                         .child(
-                            div()
-                                .flex_1()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Esc or Ctrl+G to return · ⌘↩ to send"),
+                            h_flex()
+                                .w_full()
+                                .px_4()
+                                .py_2()
+                                .gap_3()
+                                .items_center()
+                                .border_b_1()
+                                .border_color(theme.border)
+                                .child(div().text_sm().font_semibold().child("Edit draft"))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("Esc or Ctrl+G to return · ⌘↩ to send"),
+                                )
+                                .child(
+                                    aether_ui::button("done-draft").small().label("Done").on_click(
+                                        self.session_listener(cx, |this, _, window, cx| {
+                                            this.close_draft_editor(true, window, cx)
+                                        }),
+                                    ),
+                                )
+                                .child(
+                                    aether_ui::button("discard-draft")
+                                        .ghost()
+                                        .small()
+                                        .label("Discard changes")
+                                        .on_click(self.session_listener(
+                                            cx,
+                                            |this, _, window, cx| {
+                                                this.close_draft_editor(false, window, cx)
+                                            },
+                                        )),
+                                ),
                         )
                         .child(
-                            aether_ui::button("discard-draft")
-                                .ghost()
-                                .small()
-                                .label("Discard changes")
-                                .on_click(self.session_listener(cx, |this, _, window, cx| {
-                                    this.close_draft_editor(false, window, cx)
-                                })),
+                            div().flex_1().min_h_0().w_full().flex().justify_center().child(
+                                div().h_full().w_full().max_w(px(760.)).p_4().child(
+                                    Editor::new(&editor)
+                                        .h(relative(1.))
+                                        .appearance(false)
+                                        .bordered(false),
+                                ),
+                            ),
                         ),
                 )
-                .child(div().flex_1().min_h_0().w_full().flex().justify_center().child(
-                    div().h_full().w_full().max_w(px(760.)).p_4().child(
-                        Editor::new(&editor).h(relative(1.)).appearance(false).bordered(false),
-                    ),
-                ))
                 .into_any_element(),
         )
     }
