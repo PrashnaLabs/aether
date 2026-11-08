@@ -263,8 +263,11 @@ impl ChatApp {
         window: &Window,
         cx: &App,
     ) -> impl IntoElement + use<> {
-        // pay-as-you-go rows have no %; they live in the popover only, not the bar
-        let items: Vec<_> = self.shown().into_iter().filter(|(_, _, g)| g.0.is_some()).collect();
+        let items: Vec<_> = self
+            .shown()
+            .into_iter()
+            .filter(|(p, _, _)| !self.settings.bottom_bar_hidden_agents.contains(p))
+            .collect();
         let empty = items.is_empty();
         let open_view = view.clone();
         let strip = h_flex()
@@ -274,6 +277,10 @@ impl ChatApp {
             .tab_index(0)
             .role(Role::Button)
             .aria_label("Usage")
+            .px(px(6.))
+            .py(px(2.))
+            .corner(px(4.))
+            .hover(|s| s.bg(cx.theme().tokens.accent.opacity(0.15)))
             .focus_visible(|s| s.bg(overlay(cx)))
             .min_w_0()
             .overflow_hidden()

@@ -63,10 +63,6 @@ pub(super) fn direct_label(count: usize) -> String {
 
 pub(crate) const STATUS_BAR: f32 = 30.;
 
-fn sep(cx: &App) -> Div {
-    div().w(px(1.)).h(px(14.)).bg(cx.theme().tokens.border).flex_none()
-}
-
 type NavClick = fn(&mut ChatApp, &mut Window, &mut Context<ChatApp>);
 
 fn nav_button(
@@ -76,8 +72,12 @@ fn nav_button(
     active: bool,
     view: &Entity<ChatApp>,
     on_click: impl Fn(&mut ChatApp, &mut Window, &mut Context<ChatApp>) + 'static,
+    hidden: &[String],
     cx: &App,
 ) -> Div {
+    if hidden.iter().any(|key| key == id) {
+        return div();
+    }
     let (view, label) = (view.clone(), label.into());
     div().debug_selector(move || id.into()).relative().flex_none().child(
         aether_ui::icon_chip(id, active, cx)
@@ -98,10 +98,14 @@ fn badged_nav_button(
     count: usize,
     view: &Entity<ChatApp>,
     on_click: NavClick,
+    hidden: &[String],
     cx: &App,
 ) -> Div {
+    if hidden.iter().any(|key| key == id) {
+        return div();
+    }
     let badge_view = view.clone();
-    nav_button(id, icon, label, active, view, on_click, cx)
+    nav_button(id, icon, label, active, view, on_click, hidden, cx)
         .flex()
         .items_end()
         .w(px(34.))
@@ -138,86 +142,119 @@ impl ChatApp {
             .flex_none()
             .items_center()
             .gap_1()
-            .child(badged_nav_button(
-                "nav-direct",
-                Lucide::MessageCircle,
-                direct_label(direct),
-                sidebar == SidebarView::DirectChats,
-                direct,
-                view,
-                |this, window, cx| this.toggle_direct_chats(window, cx),
-                cx,
-            ))
-            .child(nav_button(
-                "nav-archive",
-                Lucide::Archive,
-                "Archive",
-                sidebar == SidebarView::Archived,
-                view,
-                |this, _, cx| this.toggle_archive(cx),
-                cx,
-            ))
-            .when(outside > 0 || sidebar == SidebarView::Outside, |row| {
+            .when(!self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-direct"), |row| {
                 row.child(badged_nav_button(
-                    "nav-outside",
-                    Lucide::Laptop,
-                    aether_ui::outside_aria(outside),
-                    sidebar == SidebarView::Outside,
-                    outside,
+                    "nav-direct",
+                    Lucide::MessageCircle,
+                    direct_label(direct),
+                    sidebar == SidebarView::DirectChats,
+                    direct,
                     view,
-                    |this, _, cx| this.toggle_outside(cx),
+                    |this, window, cx| this.toggle_direct_chats(window, cx),
+                    &self.settings.bottom_bar_hidden,
                     cx,
                 ))
             })
-            .child(nav_button(
-                "nav-terminal",
-                IconName::SquareTerminal,
-                "Terminal",
-                page == Page::Terminal,
-                view,
-                |this, window, cx| this.toggle_terminal_page(window, cx),
-                cx,
-            ))
+            .when(!self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-archive"), |row| {
+                row.child(nav_button(
+                    "nav-archive",
+                    Lucide::Archive,
+                    "Archive",
+                    sidebar == SidebarView::Archived,
+                    view,
+                    |this, _, cx| this.toggle_archive(cx),
+                    &self.settings.bottom_bar_hidden,
+                    cx,
+                ))
+            })
+            .when(outside > 0 || sidebar == SidebarView::Outside, |row| {
+                row.when(
+                    !self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-outside"),
+                    |row| {
+                        row.child(badged_nav_button(
+                            "nav-outside",
+                            Lucide::Laptop,
+                            aether_ui::outside_aria(outside),
+                            sidebar == SidebarView::Outside,
+                            outside,
+                            view,
+                            |this, _, cx| this.toggle_outside(cx),
+                            &self.settings.bottom_bar_hidden,
+                            cx,
+                        ))
+                    },
+                )
+            })
+            .when(!self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-terminal"), |row| {
+                row.child(nav_button(
+                    "nav-terminal",
+                    IconName::SquareTerminal,
+                    "Terminal",
+                    page == Page::Terminal,
+                    view,
+                    |this, window, cx| this.toggle_terminal_page(window, cx),
+                    &self.settings.bottom_bar_hidden,
+                    cx,
+                ))
+            })
             .when(self.settings.notes_enabled, |row| {
+                row.when(
+                    !self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-notes"),
+                    |row| {
+                        row.child(nav_button(
+                            "nav-notes",
+                            IconName::BookOpen,
+                            "Notes",
+                            page == Page::Notes,
+                            view,
+                            toggle(Page::Notes),
+                            &self.settings.bottom_bar_hidden,
+                            cx,
+                        ))
+                    },
+                )
+            })
+            .when(!self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-board"), |row| {
                 row.child(nav_button(
-                    "nav-notes",
-                    IconName::BookOpen,
-                    "Notes",
-                    page == Page::Notes,
+                    "nav-board",
+                    Lucide::LayoutDashboard,
+                    "Tasks board",
+                    page == Page::Board,
                     view,
-                    toggle(Page::Notes),
+                    |this, window, cx| this.open_board(window, cx),
+                    &self.settings.bottom_bar_hidden,
                     cx,
                 ))
             })
-            .child(nav_button(
-                "nav-board",
-                Lucide::LayoutDashboard,
-                "Tasks board",
-                page == Page::Board,
-                view,
-                |this, window, cx| this.open_board(window, cx),
-                cx,
-            ))
             .when(self.settings.hackernews_enabled, |row| {
+                row.when(
+                    !self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-hackernews"),
+                    |row| {
+                        row.child(nav_button(
+                            "nav-hackernews",
+                            Lucide::Flame,
+                            "Hacker News",
+                            page == Page::HackerNews,
+                            view,
+                            |this, window, cx| this.toggle_hackernews_page(window, cx),
+                            &self.settings.bottom_bar_hidden,
+                            cx,
+                        ))
+                    },
+                )
+            })
+            .when(!self.settings.bottom_bar_hidden.iter().any(|key| key == "nav-settings"), |row| {
                 row.child(nav_button(
-                    "nav-hackernews",
-                    Lucide::Flame,
-                    "Hacker News",
-                    page == Page::HackerNews,
+                    "nav-settings",
+                    IconName::Settings,
+                    "Settings",
+                    page == Page::Settings,
                     view,
-                    |this, window, cx| this.toggle_hackernews_page(window, cx),
+                    toggle(Page::Settings),
+                    &self.settings.bottom_bar_hidden,
                     cx,
                 ))
             })
-            .child(nav_button(
-                "nav-settings",
-                IconName::Settings,
-                "Settings",
-                page == Page::Settings,
-                view,
-                toggle(Page::Settings),
-                cx,
-            ))
     }
 
     pub(crate) fn direct_chat_count(&self) -> usize {
@@ -263,7 +300,8 @@ impl ChatApp {
         let clock_click_view = view.clone();
         let nav = self.render_status_nav(view, cx);
         let usage = self.render_usage_strip(view, window, cx);
-        let resources = self.sys_sample.map(|s| {
+        let visible = |key: &str| !self.settings.bottom_bar_hidden.iter().any(|k| k == key);
+        let resources = self.sys_sample.filter(|_| visible("cpu") || visible("memory")).map(|s| {
             let (cpu, mem) = resource_text(&s);
             let mem_pct = s.mem_used as f32 / s.mem_total.max(1) as f32 * 100.;
             let tip = format!(
@@ -280,8 +318,19 @@ impl ChatApp {
                 .gap(px(10.));
             // drops before the clock when narrow
             row.style().flex_shrink = Some(100.);
-            row.child(resource_item("sys-cpu", Lucide::Cpu, cpu, s.cpu_percent, tip.clone(), cx))
-                .child(resource_item("sys-mem", Lucide::MemoryStick, mem, mem_pct, tip, cx))
+            row.when(visible("cpu"), |row| {
+                row.child(resource_item(
+                    "sys-cpu",
+                    Lucide::Cpu,
+                    cpu,
+                    s.cpu_percent,
+                    tip.clone(),
+                    cx,
+                ))
+            })
+            .when(visible("memory"), |row| {
+                row.child(resource_item("sys-mem", Lucide::MemoryStick, mem, mem_pct, tip, cx))
+            })
         });
 
         h_flex()
@@ -295,64 +344,88 @@ impl ChatApp {
             .border_color(border)
             .px(px(10.))
             .items_center()
-            .justify_between()
             .gap(px(8.))
             .text_size(px(11.))
             .text_color(fg)
-            .child(nav)
-            .child(sep(cx))
-            .child(usage)
-            .when(resources.is_some(), |row| row.child(sep(cx)))
-            .children(resources)
-            .child(sep(cx))
-            // Right Side: Global Date & Time Clock
             .child(
                 h_flex()
                     .min_w_0()
-                    .overflow_hidden()
+                    .gap_2()
                     .items_center()
-                    .gap(px(8.))
-                    // Globally Visible Time & Date widget
-                    .child(
-                        h_flex()
-                            .id("global-clock-widget")
-                            .debug_selector(|| "status-clock".into())
-                            .cursor_pointer()
-                            .px(px(6.))
-                            .py(px(2.))
-                            .corner(px(4.))
-                            .items_center()
-                            .gap(px(6.))
-                            .hover(|s| s.bg(theme.tokens.accent.opacity(0.15)))
-                            .tooltip(move |window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(full_tooltip.clone())
-                                    .build(window, cx)
-                            })
-                            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                                clock_click_view.update(cx, |this, cx| {
-                                    this.update_settings(cx, |s| {
-                                        s.status_bar_show_seconds = !s.status_bar_show_seconds;
-                                    });
-                                });
-                            })
-                            .when_some(date_str, |row, date| {
-                                row.child(
-                                    gpui_kit::svg()
-                                        .path(Lucide::Calendar.path())
-                                        .size(px(12.))
-                                        .text_color(fg),
-                                )
-                                .child(div().font_medium().text_color(primary_fg).child(date))
-                                .child(div().text_color(border).child("·"))
-                            })
-                            .child(
-                                gpui_kit::svg()
-                                    .path(Lucide::Clock.path())
-                                    .size(px(12.))
-                                    .text_color(fg),
-                            )
-                            .child(div().font_medium().text_color(primary_fg).child(time_str)),
-                    ),
+                    .child(nav)
+                    .when(visible("usage"), |row| row.child(usage)),
+            )
+            .child(div().flex_1())
+            .child(
+                h_flex()
+                    .min_w_0()
+                    .gap_2()
+                    .items_center()
+                    .children(resources)
+                    // Right Side: Global Date & Time Clock
+                    .when(visible("clock"), |row| {
+                        row.child(
+                            h_flex()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .items_center()
+                                .gap(px(8.))
+                                // Globally Visible Time & Date widget
+                                .child(
+                                    h_flex()
+                                        .id("global-clock-widget")
+                                        .debug_selector(|| "status-clock".into())
+                                        .cursor_pointer()
+                                        .px(px(6.))
+                                        .py(px(2.))
+                                        .corner(px(4.))
+                                        .items_center()
+                                        .gap(px(6.))
+                                        .hover(|s| s.bg(theme.tokens.accent.opacity(0.15)))
+                                        .tooltip(move |window, cx| {
+                                            gpui_kit::component::tooltip::Tooltip::new(
+                                                full_tooltip.clone(),
+                                            )
+                                            .build(window, cx)
+                                        })
+                                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                                            clock_click_view.update(cx, |this, cx| {
+                                                this.update_settings(cx, |s| {
+                                                    s.status_bar_show_seconds =
+                                                        !s.status_bar_show_seconds;
+                                                });
+                                            });
+                                        })
+                                        .when_some(date_str, |row, date| {
+                                            row.child(
+                                                gpui_kit::svg()
+                                                    .path(Lucide::Calendar.path())
+                                                    .size(px(12.))
+                                                    .text_color(fg),
+                                            )
+                                            .child(
+                                                div()
+                                                    .font_medium()
+                                                    .text_color(primary_fg)
+                                                    .child(date),
+                                            )
+                                            .child(div().text_color(border).child("·"))
+                                        })
+                                        .child(
+                                            gpui_kit::svg()
+                                                .path(Lucide::Clock.path())
+                                                .size(px(12.))
+                                                .text_color(fg),
+                                        )
+                                        .child(
+                                            div()
+                                                .font_medium()
+                                                .text_color(primary_fg)
+                                                .child(time_str),
+                                        ),
+                                ),
+                        )
+                    }),
             )
             .into_any_element()
     }

@@ -162,12 +162,25 @@ impl RenderOnce for CardRow {
 pub struct CardCarousel {
     id: SharedString,
     selected_ix: usize,
+    card_width: f32,
+    card_gap: f32,
     cards: Vec<AnyElement>,
 }
 
 impl CardCarousel {
+    pub fn compact(mut self) -> Self {
+        self.card_width = 120.;
+        self.card_gap = 12.;
+        self
+    }
     pub fn new(id: impl Into<SharedString>, selected_ix: usize) -> Self {
-        Self { id: id.into(), selected_ix, cards: Vec::new() }
+        Self {
+            id: id.into(),
+            selected_ix,
+            card_width: CAROUSEL_CARD_WIDTH,
+            card_gap: 4.,
+            cards: Vec::new(),
+        }
     }
 }
 
@@ -233,7 +246,7 @@ impl RenderOnce for CardCarousel {
                     .id(self.id.clone())
                     .w_full()
                     .items_start()
-                    .gap_1()
+                    .gap(px(self.card_gap))
                     .overflow_x_scroll()
                     // a vertical wheel over the row keeps scrolling the page
                     .restrict_scroll_to_axis()
@@ -241,7 +254,7 @@ impl RenderOnce for CardCarousel {
                     .children(
                         self.cards
                             .into_iter()
-                            .map(|card| div().flex_none().w(px(CAROUSEL_CARD_WIDTH)).child(card)),
+                            .map(|card| div().flex_none().w(px(self.card_width)).child(card)),
                     ),
             )
             .when(back, |row| {

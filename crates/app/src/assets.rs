@@ -8,6 +8,7 @@ use crate::icon_packs::PACK_ICONS;
 gpui_kit::assets::icon_assets!(
     ExtraIcons,
     [
+        Timer,
         Trash,
         Lock,
         LockKeyhole,

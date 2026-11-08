@@ -36,6 +36,7 @@ const SETTINGS_DROPDOWN_WIDTH: f32 = 280.;
 pub(crate) enum SettingsTab {
     #[default]
     Appearance,
+    BottomBar,
     Tiling,
     Composer,
     Model,
@@ -47,8 +48,9 @@ pub(crate) enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Appearance,
+        Self::BottomBar,
         Self::Tiling,
         Self::Composer,
         Self::Model,
@@ -62,6 +64,7 @@ impl SettingsTab {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
+            Self::BottomBar => "Bottom Bar",
             Self::Tiling => "Tiling",
             Self::Composer => "Composer",
             Self::Model => "Model",
@@ -617,6 +620,101 @@ impl ChatApp {
                             }),
                     )
                 });
+            }
+            SettingsTab::BottomBar => {
+                let mut entry_cards = Vec::new();
+                for (key, label, mark) in [
+                    ("nav-direct", "Direct chats", gpui_kit::assets::IconName::MessageCircle),
+                    ("nav-archive", "Archive", gpui_kit::assets::IconName::Archive),
+                    ("nav-outside", "Outside agents", gpui_kit::assets::IconName::Laptop),
+                    ("nav-terminal", "Terminal", gpui_kit::assets::IconName::SquareTerminal),
+                    ("nav-notes", "Notes", gpui_kit::assets::IconName::BookOpen),
+                    ("nav-board", "Board", gpui_kit::assets::IconName::LayoutDashboard),
+                    ("nav-hackernews", "Hacker News", gpui_kit::assets::IconName::Flame),
+                    ("nav-settings", "Settings", gpui_kit::assets::IconName::Settings),
+                    ("usage", "Agent usage", gpui_kit::assets::IconName::Bot),
+                    ("cpu", "CPU", gpui_kit::assets::IconName::Cpu),
+                    ("memory", "Memory", gpui_kit::assets::IconName::MemoryStick),
+                    ("clock", "Date and time", gpui_kit::assets::IconName::Timer),
+                ] {
+                    let selected = !settings.bottom_bar_hidden.iter().any(|k| k == key);
+                    entry_cards.push(
+                        div().w(px(120.)).flex_none().child(
+                            ChoiceCard::new(format!("bottom-bar-{key}"), label)
+                                .selected(selected)
+                                .preview(
+                                    h_flex()
+                                        .h(px(48.))
+                                        .w_full()
+                                        .justify_center()
+                                        .items_center()
+                                        .child(Icon::new(mark).size(px(22.))),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.update_settings(cx, |s| {
+                                        let selected =
+                                            !s.bottom_bar_hidden.iter().any(|k| k == key);
+                                        s.bottom_bar_hidden.retain(|k| k != key);
+                                        if selected {
+                                            s.bottom_bar_hidden.push(key.to_string());
+                                        }
+                                    });
+                                })),
+                        ),
+                    );
+                }
+                let entries = SettingsSection::new("Visible entries")
+                    .icon(Icon::new(gpui_kit::assets::IconName::Eye))
+                    .child(h_flex().flex_wrap().gap_3().p_4().children(entry_cards));
+                page = page.when(show("bottom-bar-entries"), |page| {
+                    page.child(div().id("bottom-bar-entries").child(entries))
+                });
+                let agents = SettingsSection::new("Agent usage").icon(Icon::new(gpui_kit::assets::IconName::Bot))
+                    .child(div().px_3().py_3().text_sm().text_color(cx.theme().muted_foreground)
+                        .child("Choose which agents appear in the bottom bar. Select at least one. The usage popover shows all agents."));
+                let cards = [
+                    aether_core::Provider::Claude,
+                    aether_core::Provider::Codex,
+                    aether_core::Provider::Antigravity,
+                    aether_core::Provider::OpenRouter,
+                    aether_core::Provider::OpenCode,
+                ]
+                .into_iter()
+                .map(|provider| {
+                    let selected = !settings.bottom_bar_hidden_agents.contains(&provider);
+                    ChoiceCard::new(
+                        format!("bottom-bar-agent-{}", provider.key()),
+                        provider.label(),
+                    )
+                    .selected(selected)
+                    .preview(
+                        h_flex()
+                            .h(px(48.))
+                            .w_full()
+                            .justify_center()
+                            .items_center()
+                            .child(aether_ui::provider_icon(provider).size(px(22.))),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.update_settings(cx, |s| {
+                            let selected = !s.bottom_bar_hidden_agents.contains(&provider);
+                            if selected && s.bottom_bar_hidden_agents.len() >= 4 {
+                                return;
+                            }
+                            s.bottom_bar_hidden_agents.retain(|p| *p != provider);
+                            if selected {
+                                s.bottom_bar_hidden_agents.push(provider);
+                            }
+                        });
+                    }))
+                });
+                let agents = agents.child(div().p_3().child(
+                    CardCarousel::new("bottom-bar-agent-cards", 0).compact().children(cards),
+                ));
+                page = page.when(show("bottom-bar-agents"), |page| {
+                    page.child(div().id("bottom-bar-agents").child(agents))
+                });
+
                 let current_time_format_ix = match settings.status_bar_time_format {
                     TimeFormat::Hour12 => 0,
                     TimeFormat::Hour24 => 1,
@@ -634,8 +732,8 @@ impl ChatApp {
                         || show("status-bar-hn"),
                     |page| {
                         page.child(
-                            SettingsSection::new("Status Bar")
-                                .icon(Icon::new(gpui_kit::assets::IconName::PanelBottom))
+                            SettingsSection::new("Date and Time")
+                                .icon(Icon::new(gpui_kit::assets::IconName::Timer))
                                 .when(show("status-bar-time-format"), |section| {
                                     section.child(
                                         div()
@@ -1573,6 +1671,7 @@ impl SettingsTab {
     fn description(self) -> &'static str {
         match self {
             Self::Appearance => "Customize how the app looks.",
+            Self::BottomBar => "Choose bottom bar entries, agent usage and clock formats.",
             Self::Tiling => "Arrange docked session panes in the window.",
             Self::Composer => "Set up dictation in the message box.",
             Self::Model => "Choose defaults for new conversations.",
@@ -1588,6 +1687,7 @@ impl SettingsTab {
         use gpui_kit::assets::IconName as Lucide;
         match self {
             Self::Appearance => Lucide::Palette,
+            Self::BottomBar => Lucide::PanelBottom,
             Self::Tiling => Lucide::LayoutDashboard,
             Self::Composer => Lucide::MessageSquare,
             Self::Model => Lucide::Cpu,

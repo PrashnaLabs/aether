@@ -10,6 +10,20 @@ pub(crate) struct SettingItem {
 
 static SETTING_CATALOG: &[SettingItem] = &[
     SettingItem {
+        id: "bottom-bar-entries",
+        tab: SettingsTab::BottomBar,
+        title: "Visible entries",
+        description: "Show or hide bottom bar navigation, usage, CPU, memory and clock.",
+        keywords: &["bottom", "status", "bar", "hide", "show", "terminal", "board", "archive"],
+    },
+    SettingItem {
+        id: "bottom-bar-agents",
+        tab: SettingsTab::BottomBar,
+        title: "Agent usage",
+        description: "Choose which agents appear in the bottom bar usage strip.",
+        keywords: &["bottom", "usage", "claude", "codex", "antigravity", "openrouter", "opencode"],
+    },
+    SettingItem {
         id: "notes-enabled",
         tab: SettingsTab::Tools,
         title: "Enable notes",
@@ -234,21 +248,21 @@ static SETTING_CATALOG: &[SettingItem] = &[
     },
     SettingItem {
         id: "status-bar-time-format",
-        tab: SettingsTab::Appearance,
+        tab: SettingsTab::BottomBar,
         title: "Time format",
         description: "Choose 12-hour (with AM/PM) or 24-hour clock.",
         keywords: &["clock", "time", "12", "24", "hour", "military", "am", "pm"],
     },
     SettingItem {
         id: "status-bar-date-format",
-        tab: SettingsTab::Appearance,
+        tab: SettingsTab::BottomBar,
         title: "Date format",
         description: "Display style for the globally visible date.",
         keywords: &["date", "calendar", "day", "month", "year", "short", "numeric", "full"],
     },
     SettingItem {
         id: "status-bar-seconds",
-        tab: SettingsTab::Appearance,
+        tab: SettingsTab::BottomBar,
         title: "Display seconds",
         description: "Include seconds in the status bar clock.",
         keywords: &["seconds", "clock", "precision", "tick"],
