@@ -2,7 +2,10 @@ pub mod mcp;
 pub(crate) mod server;
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use std::net::TcpStream as Stream;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream as Stream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,6 +51,14 @@ pub struct OrchCall {
 
 pub const SOCK_ENV: &str = "AETHER_ORCH_SOCK";
 pub const TOKEN_ENV: &str = "AETHER_ORCH_TOKEN";
+
+// Windows has no unix sockets: the "socket" file holds the loopback address instead.
+pub(crate) fn connect(sock: &Path) -> std::io::Result<Stream> {
+    #[cfg(unix)]
+    return Stream::connect(sock);
+    #[cfg(windows)]
+    return Stream::connect(std::fs::read_to_string(sock)?.trim());
+}
 
 pub fn socket_path() -> Option<PathBuf> {
     Some(aether_core::config_dir()?.join("orchestrator.sock"))
@@ -258,7 +269,7 @@ pub fn history_specs() -> Value {
 }
 
 pub fn forward(sock: &Path, token: &str, tool: &str, args: Value) -> Result<Value, String> {
-    let mut stream = UnixStream::connect(sock).map_err(|_| "Aether isn't running".to_string())?;
+    let mut stream = connect(sock).map_err(|_| "Aether isn't running".to_string())?;
     let timeout = Duration::from_secs(35);
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));

@@ -94,7 +94,10 @@ fn pi_takes_only_web_images_natively() {
 fn path_block_lists_each_file() {
     assert_eq!(
         attached_files_block(&[att("a.png", "image/png", 3)]),
-        "\n\nAttached files:\n- /c/attachments/1/a.png (image/png)"
+        format!(
+            "\n\nAttached files:\n- {} (image/png)",
+            PathBuf::from("/c/attachments/1").join("a.png").display()
+        )
     );
     assert_eq!(attached_files_block(&[]), "");
 }

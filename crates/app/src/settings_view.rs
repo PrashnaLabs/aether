@@ -1160,18 +1160,17 @@ impl ChatApp {
                             ))) })) });
             }
             SettingsTab::Terminal => {
-                if cfg!(unix) {
-                    let raw_font = settings.terminal_font_family.trim().to_string();
-                    let font_warning = if raw_font.is_empty() {
-                        None
-                    } else {
-                        let installed = aether_terminal::view::installed_font_names_cached(cx);
-                        let effective = aether_terminal::view::resolve_terminal_family(
-                            &raw_font,
-                            installed,
-                            cx.theme().mono_font_family.as_ref(),
-                        );
-                        (effective.as_ref() != raw_font).then(|| {
+                let raw_font = settings.terminal_font_family.trim().to_string();
+                let font_warning = if raw_font.is_empty() {
+                    None
+                } else {
+                    let installed = aether_terminal::view::installed_font_names_cached(cx);
+                    let effective = aether_terminal::view::resolve_terminal_family(
+                        &raw_font,
+                        installed,
+                        cx.theme().mono_font_family.as_ref(),
+                    );
+                    (effective.as_ref() != raw_font).then(|| {
                             let nerds = aether_terminal::view::installed_nerd_fonts(installed);
                             if nerds.is_empty() {
                                 format!(
@@ -1185,37 +1184,34 @@ impl ChatApp {
                                 )
                             }
                         })
-                    };
-                    let current_theme = settings.terminal_theme;
-                    let entity = cx.entity().clone();
-                    let theme_picker = settings_dropdown_trigger(
-                        "terminal-theme-dropdown",
-                        current_theme.label(),
-                        cx,
-                    )
-                    .accessibility_label("Terminal color theme")
-                    .dropdown_menu_with_anchor(
-                        Anchor::TopRight,
-                        move |mut menu: PopupMenu, _, _| {
-                            menu = settings_dropdown_menu(menu);
-                            for theme in TerminalTheme::ALL {
-                                let entity = entity.clone();
-                                menu = menu.item(
-                                    PopupMenuItem::new(theme.label())
-                                        .checked(theme == current_theme)
-                                        .on_click(move |_, _, cx| {
-                                            entity.update(cx, |this, cx| {
-                                                this.update_settings(cx, |s| {
-                                                    s.terminal_theme = theme
+                };
+                let current_theme = settings.terminal_theme;
+                let entity = cx.entity().clone();
+                let theme_picker =
+                    settings_dropdown_trigger("terminal-theme-dropdown", current_theme.label(), cx)
+                        .accessibility_label("Terminal color theme")
+                        .dropdown_menu_with_anchor(
+                            Anchor::TopRight,
+                            move |mut menu: PopupMenu, _, _| {
+                                menu = settings_dropdown_menu(menu);
+                                for theme in TerminalTheme::ALL {
+                                    let entity = entity.clone();
+                                    menu = menu.item(
+                                        PopupMenuItem::new(theme.label())
+                                            .checked(theme == current_theme)
+                                            .on_click(move |_, _, cx| {
+                                                entity.update(cx, |this, cx| {
+                                                    this.update_settings(cx, |s| {
+                                                        s.terminal_theme = theme
+                                                    });
                                                 });
-                                            });
-                                        }),
-                                );
-                            }
-                            menu
-                        },
-                    );
-                    page = page.when(show("terminal-theme") || show("terminal-font-size") || show("terminal-font-family") || show("terminal-cursor") || show("terminal-meta"), |page| { page.child(SettingsSection::new("Terminal").icon(Icon::new(gpui_kit::assets::IconName::Terminal))
+                                            }),
+                                    );
+                                }
+                                menu
+                            },
+                        );
+                page = page.when(show("terminal-theme") || show("terminal-font-size") || show("terminal-font-family") || show("terminal-cursor") || show("terminal-meta"), |page| { page.child(SettingsSection::new("Terminal").icon(Icon::new(gpui_kit::assets::IconName::Terminal))
                             .when(show("terminal-theme"), |section| { section.child(div().id("terminal-theme").debug_selector(|| "terminal-theme".into()).child(SettingsRow::new("Color theme")
                                     .description(
                                         "Terminal palette. Auto pairs Mocha for dark and Latte for light appearance.",
@@ -1276,7 +1272,6 @@ impl ChatApp {
                                                 this.update_settings(cx, |s| s.terminal_option_as_meta = checked);
                                             })),
                                     ))) })) });
-                }
             }
             SettingsTab::Account => {
                 page = page.when(show("api-key"), |page| { page.child(SettingsSection::new("OpenRouter").when(show("api-key"), |section| { section.child(div().id("api-key").debug_selector(|| "api-key".into()).child(SettingsRow::new("API key")

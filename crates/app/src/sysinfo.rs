@@ -1,5 +1,3 @@
-use std::process::Command;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {
     pub cpu_percent: f32,
@@ -82,7 +80,7 @@ pub fn parse_meminfo(text: &str) -> Option<(u64, u64)> {
 }
 
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).output().ok()?;
+    let out = aether_core::command(program).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -107,7 +105,21 @@ pub fn sample() -> Option<Sample> {
     Some(Sample { cpu_percent, mem_used, mem_total })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
+pub fn sample() -> Option<Sample> {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_cpu_usage();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
+    Some(Sample {
+        cpu_percent: sys.global_cpu_usage(),
+        mem_used: sys.used_memory(),
+        mem_total: sys.total_memory(),
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 pub fn sample() -> Option<Sample> {
     None
 }

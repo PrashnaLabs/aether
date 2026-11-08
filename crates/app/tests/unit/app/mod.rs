@@ -31,7 +31,6 @@ fn legacy_openrouter_chat_uses_the_global_model() {
     assert_eq!(chat.model(&settings), "");
 }
 
-
 #[test]
 fn activity_is_the_latest_send_reply_or_creation() {
     let mut chat = chat_with("t", &["hi", "yo", "again", "sure"]);

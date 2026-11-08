@@ -23,6 +23,7 @@ fn drafts_round_trip_through_the_parser() {
 }
 
 #[test]
+#[ignore = "needs agent skills installed on this machine"]
 fn loads_installed_agent_skills() {
     let skills = load_all();
     assert!(!skills.is_empty(), "expected skills to be found across sources");

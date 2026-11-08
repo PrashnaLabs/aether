@@ -123,6 +123,7 @@ fn lead_pids_track_spawn_and_drop() {
     assert!(!LEAD_PIDS.lock().unwrap().contains(&pid));
 }
 
+#[cfg(unix)]
 #[test]
 fn kill_lead_servers_kills_registered() {
     use std::os::unix::process::ExitStatusExt;

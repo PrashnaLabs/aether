@@ -1,5 +1,5 @@
 //! Browser panel: a native webview (WKWebView on macOS, WebKitGTK on X11
-//! Linux) embedded as a child of the window beside the chat.
+//! Linux, WebView2 on Windows) embedded as a child of the window beside the chat.
 //!
 //! The webview is native content gpui does not paint, so three rules keep it
 //! honest:
@@ -138,7 +138,7 @@ fn tab_shortcut_message(message: &str) -> Option<bool> {
 }
 
 /// The platform webview behind a uniform surface.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 mod host {
     use std::cell::{Cell, RefCell};
     use std::collections::VecDeque;
@@ -151,6 +151,7 @@ mod host {
     use super::Native;
 
     /// Mirror Safari's UA so sites serve the webview their real desktop build.
+    #[cfg(not(windows))]
     const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
          AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15";
 
@@ -197,14 +198,17 @@ mod host {
                 }}, true);
             "#
             );
-            let webview = WebViewBuilder::new()
+            let builder = WebViewBuilder::new();
+            // WebView2 already sends Edge's own UA
+            #[cfg(not(windows))]
+            let builder = builder.with_user_agent(USER_AGENT);
+            let webview = builder
                 .with_bounds(wry::Rect {
                     position: LogicalPosition::new(0.0, 0.0).into(),
                     size: LogicalSize::new(0.0, 0.0).into(),
                 })
                 .with_visible(false)
                 .with_url(url)
-                .with_user_agent(USER_AGENT)
                 .with_devtools(super::devtools_enabled())
                 .with_accept_first_mouse(true)
                 // Native page focus bypasses GPUI's keymap; forward only tab cycling.
@@ -336,7 +340,7 @@ mod host {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod host {
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -864,7 +868,7 @@ impl Render for Browser {
                         ));
                     })),
             )
-            .when(cfg!(target_os = "macos"), |t| t.child(open_control))
+            .when(cfg!(any(target_os = "macos", windows)), |t| t.child(open_control))
             .child(
                 aether_ui::button("browser-devtools")
                     .ghost()

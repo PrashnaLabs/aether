@@ -6,7 +6,7 @@ use aether_ui::{
 };
 use gpui_kit::component::button::Button;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, h_flex, v_flex};
-use gpui_kit::{AnyElement, Context, FontWeight, PathPromptOptions, Window, prelude::*, px};
+use gpui_kit::{AnyElement, Context, FontWeight, PathPromptOptions, Window, div, prelude::*, px};
 
 use std::path::PathBuf;
 
@@ -299,15 +299,26 @@ impl ChatApp {
                                 None => child.title.to_string(),
                             };
                             composer_chip(("crew-chip", id as u64), false, cx)
+                                .w_full()
                                 .justify_start()
-                                .icon(provider_icon(child.provider))
-                                .label(title)
                                 .tooltip(format!(
                                     "{} — {}. Click to open: message or stop it there.",
                                     child.title,
                                     crate::app::orchestrate::child_status_label(child)
                                 ))
-                                .child(child.status(now).badge(("crew-status", ix), Some(now), cx))
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .justify_start()
+                                        .gap_1()
+                                        .child(provider_icon(child.provider).size_3p5().flex_none())
+                                        .child(div().min_w_0().text_ellipsis().child(title))
+                                        .child(child.status(now).badge(
+                                            ("crew-status", ix),
+                                            Some(now),
+                                            cx,
+                                        )),
+                                )
                                 .debug_selector(move || format!("crew-chip-{id}"))
                                 .on_click(self.session_listener(cx, move |this, _, window, cx| {
                                     this.crew_pop = false;

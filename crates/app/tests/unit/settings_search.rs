@@ -1,7 +1,6 @@
 use crate::settings_search::*;
 use crate::settings_view::SettingsTab;
 
-#[cfg(unix)]
 #[test]
 fn terminal_rows_search_into_the_terminal_tab() {
     for (query, id) in [("cursor", "terminal-cursor"), ("nerd", "terminal-font-family")] {
@@ -87,7 +86,6 @@ fn theme_search_finds_scheme_names() {
         assert!(search_settings(query).iter().any(|m| m.id == "theme"), "{query}");
     }
     assert!(search_settings("catppuccin").iter().any(|m| m.id == "theme"));
-    #[cfg(unix)]
     assert!(search_settings("catppuccin").iter().any(|m| m.id == "terminal-theme"));
 }
 

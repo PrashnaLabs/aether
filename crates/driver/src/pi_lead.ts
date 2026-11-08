@@ -1,11 +1,24 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import fs from "node:fs";
 import net from "node:net";
 
 type Spec = { name: string; description: string; inputSchema: Record<string, unknown> };
 
+// windows: the sock file holds "host:port" of the loopback listener
+function connectTcp(file: string) {
+  const addr = fs.readFileSync(file, "utf8").trim();
+  const i = addr.lastIndexOf(":");
+  return net.createConnection({ host: addr.slice(0, i), port: Number(addr.slice(i + 1)) });
+}
+
 function ask(sock: string, line: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
-    const c = net.createConnection(sock);
+    let c: net.Socket;
+    try {
+      c = process.platform === "win32" ? connectTcp(sock) : net.createConnection(sock);
+    } catch {
+      return reject(new Error("Aether isn't running"));
+    }
     c.setEncoding("utf8");
     let buf = "";
     let connected = false;

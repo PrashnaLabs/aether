@@ -21,6 +21,7 @@ fn scrub_skips_relative_and_root_cwds() {
     assert_eq!(scrub(raw, "/h", &[".", "/", "", "rel/dir"]), raw);
 }
 
+#[cfg(unix)]
 #[test]
 fn recorder_scrubs_dot_cwd_and_missing_absolute_cwd() {
     let dir = std::env::temp_dir().join(format!("aether-rec-cwd-{}", std::process::id()));
@@ -38,6 +39,7 @@ fn recorder_scrubs_dot_cwd_and_missing_absolute_cwd() {
     assert_eq!(text("/nonexistent/proj"), "{\"a\":\"x.y/z\",\"p\":\"/work/f\"}\n");
 }
 
+#[cfg(unix)]
 #[test]
 fn recorder_appends_scrubbed_lines_and_marks() {
     let dir = std::env::temp_dir().join(format!("aether-rec-test-{}", std::process::id()));

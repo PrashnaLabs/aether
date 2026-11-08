@@ -432,7 +432,7 @@ fn codex_transcript_keeps_user_and_assistant_text() {
 #[test]
 fn codex_file_finds_rollout_by_thread_id() {
     let root = std::env::temp_dir().join(format!("aether-codex-lookup-{}", std::process::id()));
-    let dir = root.join("sessions/2026/10/06");
+    let dir = root.join("sessions").join("2026").join("10").join("06");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("rollout-2026-10-06T09-30-37-01a10f51-211c-7610-a20f-ac9f43c1c667.jsonl");
     std::fs::write(&path, "{}").unwrap();
@@ -469,6 +469,7 @@ fn agy_transcript_decodes_user_and_planner_steps() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn agy_rows_reads_with_and_without_a_wal() {
     let dir = std::env::temp_dir().join(format!("aether-agy-rows-{}", std::process::id()));

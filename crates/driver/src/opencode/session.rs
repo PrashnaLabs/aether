@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -770,10 +769,7 @@ fn new_session_id() -> String {
     const ALPHABET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let time = !(millis.wrapping_mul(0x1000) + 1) & 0xFFFF_FFFF_FFFF;
-    let mut b = [0u8; 14];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut b);
-    }
+    let b = aether_core::random_bytes::<14>();
     let suffix: String = b.iter().map(|x| ALPHABET[*x as usize % 62] as char).collect();
     format!("ses_{time:012x}{suffix}")
 }
@@ -824,7 +820,7 @@ pub(super) fn model_switch(
 
 // the server matches directories by exact string; trailing slash or symlink splits sessions
 fn location_dir(opts: &DriverStartOptions) -> std::path::PathBuf {
-    std::fs::canonicalize(&opts.cwd).unwrap_or_else(|_| opts.cwd.components().collect())
+    aether_core::canonicalize(&opts.cwd).unwrap_or_else(|_| opts.cwd.components().collect())
 }
 
 fn create_body(id: &str, opts: &DriverStartOptions) -> Value {

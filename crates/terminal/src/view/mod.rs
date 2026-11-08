@@ -360,7 +360,7 @@ impl TerminalView {
 
     pub(crate) fn stop(&mut self, cx: &mut Context<Self>) {
         let stopped = match (&self.session, &self.status) {
-            (Some(session), Status::Running) if cfg!(unix) => session.terminate(),
+            (Some(session), Status::Running) => session.terminate(),
             (_, Status::Starting | Status::Running) => {
                 self.spawning = None;
                 self.session = None;

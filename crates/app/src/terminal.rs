@@ -75,7 +75,7 @@ impl ChatApp {
 
     /// The active chat's shell folder; `None` hides the terminal.
     pub(crate) fn terminal_folder(&self) -> Option<PathBuf> {
-        if !cfg!(unix) || self.page != Page::Chat || !self.is_agent_chat(&self.chats[self.active]) {
+        if self.page != Page::Chat || !self.is_agent_chat(&self.chats[self.active]) {
             return None;
         }
         self.folder_of(&self.chats[self.active]).filter(|f| !self.missing_folders.contains(f))

@@ -495,11 +495,7 @@ fn reap(mut child: Child) {
 }
 
 fn signal(sig: &str, pid: u32) {
-    let _ = Command::new("/bin/kill")
-        .args([sig, &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    aether_core::signal_process(pid, sig.trim_start_matches('-'), false);
 }
 
 fn read(
@@ -819,7 +815,7 @@ fn spawn_env(opts: &DriverStartOptions) -> Vec<(String, String)> {
 fn agy(binary: &str) -> io::Result<Command> {
     let bin = find_binary("agy", binary)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "agy is not installed"))?;
-    let mut cmd = Command::new(bin);
+    let mut cmd = aether_core::command(bin);
     cmd.env("PATH", repaired_path()).stdin(Stdio::null());
     Ok(cmd)
 }

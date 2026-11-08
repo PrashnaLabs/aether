@@ -17,7 +17,7 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let dir = std::fs::canonicalize(dir).unwrap();
+        let dir = aether_core::canonicalize(&dir).unwrap();
         let project = dir.join("project");
         let notes = dir.join("notes");
         std::fs::create_dir_all(&project).unwrap();
@@ -332,7 +332,7 @@ fn create_note_runs_end_to_end_and_keeps_last_note_inside_fixture(cx: &mut TestA
             assert_eq!(exp.active_buffer().unwrap().original, "# Saved selection\n");
             assert_eq!(
                 std::fs::read_to_string(f.dir.join("last-note")).unwrap().trim(),
-                f.notes.join("misc/captured.md").display().to_string()
+                f.notes.join("misc").join("captured.md").display().to_string()
             );
         })
         .unwrap();

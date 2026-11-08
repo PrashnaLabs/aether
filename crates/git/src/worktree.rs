@@ -149,7 +149,7 @@ pub fn bases(folder: &Path) -> Option<Bases> {
     let listed =
         run(folder, &["worktree", "list", "--porcelain"], QUICK).ok().filter(|out| out.ok)?;
     let repo = entries(&listed.stdout).into_iter().next()?.path;
-    let repo = repo.canonicalize().unwrap_or(repo);
+    let repo = aether_core::canonicalize(&repo).unwrap_or(repo);
     Some(Bases { branches, default, repo })
 }
 
@@ -179,7 +179,7 @@ pub fn create(
     }
     let dir = root.join(repo_dir(&top));
     let dir = std::fs::create_dir_all(&dir)
-        .and_then(|()| dir.canonicalize())
+        .and_then(|()| aether_core::canonicalize(&dir))
         .map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let mut retried = false;
     loop {
@@ -394,7 +394,7 @@ pub fn list(roots: &[PathBuf], repos: &[PathBuf]) -> Vec<Listed> {
         let Some(main) = listed.first().map(|e| e.path.clone()) else {
             continue;
         };
-        let main = main.canonicalize().unwrap_or(main);
+        let main = aether_core::canonicalize(&main).unwrap_or(main);
         for entry in listed.into_iter().skip(1) {
             let listed = to_listed(roots, &main, entry);
             if !found.iter().any(|f| f.path == listed.path) {
@@ -417,7 +417,7 @@ pub fn list_repo(roots: &[PathBuf], folder: &Path) -> Result<Vec<Listed>, String
     let Some(main) = listed.first().map(|e| e.path.clone()) else {
         return Ok(Vec::new());
     };
-    let main = main.canonicalize().unwrap_or(main);
+    let main = aether_core::canonicalize(&main).unwrap_or(main);
     let mut found: Vec<Listed> =
         listed.into_iter().take(MAX_LISTED).map(|e| to_listed(roots, &main, e)).collect();
     found[0].main = true;
@@ -432,7 +432,7 @@ pub fn list_repo(roots: &[PathBuf], folder: &Path) -> Result<Vec<Listed>, String
 }
 
 fn to_listed(roots: &[PathBuf], main: &Path, entry: Entry) -> Listed {
-    let path = entry.path.canonicalize().unwrap_or(entry.path);
+    let path = aether_core::canonicalize(&entry.path).unwrap_or(entry.path);
     Listed {
         missing: gone(&path).unwrap_or(false),
         managed: managed(roots, &path).is_ok(),
@@ -470,7 +470,7 @@ fn linked(project: &Path, path: &Path) -> Result<PathBuf, String> {
     if !out.ok {
         return Err(git_error(&out));
     }
-    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| aether_core::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let resolved = real(path);
     match entries(&out.stdout).iter().position(|e| real(&e.path) == resolved) {
         Some(0) => Err(format!(
@@ -560,7 +560,7 @@ pub fn add(
         None => {
             let dir = root.join(repo_dir(&main));
             let dir = std::fs::create_dir_all(&dir)
-                .and_then(|()| dir.canonicalize())
+                .and_then(|()| aether_core::canonicalize(&dir))
                 .map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
             let name = free_slug(&slug(hint), |s| {
                 let path = dir.join(s);
@@ -590,9 +590,9 @@ pub fn add(
 /// A new, empty `<slug of hint>` folder in `parent`; refused when it exists,
 /// `parent` isn't writable, or it would nest inside one of the repo's worktrees.
 fn user_slot(parent: &Path, listed: &[Entry], hint: &str) -> Result<PathBuf, String> {
-    let parent =
-        parent.canonicalize().map_err(|e| format!("Couldn't open {}: {e}", parent.display()))?;
-    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let parent = aether_core::canonicalize(parent)
+        .map_err(|e| format!("Couldn't open {}: {e}", parent.display()))?;
+    let real = |p: &Path| aether_core::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     if let Some(tree) = listed.iter().find(|e| parent.starts_with(real(&e.path))) {
         return Err(format!(
             "{} is inside the worktree at {}. Pick a folder outside the repository.",
@@ -667,10 +667,10 @@ fn managed(roots: &[PathBuf], path: &Path) -> Result<PathBuf, String> {
         || format!("{} isn't one of aether's worktrees, so it wasn't touched.", path.display());
     let gone = |p: &Path| std::fs::symlink_metadata(p).is_err();
     let name = path.file_name().ok_or_else(outside)?;
-    let resolved = match path.parent().and_then(|p| p.canonicalize().ok()) {
+    let resolved = match path.parent().and_then(|p| aether_core::canonicalize(p).ok()) {
         Some(parent) => match parent.join(name) {
             slot if gone(&slot) => slot,
-            slot => slot.canonicalize().map_err(|_| outside())?,
+            slot => aether_core::canonicalize(&slot).map_err(|_| outside())?,
         },
         // its repo's folder under the root is gone too: nothing on disk to resolve or
         // delete, only git's record, so matching the path as written is enough
@@ -681,7 +681,7 @@ fn managed(roots: &[PathBuf], path: &Path) -> Result<PathBuf, String> {
     };
     if !roots
         .iter()
-        .filter_map(|root| root.canonicalize().ok())
+        .filter_map(|root| aether_core::canonicalize(root).ok())
         .any(|root| within(&root, &resolved))
     {
         return Err(outside());
@@ -732,11 +732,12 @@ fn free_slug(slug: &str, taken: impl Fn(&str) -> bool) -> Option<String> {
 pub fn repo_dir(toplevel: &Path) -> String {
     let name = toplevel.file_name().map_or_else(|| "repo".into(), |n| n.to_string_lossy());
     // FNV-1a: stable across Rust releases, unlike DefaultHasher
-    let hash = toplevel
-        .as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193));
+    let bytes = toplevel.as_os_str().as_encoded_bytes();
+    // git prints C:/x, std prints C:\x: one repo must hash once
+    #[cfg(windows)]
+    let bytes: Vec<u8> = bytes.iter().map(|&b| if b == b'\\' { b'/' } else { b }).collect();
+    let hash =
+        bytes.iter().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193));
     format!("{name}-{hash:08x}")
 }
 

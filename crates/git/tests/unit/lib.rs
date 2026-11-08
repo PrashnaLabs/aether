@@ -300,7 +300,7 @@ fn stage_unstage_and_commit_round_trip_in_a_temp_repo() {
     write("f[1].txt", b"bracket\n");
     write("f1.txt", b"plain\n");
     let unborn = status(&repo.join("sub")).unwrap();
-    assert_eq!(unborn.top, repo.canonicalize().unwrap());
+    assert_eq!(unborn.top, aether_core::canonicalize(&repo).unwrap());
     assert_eq!((unborn.branch.as_deref(), unborn.commit.as_deref()), (Some("main"), None));
     assert_eq!(
         paths(&unborn, false),
@@ -408,6 +408,7 @@ fn stage_unstage_and_commit_round_trip_in_a_temp_repo() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+#[cfg(unix)]
 #[test]
 fn failing_hooks_and_pushes_report_what_git_said() {
     let base = std::env::temp_dir().join(format!("aether-git-push-{}", std::process::id()));

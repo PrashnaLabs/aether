@@ -4,7 +4,6 @@ use std::{
     fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    process::Command,
     time::{Duration, SystemTime},
 };
 
@@ -57,7 +56,7 @@ impl Store {
             let Some(parent) = existing.parent() else { break };
             existing = parent;
         }
-        let root = match existing.canonicalize() {
+        let root = match aether_core::canonicalize(existing) {
             Ok(mut resolved) => {
                 for name in missing.iter().rev() {
                     resolved.push(name);
@@ -69,10 +68,7 @@ impl Store {
         Self {
             scope: root.clone(),
             root,
-            last_note_file: std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_default()
-                .join(".last_note"),
+            last_note_file: aether_core::home_dir().join(".last_note"),
         }
     }
     #[cfg(test)]
@@ -539,7 +535,7 @@ impl Store {
             return Err("Notes directory is not a Git repository; run git init there first".into());
         }
         let run = |args: &[&str]| -> Result<String> {
-            let out = Command::new("git")
+            let out = aether_core::command("git")
                 .current_dir(&self.root)
                 .args(args)
                 .output()

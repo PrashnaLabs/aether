@@ -561,13 +561,13 @@ impl ChatApp {
                         cx.listener(|this, _, _, cx| this.close_browser_tab(cx)),
                     )
                 }
-                SideTab::Board => Tab::new("side-tab-board", "Board")
-                    .icon(Lucide::LayoutDashboard)
-                    .on_close(
+                SideTab::Board => {
+                    Tab::new("side-tab-board", "Board").icon(Lucide::LayoutDashboard).on_close(
                         "side-tab-board-close",
                         "Close board tab",
                         cx.listener(|this, _, _, cx| this.close_board_tab(cx)),
-                    ),
+                    )
+                }
             };
             bar = bar.tab(el.selected(active == tab).on_click(
                 cx.listener(move |this, _, window, cx| this.select_tab(tab, window, cx)),
@@ -698,10 +698,7 @@ impl ChatApp {
 
     fn right_panel_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let tabs = Surface::tabs(self.right_review_open, self.right_browser_open, self.board_tab);
-        let active = self
-            .right_surface
-            .filter(|s| tabs.contains(s))
-            .unwrap_or(Surface::Terminal);
+        let active = self.right_surface.filter(|s| tabs.contains(s)).unwrap_or(Surface::Terminal);
         let mut bar = TabBar::new("right-panel-tab-bar")
             .tabs_id("right-panel-tabs")
             .height(px(38.))

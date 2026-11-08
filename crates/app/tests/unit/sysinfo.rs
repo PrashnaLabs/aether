@@ -62,3 +62,10 @@ fn bad_input_gives_none() {
     assert_eq!(parse_proc_stat("cpu  1 2"), None);
     assert_eq!(parse_meminfo("MemTotal: 1 kB"), None);
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_reads_cpu_and_memory() {
+    let s = sample().unwrap();
+    assert!(s.mem_total > 0 && s.mem_used <= s.mem_total && s.cpu_percent <= 100.);
+}

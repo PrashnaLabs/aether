@@ -30,7 +30,7 @@ pub fn parse_file_link(href: &str, cwd: Option<&Path>) -> Option<FileLink> {
     let href = href.trim();
     let raw = match href.strip_prefix("file://") {
         Some(rest) => match rest.strip_prefix("localhost").unwrap_or(rest) {
-            path if path.starts_with('/') => percent_decode(path)?,
+            path if path.starts_with('/') => drive_path(percent_decode(path)?),
             _ => return None,
         },
         None if has_scheme(href) => return None,
@@ -112,12 +112,25 @@ fn code_link(code: &str, cwd: &Path) -> Option<String> {
         return None;
     }
     let link = parse_file_link(code, Some(cwd))?;
-    let path = link.path.to_str().filter(|p| !p.contains(['<', '>', '\\']))?;
+    // a backslash would escape in a markdown destination, and Windows accepts `/`
+    let path = link.path.to_str()?;
+    let path = if cfg!(windows) { path.replace('\\', "/") } else { path.to_string() };
+    if path.contains(['<', '>', '\\']) {
+        return None;
+    }
     Some(match (link.line, link.col) {
         (Some(line), Some(col)) => format!("{path}#L{line}C{col}"),
         (Some(line), None) => format!("{path}#L{line}"),
         _ => path.to_string(),
     })
+}
+
+/// The `/C:/x` a file URL holds for `C:\x` is `C:/x`; anything else is unchanged.
+fn drive_path(path: String) -> String {
+    match path.as_bytes() {
+        [b'/', drive, b':', ..] if cfg!(windows) && drive.is_ascii_alphabetic() => path[1..].into(),
+        _ => path,
+    }
 }
 
 fn resolve(path: &str, cwd: Option<&Path>) -> Option<PathBuf> {

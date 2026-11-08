@@ -4,6 +4,7 @@ mod paths;
 mod request;
 mod settings;
 mod skill;
+mod sys;
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -12,7 +13,8 @@ use serde::{Deserialize, Serialize};
 pub use attachment::*;
 pub use lock::MutexExt;
 pub use paths::{
-    attachments_dir, config_dir, create_private_dir, find_binary, home_dir, repaired_path,
+    attachments_dir, canonicalize, config_dir, create_private_dir, find_binary, home_dir,
+    repaired_path, simplify,
 };
 pub use request::{
     Answer, Approval, ApprovalKind, ApprovalOption, Ask, Choice, Field, FieldKind, Form, Plan,
@@ -28,6 +30,7 @@ pub use settings::{
 pub use skill::{
     Skill, SkillSource, complete_skill, mention_at, mentioned_skills, valid_skill_name,
 };
+pub use sys::{command, random_bytes, signal_process};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {

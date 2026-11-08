@@ -340,6 +340,7 @@ dependencies = [
  "resvg 0.46.0",
  "serde",
  "serde_json",
+ "sysinfo",
  "tokio",
  "wry",
 ]
@@ -368,6 +369,7 @@ dependencies = [
 name = "aether-core"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "serde",
  "serde_json",
 ]
@@ -408,6 +410,7 @@ dependencies = [
  "aether-ui",
  "alacritty_terminal",
  "gpui-kit",
+ "sysinfo",
 ]
 
 [[package]]

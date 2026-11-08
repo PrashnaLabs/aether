@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -13,7 +13,7 @@ pub(super) const SLOW: Duration = Duration::from_secs(120);
 
 pub(super) fn run(cwd: &Path, args: &[String], timeout: Duration) -> Result<(), String> {
     let bin = find_binary("gh", "").ok_or("GitHub CLI not found")?;
-    let mut child = Command::new(bin)
+    let mut child = aether_core::command(bin)
         .args(args)
         .current_dir(cwd)
         .env("PATH", repaired_path())

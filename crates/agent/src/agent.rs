@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -247,10 +246,7 @@ impl Agent {
         if let Some((token, _)) = leads.iter().find(|(_, key)| *key == chat_key) {
             return token.clone();
         }
-        let mut bytes = [0u8; 16];
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut bytes))
-            .expect("read /dev/urandom");
+        let bytes = aether_core::random_bytes::<16>();
         let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         leads.insert(token.clone(), chat_key.to_string());
         token
@@ -1040,12 +1036,7 @@ fn reap(live: &Mutex<HashMap<String, Live>>, idle: Duration) {
 }
 
 fn process_alive(pid: u32) -> bool {
-    std::process::Command::new("/bin/kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    aether_core::signal_process(pid, "0", false)
 }
 
 /// Whether an answer lets the driver continue.
