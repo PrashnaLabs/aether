@@ -9,7 +9,7 @@ use gpui_kit::{
 };
 
 use super::chat_row::render_chat;
-use super::chrome::{nest, reveal_on_hover, row_style, tabular, tooltip};
+use super::chrome::{nest, reveal_on_hover, row_hover, row_style, tabular, tooltip};
 use super::crew::{CrewMember, CrewSummary, Tier, order, preview, starts_collapsed};
 use super::menu::track_menu;
 use super::project_row::ProjectRow;
@@ -20,6 +20,7 @@ use super::{
 };
 use crate::components::provider_icon;
 use aether_core::{Provider, SidebarStyle};
+use std::rc::Rc;
 
 /// One sidebar body row. Custom rows so chat items match the bottom
 /// navigation's sizing instead of the fixed-height menu item, and so each
@@ -82,15 +83,18 @@ pub(super) enum ChatRow {
         style: SidebarStyle,
         crew: Option<CrewSummary>,
         open: Option<bool>,
+        members: usize,
+        parent: Option<Provider>,
+        tier: Tier,
     },
     CrewMore {
         lead: i64,
         hidden: CrewSummary,
         all: bool,
         total: usize,
-        #[allow(dead_code)]
         depth: u8,
         nested: bool,
+        tier: Tier,
     },
     SectionButton {
         icon: Icon,
@@ -382,12 +386,22 @@ impl ChatRow {
                     cx,
                 )
             }
-            Self::Chat { chat, nested, rename_editor, style, crew, open } => {
+            Self::Chat {
+                chat,
+                nested,
+                rename_editor,
+                style,
+                crew,
+                open,
+                members,
+                parent,
+                tier,
+            } => {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
                     && window.last_input_was_keyboard();
                 let show = chat.active || keyboard || menu_open;
-                let child = chat.child();
+                let depth = chat.depth.min(2);
                 let lead = chat.id;
                 let toggle = open.map(|_| {
                     let state = state.clone();
@@ -399,11 +413,18 @@ impl ChatRow {
                         window.refresh();
                     }
                 });
+                let fill = if chat.active { cx.theme().sidebar_accent } else { row_hover(cx) };
                 let chevron = open.zip(toggle.clone()).map(|(open, toggle)| {
-                    div()
+                    let chevron = div()
                         .id(("crew-chevron", chat.ix))
                         .debug_selector(move || format!("crew-chevron-{lead}"))
-                        .flex_none()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(4.))
+                        .bg(fill)
                         .role(Role::Button)
                         .aria_label(format!(
                             "{} crew, {}",
@@ -423,9 +444,24 @@ impl ChatRow {
                                 IconName::ChevronRight
                             })
                             .size(rems(0.75))
-                            .text_color(cx.theme().muted_foreground),
-                        )
-                        .into_any_element()
+                            .text_color(cx.theme().foreground),
+                        );
+                    reveal_on_hover(chevron, key.clone(), keyboard).into_any_element()
+                });
+                let all = open == Some(true) && state.read(cx).crew_all.contains(&lead);
+                let show_all = (members > 5).then(|| {
+                    let state = state.clone();
+                    let toggle: RowHandler = Rc::new(move |_, window, cx| {
+                        state.update(cx, |s, cx| {
+                            if !s.crew_all.remove(&lead) || !all {
+                                s.crew_all.insert(lead);
+                                s.crew_open.insert(lead, true);
+                            }
+                            cx.notify();
+                        });
+                        window.refresh();
+                    });
+                    (show_all_label(all, members), toggle)
                 });
                 let nav = move |ev: &KeyDownEvent, window: &mut Window, cx: &mut App| {
                     let next = match ev.keystroke.key.as_str() {
@@ -451,12 +487,15 @@ impl ChatRow {
                     rename_editor,
                     style,
                     chevron,
+                    crew.zip(open),
+                    show_all,
+                    parent,
+                    tier,
                     cx,
                 );
-                let row = nest(row, nested, cx);
-                if child { nest(row, true, cx) } else { row }
+                (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
             }
-            Self::CrewMore { lead, hidden, all, total, nested, .. } => {
+            Self::CrewMore { lead, hidden, all, total, depth, nested, tier } => {
                 let state = state.clone();
                 let row = h_flex()
                     .w_full()
@@ -465,11 +504,24 @@ impl ChatRow {
                     .gap_2()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .when(!all, |row| row.child(format!("+{} more", hidden.total())))
+                    .justify_between()
+                    .child(div().min_w_0().truncate().when(!all, |el| {
+                        el.child(if tier == Tier::Wide {
+                            hidden
+                                .parts(Tier::Wide)
+                                .iter()
+                                .map(|(b, n)| format!("+{n} {}", b.word()))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        } else {
+                            format!("+{} more", hidden.total())
+                        })
+                    }))
                     .child(
                         div()
                             .id("crew-more")
                             .debug_selector(move || format!("crew-more-{lead}"))
+                            .flex_none()
                             .role(Role::Button)
                             .cursor_pointer()
                             .hover(|s| s.text_color(cx.theme().sidebar_foreground))
@@ -488,7 +540,7 @@ impl ChatRow {
                                 window.refresh();
                             }),
                     );
-                nest(nest(row.into_any_element(), nested, cx), true, cx)
+                (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
             }
             Self::SectionButton { icon, label, aria, count, on_click } => {
                 let muted = cx.theme().muted_foreground;
@@ -614,6 +666,10 @@ pub fn outside_aria(count: usize) -> String {
     format!("Outside aether, {agents}")
 }
 
+fn show_all_label(all: bool, total: usize) -> SharedString {
+    if all { "Show fewer agents".into() } else { format!("Show all {total} agents").into() }
+}
+
 pub(super) fn chat_key(id: i64) -> SharedString {
     format!("chat:{id}").into()
 }
@@ -648,28 +704,48 @@ impl ChatSidebar {
         nested: bool,
         crew: Option<CrewSummary>,
         open: Option<bool>,
+        members: usize,
+        parent: Option<Provider>,
     ) -> ChatRow {
         chat.now = self.now;
         let rename_editor =
             self.rename_ix.filter(|ix| *ix == chat.ix).and(self.rename_input.clone());
-        ChatRow::Chat { chat, nested, rename_editor, style: self.style, crew, open }
+        ChatRow::Chat {
+            chat,
+            nested,
+            rename_editor,
+            style: self.style,
+            crew,
+            open,
+            members,
+            parent,
+            tier: self.tier,
+        }
     }
 
     fn crew_rows(&self, chats: Vec<ChatItem>, nested: bool) -> Vec<ChatRow> {
         let mut out = Vec::new();
         for (head, rest) in families(chats) {
-            self.family(head, rest, nested, &mut out);
+            self.family(head, rest, nested, None, &mut out);
         }
         out
     }
 
-    fn family(&self, head: ChatItem, rest: Vec<ChatItem>, nested: bool, out: &mut Vec<ChatRow>) {
+    fn family(
+        &self,
+        head: ChatItem,
+        rest: Vec<ChatItem>,
+        nested: bool,
+        parent: Option<Provider>,
+        out: &mut Vec<ChatRow>,
+    ) {
         if self.style == SidebarStyle::Focus || !head.lead || rest.is_empty() {
-            out.push(self.chat_row(head, nested, None, None));
+            out.push(self.chat_row(head, nested, None, None, 0, parent));
             out.extend(self.crew_rows(rest, nested));
             return;
         }
         let lead = head.id;
+        let provider = head.line.as_ref().map(|line| line.provider);
         let depth = head.depth.saturating_add(1).min(2);
         let summary = summarize(&rest);
         let members = families(rest);
@@ -690,14 +766,14 @@ impl ChatSidebar {
             .collect();
         order(&mut crew);
         let shown = preview(&crew, open, all);
-        out.push(self.chat_row(head, nested, Some(summary), Some(open)));
+        out.push(self.chat_row(head, nested, Some(summary), Some(open), crew.len(), parent));
         let mut members: Vec<_> = members.into_iter().map(Some).collect();
         for (member, _) in crew.iter().zip(&shown.visible).filter(|(_, v)| **v) {
             if let Some((chat, rest)) = members[member.ix].take() {
-                self.family(chat, rest, nested, out);
+                self.family(chat, rest, nested, provider, out);
             }
         }
-        if open && (all || shown.hidden.total() > 0) {
+        if open && (shown.hidden.total() > 0 || (all && crew.len() > 5)) {
             out.push(ChatRow::CrewMore {
                 lead,
                 hidden: shown.hidden,
@@ -705,6 +781,7 @@ impl ChatSidebar {
                 total: crew.len(),
                 depth,
                 nested,
+                tier: self.tier,
             });
         }
     }

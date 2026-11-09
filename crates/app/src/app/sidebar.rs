@@ -772,6 +772,7 @@ impl ChatApp {
         let (resize, resize_end, watch, handoff) =
             (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)
+            .width(self.settings.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
             .now(now_ms())
             .handoff(
                 self.handoff_targets(None),

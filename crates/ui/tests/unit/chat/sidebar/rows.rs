@@ -1,5 +1,7 @@
 use super::super::{ChatStatus, ClickEvent};
 use super::*;
+use std::cell::Cell;
+use std::rc::Rc;
 
 #[test]
 fn sidebar_custom_sections() {
@@ -187,6 +189,30 @@ fn show_all_lists_every_child() {
 }
 
 #[test]
+fn small_crew_has_no_show_fewer_line() {
+    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 5], None);
+    sidebar.crew_all.insert(10);
+    assert!(!keys(&mut sidebar).iter().any(|k| k.starts_with("crew-more")));
+}
+
+#[test]
+fn show_all_menu_label_names_the_crew_size() {
+    assert_eq!(show_all_label(false, 15).as_ref(), "Show all 15 agents");
+    assert_eq!(show_all_label(true, 15).as_ref(), "Show fewer agents");
+}
+
+#[test]
+fn tier_change_keeps_row_keys() {
+    let mut narrow = crew_sidebar(&mixed_crew(), Some(12)).width(200.);
+    let mut wide = crew_sidebar(&mixed_crew(), Some(12)).width(480.);
+    narrow.crew_open.insert(10, true);
+    wide.crew_open.insert(10, true);
+    assert_eq!(narrow.tier, Tier::Narrow);
+    assert_eq!(wide.tier, Tier::Wide);
+    assert_eq!(keys(&mut narrow), keys(&mut wide));
+}
+
+#[test]
 fn collapsing_hides_busy_children() {
     let mut sidebar = crew_sidebar(
         &[ChatStatus::Working { since_ms: 0 }, ChatStatus::Waiting, ChatStatus::Failed],
@@ -279,6 +305,7 @@ fn default_crew_sidebar(statuses: &[ChatStatus], selected: Option<usize>) -> Cha
 struct CrewPreview {
     state: Option<Entity<SidebarState>>,
     style: SidebarStyle,
+    opened: Rc<Cell<bool>>,
 }
 
 impl gpui_kit::Render for CrewPreview {
@@ -289,11 +316,19 @@ impl gpui_kit::Render for CrewPreview {
     ) -> impl IntoElement {
         self.state =
             Some(window.use_keyed_state("chat-sidebar", cx, |window, _| SidebarState::new(window)));
-        let sidebar = if self.style == SidebarStyle::Default {
+        let mut sidebar = if self.style == SidebarStyle::Default {
             default_crew_sidebar(&[ChatStatus::Done; 7], None)
         } else {
             crew_sidebar(&[ChatStatus::Done; 7], None)
         };
+        let opened = self.opened.clone();
+        let on_click: RowHandler = Rc::new(move |_, _, _| opened.set(true));
+        let sections = sidebar.custom_sections.iter_mut().flat_map(|(_, chats)| chats);
+        for chat in sections.chain(sidebar.projects.iter_mut().flat_map(|p| &mut p.chats)) {
+            if chat.id == 10 {
+                chat.on_click = on_click.clone();
+            }
+        }
         sidebar.render(window, cx)
     }
 }
@@ -302,7 +337,9 @@ impl gpui_kit::Render for CrewPreview {
 fn crew_toggle_supports_click_and_keyboard_and_retains_state(cx: &mut gpui_kit::TestAppContext) {
     cx.update(gpui_kit::init);
     for style in [SidebarStyle::Minimal, SidebarStyle::Default] {
-        let window = cx.add_window(|_, _| CrewPreview { state: None, style });
+        let opened = Rc::new(Cell::new(false));
+        let window =
+            cx.add_window(|_, _| CrewPreview { state: None, style, opened: opened.clone() });
         let preview = window.root(cx).unwrap();
         let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
         let state = |visual: &mut gpui_kit::VisualTestContext| {
@@ -320,6 +357,7 @@ fn crew_toggle_supports_click_and_keyboard_and_retains_state(cx: &mut gpui_kit::
         let chevron = visual.debug_bounds("crew-chevron-10").expect("lead chevron");
         visual.simulate_click(chevron.center(), gpui_kit::Modifiers::default());
         assert_eq!(open(&mut visual), Some(true));
+        assert!(!opened.get(), "chevron click must not open the lead chat");
         let more = visual.debug_bounds("crew-more-10").expect("show all target");
         visual.simulate_click(more.center(), gpui_kit::Modifiers::default());
         let s = state(&mut visual);

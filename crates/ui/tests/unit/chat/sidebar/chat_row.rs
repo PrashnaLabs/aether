@@ -64,19 +64,55 @@ fn aria_carries_hover_card_lines() {
         background: 0,
     };
     assert_eq!(
-        aria("Project Purpose", ChatStatus::Done, false, Some(&line)),
+        aria("Project Purpose", ChatStatus::Done, false, Some(&line), None),
         "Project Purpose, new reply, auto-clicker, Branch feat/autoclicker, \
          OpenCode DeepSeek V4.1 Flash Free, 15h"
     );
     let bare = ChatLine { project: None, place: None, ..line };
     assert_eq!(
-        aria("Greeting", ChatStatus::Idle, false, Some(&bare)),
+        aria("Greeting", ChatStatus::Idle, false, Some(&bare), None),
         "Greeting, No project, OpenCode DeepSeek V4.1 Flash Free, 15h"
     );
-    assert_eq!(aria("Plain", ChatStatus::Idle, false, None), "Plain");
+    assert_eq!(aria("Plain", ChatStatus::Idle, false, None, None), "Plain");
     assert_eq!(
-        aria("Greeting", ChatStatus::Idle, true, Some(&bare)),
+        aria("Greeting", ChatStatus::Idle, true, Some(&bare), None),
         "Greeting, Lead, No project, OpenCode DeepSeek V4.1 Flash Free, 15h"
+    );
+}
+
+#[test]
+fn lead_aria_reads_spawned_count_and_rollup() {
+    use super::super::crew::CrewSummary;
+    let line = ChatLine {
+        provider: aether_core::Provider::Claude,
+        project: Some("aether".into()),
+        model: "Opus".into(),
+        place: None,
+        time: "2m".into(),
+        path: "/repo".into(),
+        removed: false,
+        changed: 0,
+        added: 0,
+        deleted: 0,
+        ahead_behind: None,
+        background: 0,
+    };
+    let summary = CrewSummary { needs_you: 1, failed: 0, working: 2, done: 12 };
+    assert_eq!(
+        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, false))),
+        "Lead, Title, 15 spawned agents, 1 needs you, 2 working, 12 done, collapsed"
+    );
+    assert!(
+        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, true)))
+            .ends_with(", expanded")
+    );
+}
+
+#[test]
+fn child_aria_is_short() {
+    assert_eq!(
+        aria("Title", ChatStatus::Working { since_ms: 0 }, false, None, None),
+        "Title, working"
     );
 }
 

@@ -21,6 +21,15 @@ impl Bucket {
             ChatStatus::Done | ChatStatus::Idle => Bucket::Done,
         }
     }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Bucket::NeedsYou => "needs you",
+            Bucket::Failed => "failed",
+            Bucket::Working => "working",
+            Bucket::Done => "done",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,20 +85,27 @@ impl CrewSummary {
         .map(|(_, b)| b)
     }
 
+    /// Non-empty buckets the tier shows; below Wide only busy ones, unless all are done.
+    pub fn parts(&self, tier: Tier) -> Vec<(Bucket, usize)> {
+        let all = [
+            (Bucket::NeedsYou, self.needs_you),
+            (Bucket::Failed, self.failed),
+            (Bucket::Working, self.working),
+            (Bucket::Done, self.done),
+        ];
+        let busy: Vec<_> = all[..3].iter().copied().filter(|(_, n)| *n > 0).collect();
+        if tier != Tier::Wide && !busy.is_empty() {
+            return busy;
+        }
+        all.into_iter().filter(|(_, n)| *n > 0).collect()
+    }
+
     pub fn words(&self, tier: Tier) -> String {
-        let join = |parts: &[(usize, &str)]| {
-            parts
-                .iter()
-                .filter(|(n, _)| *n > 0)
-                .map(|(n, w)| format!("{n} {w}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let busy =
-            [(self.needs_you, "needs you"), (self.failed, "failed"), (self.working, "working")];
-        let all = [busy[0], busy[1], busy[2], (self.done, "done")];
-        let text = join(if tier == Tier::Wide { &all } else { &busy });
-        if text.is_empty() { join(&all) } else { text }
+        self.parts(tier)
+            .iter()
+            .map(|(b, n)| format!("{n} {}", b.word()))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 

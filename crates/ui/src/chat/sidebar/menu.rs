@@ -122,6 +122,7 @@ pub(super) fn project_menu(
 pub(super) fn chat_menu(
     menu: PopupMenu,
     chat: &ChatItem,
+    crew: Option<(SharedString, RowHandler)>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
@@ -181,6 +182,14 @@ pub(super) fn chat_menu(
                     .on_click(move |_, window, cx| on_watch(id, window, cx)),
             )
         }
+        None => menu,
+    };
+    let menu = match crew {
+        Some((label, toggle)) => menu.item(
+            PopupMenuItem::new(label)
+                .icon(Lucide::Users)
+                .on_click(move |ev, window, cx| toggle(ev, window, cx)),
+        ),
         None => menu,
     };
     let menu = match chat.line.as_ref() {

@@ -8,19 +8,22 @@ use gpui_kit::component::{
     hover_card::HoverCard,
     input::InputState,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu},
+    spinner::Spinner,
     v_flex,
 };
 use gpui_kit::{
     Anchor, AnyElement, App, ClickEvent, Div, Entity, FocusHandle, Hsla, KeyDownEvent, MouseButton,
-    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, rems,
+    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, relative, rems,
 };
 
 use super::chrome::{reveal_on_hover, row_style, swallow_click, tabular, tooltip};
+use super::crew::{Bucket, CrewSummary, Tier};
 use super::menu::chat_menu;
-use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowPlace};
+use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowHandler, RowPlace};
 use crate::arrow_count;
 use crate::components::provider_icon;
-use aether_core::SidebarStyle;
+use crate::theme::{danger_text, info_text, mango_text};
+use aether_core::{Provider, SidebarStyle};
 
 /// Keeps both ends of a long name, which is where branch names differ.
 pub fn middle_truncate(text: &str, max: usize) -> String {
@@ -132,7 +135,23 @@ fn project_label(project: Option<&SharedString>) -> SharedString {
 }
 
 /// Row label for screen readers; also carries the hover card's lines.
-pub(super) fn aria(title: &str, status: ChatStatus, lead: bool, line: Option<&ChatLine>) -> String {
+pub(super) fn aria(
+    title: &str,
+    status: ChatStatus,
+    lead: bool,
+    line: Option<&ChatLine>,
+    crew: Option<(CrewSummary, bool)>,
+) -> String {
+    if let Some((summary, open)) = crew {
+        let mut aria = vec!["Lead".to_string(), title.to_string()];
+        if status != ChatStatus::Idle {
+            aria.push(status.label().into());
+        }
+        aria.push(format!("{} spawned agents", summary.total()));
+        aria.push(summary.words(Tier::Wide));
+        aria.push(if open { "expanded" } else { "collapsed" }.into());
+        return aria.join(", ");
+    }
     let mut aria = vec![title.to_string()];
     if status != ChatStatus::Idle {
         aria.push(status.label().into());
@@ -162,6 +181,109 @@ pub(super) fn aria(title: &str, status: ChatStatus, lead: bool, line: Option<&Ch
         aria.push(line.time.to_string());
     }
     aria.join(", ")
+}
+
+pub(super) fn rollup(summary: CrewSummary, tier: Tier, cx: &App) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    let color = |bucket: Bucket| match bucket {
+        Bucket::NeedsYou => mango_text(cx),
+        Bucket::Failed => danger_text(cx),
+        Bucket::Working => cx.theme().foreground,
+        Bucket::Done => muted,
+    };
+    let parts = summary.parts(tier);
+    if tier == Tier::Narrow {
+        let glyph = |bucket: Bucket| {
+            let icon = |name: Lucide, color: Hsla| {
+                Icon::new(name).size(rems(0.75)).text_color(color).into_any_element()
+            };
+            match bucket {
+                Bucket::NeedsYou => icon(Lucide::CircleDot, color(bucket)),
+                Bucket::Failed => icon(Lucide::CircleX, color(bucket)),
+                Bucket::Working => Spinner::new().xsmall().color(color(bucket)).into_any_element(),
+                Bucket::Done => icon(Lucide::CircleCheck, info_text(cx)),
+            }
+        };
+        return h_flex()
+            .flex_none()
+            .gap_1p5()
+            .items_center()
+            .text_xs()
+            .font_features(tabular())
+            .children(parts.into_iter().map(|(bucket, n)| {
+                h_flex()
+                    .gap_0p5()
+                    .items_center()
+                    .text_color(color(bucket))
+                    .child(glyph(bucket))
+                    .child(n.to_string())
+            }))
+            .into_any_element();
+    }
+    h_flex()
+        .min_w_0()
+        .overflow_hidden()
+        .text_xs()
+        .text_color(muted)
+        .font_features(tabular())
+        .children(parts.into_iter().enumerate().map(|(i, (bucket, n))| {
+            h_flex().flex_none().when(i > 0, |el| el.child(div().mr_1().child(","))).child(
+                div()
+                    .text_color(color(bucket))
+                    .when(bucket == Bucket::NeedsYou, |el| el.font_semibold())
+                    .child(format!("{n} {}", bucket.word())),
+            )
+        }))
+        .into_any_element()
+}
+
+pub(super) fn status_bar(summary: CrewSummary, cx: &App) -> AnyElement {
+    let total = summary.total().max(1) as f32;
+    let segment = |n: usize, color: Hsla| {
+        (n > 0).then(|| div().h_full().min_w(px(2.)).w(relative(n as f32 / total)).bg(color))
+    };
+    h_flex()
+        .w_full()
+        .h(px(3.))
+        .gap(px(1.))
+        .rounded(px(2.))
+        .overflow_hidden()
+        .bg(cx.theme().foreground.opacity(0.05))
+        .children(segment(summary.done, info_text(cx).opacity(0.55)))
+        .children(segment(summary.working, cx.theme().foreground.opacity(0.7)))
+        .children(segment(summary.needs_you, mango_text(cx)))
+        .children(segment(summary.failed, danger_text(cx)))
+        .into_any_element()
+}
+
+fn with_card(
+    row: impl IntoElement + 'static,
+    ix: usize,
+    title: SharedString,
+    line: Option<ChatLine>,
+) -> AnyElement {
+    match line {
+        Some(line) => HoverCard::new(("chat-card", ix))
+            .anchor(Anchor::LeftCenter)
+            .ml_2()
+            .trigger(row)
+            .content(move |_, _, cx| card(title.clone(), line.clone(), cx))
+            .into_any_element(),
+        None => row.into_any_element(),
+    }
+}
+
+fn swap(mark: AnyElement, chevron: Option<AnyElement>) -> AnyElement {
+    div()
+        .relative()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(rems(1.))
+        .child(mark)
+        .children(chevron)
+        .into_any_element()
 }
 
 fn card(title: SharedString, line: ChatLine, cx: &App) -> impl IntoElement + use<> {
@@ -250,6 +372,10 @@ pub(super) fn render_chat(
     rename: Option<Entity<InputState>>,
     style: SidebarStyle,
     chevron: Option<AnyElement>,
+    crew: Option<(CrewSummary, bool)>,
+    show_all: Option<(SharedString, RowHandler)>,
+    parent: Option<Provider>,
+    tier: Tier,
     cx: &App,
 ) -> AnyElement {
     let muted = cx.theme().muted_foreground;
@@ -259,18 +385,19 @@ pub(super) fn render_chat(
     let slot = |mark: AnyElement| pick_slot(mark, pick.as_ref(), &pick_group, pick_id, &title);
     let status = chat.status;
     let now = chat.now;
-    let aria = aria(&title, status, chat.lead, chat.line.as_ref());
+    let child = chat.child();
+    let aria = aria(&title, status, chat.lead, chat.line.as_ref().filter(|_| !child), crew);
     let removed = chat.line.as_ref().is_some_and(|line| line.removed);
     let menu = {
-        let chat = chat.clone();
+        let (chat, show_all) = (chat.clone(), show_all.clone());
         move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| {
-            chat_menu(menu, &chat, window, cx)
+            chat_menu(menu, &chat, show_all.clone(), window, cx)
         }
     };
     let context = {
         let chat = chat.clone();
         move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| {
-            chat_menu(menu, &chat, window, cx)
+            chat_menu(menu, &chat, show_all.clone(), window, cx)
         }
     };
     let actions = reveal_on_hover(div().flex_none().size(rems(1.25)), group.clone(), show_menu)
@@ -307,9 +434,10 @@ pub(super) fn render_chat(
                     .min_w_0()
                     .truncate()
                     .when(removed, |el| el.text_color(muted))
+                    .when(crew.is_some() && !child, |el| el.font_semibold())
                     .when_some(tip, |el, tip| el.tooltip(tooltip(tip)))
                     .child(title);
-                if !lead {
+                if !lead || crew.is_some() || child {
                     return title.into_any_element();
                 }
                 h_flex()
@@ -317,7 +445,6 @@ pub(super) fn render_chat(
                     .min_w_0()
                     .gap_1()
                     .items_center()
-                    .children(chevron)
                     .child(
                         div()
                             .id(("chat-lead", ix))
@@ -368,6 +495,87 @@ pub(super) fn render_chat(
                 on_click(ev, window, cx);
             })
     });
+    let card_line = line.clone().filter(|_| style == SidebarStyle::Default);
+    let time = line.as_ref().map(|line| line.time.clone()).unwrap_or_default();
+    let time_text = |time: SharedString| {
+        div().flex_none().text_xs().text_color(muted).font_features(tabular()).child(time)
+    };
+    if child {
+        let mark = match (status, line.as_ref()) {
+            (ChatStatus::Idle, Some(line)) if crew.is_some() => {
+                provider_icon(line.provider).size(rems(0.8125)).into_any_element()
+            }
+            (ChatStatus::Idle, _) => div().into_any_element(),
+            _ => status.badge(("chat-status-badge", ix), None, cx),
+        };
+        let model = line
+            .as_ref()
+            .map(|line| line.model.clone())
+            .filter(|model| tier != Tier::Narrow && !model.is_empty());
+        let provider = line
+            .as_ref()
+            .map(|line| line.provider)
+            .filter(|p| tier == Tier::Wide || parent != Some(*p));
+        let one = h_flex()
+            .w_full()
+            .gap_1p5()
+            .items_center()
+            .child(slot(swap(mark, chevron)))
+            .child(title_cell(title.clone()))
+            .children(model.map(|model| {
+                div()
+                    .flex_none()
+                    .max_w(rems(7.))
+                    .truncate()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(model)
+            }))
+            .children(provider.map(|p| provider_icon(p).size(rems(0.8125)).flex_none()))
+            .children(crew.map(|(summary, _)| rollup(summary, Tier::Narrow, cx)))
+            .when(tier != Tier::Narrow && !time.is_empty(), |el| el.child(time_text(time)))
+            .children(approve_action)
+            .child(actions);
+        return with_card(row.child(one).context_menu(context), ix, title, card_line);
+    }
+    if let Some((summary, _)) = crew {
+        let icon = match line.as_ref() {
+            Some(line) => provider_icon(line.provider).size(rems(0.875)).into_any_element(),
+            None => Icon::new(Lucide::Users).size(rems(0.875)).text_color(muted).into_any_element(),
+        };
+        let trailing = match status {
+            ChatStatus::Idle => time_text(time).into_any_element(),
+            _ => status.badge(("chat-status-badge", ix), Some(now), cx),
+        };
+        let model = line.as_ref().map(|line| line.model.clone()).filter(|_| tier == Tier::Wide);
+        let top = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .child(slot(swap(icon, chevron)))
+            .child(title_cell(title.clone()))
+            .children(model.map(|model| {
+                div()
+                    .flex_none()
+                    .max_w(rems(8.))
+                    .truncate()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(model)
+            }))
+            .child(trailing)
+            .children(approve_action)
+            .child(actions);
+        let row = row
+            .gap_0p5()
+            .child(top)
+            .child(div().pl(rems(1.5)).child(rollup(summary, tier, cx)))
+            .when(style == SidebarStyle::Default, |row| {
+                row.child(div().pl(rems(1.5)).pt_1().pb_0p5().child(status_bar(summary, cx)))
+            })
+            .context_menu(context);
+        return with_card(row, ix, title, card_line);
+    }
     let Some(line) = line else {
         let title_row = h_flex()
             .w_full()
@@ -589,12 +797,7 @@ pub(super) fn render_chat(
         .children(background)
         .child(provider_icon(line.provider).size(rems(0.8125)).flex_none());
     let row = row.gap_0p5().children(top).child(title_line).child(bottom).context_menu(context);
-    HoverCard::new(("chat-card", ix))
-        .anchor(Anchor::LeftCenter)
-        .ml_2()
-        .trigger(row)
-        .content(move |_, _, cx| card(title.clone(), line.clone(), cx))
-        .into_any_element()
+    with_card(row, ix, title, Some(line))
 }
 
 #[cfg(test)]

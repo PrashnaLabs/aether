@@ -492,6 +492,7 @@ pub struct ChatSidebar {
     rename_ix: Option<usize>,
     rename_input: Option<Entity<InputState>>,
     width: f32,
+    tier: crew::Tier,
     on_resize: Option<ResizeHandler>,
     on_resize_end: Option<ResizeEndHandler>,
     now: i64,
@@ -536,6 +537,7 @@ impl ChatSidebar {
             rename_ix: None,
             rename_input: None,
             width: SIDEBAR_WIDTH,
+            tier: crew::Tier::of(SIDEBAR_WIDTH),
             on_resize: None,
             on_resize_end: None,
             now: 0,
@@ -896,6 +898,12 @@ impl ChatSidebar {
             picking: !picked.is_empty(),
             on_toggle: on_toggle.clone(),
         })
+    }
+
+    pub fn width(mut self, px: f32) -> Self {
+        self.width = px;
+        self.tier = crew::Tier::of(px);
+        self
     }
 
     pub fn style(mut self, style: SidebarStyle) -> Self {
