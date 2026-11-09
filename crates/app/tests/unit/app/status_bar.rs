@@ -22,7 +22,7 @@ fn open(cx: &mut TestAppContext, size: Option<(f32, f32)>) -> (AnyWindowHandle, 
                 ChatApp::with_state(
                     Agent::new().unwrap(),
                     Settings {
-                        provider: Provider::OpenRouter,
+                        provider: Some(Provider::OpenRouter),
                         workspace_root: std::env::temp_dir().to_string_lossy().into_owned(),
                         ..Settings::default()
                     },

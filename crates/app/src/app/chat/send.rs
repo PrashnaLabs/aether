@@ -386,7 +386,7 @@ impl ChatApp {
         let chat = &self.chats[ix];
         // Chat's own provider and model win; an empty CLI model omits `--model`.
         let mut effective = self.settings.clone();
-        effective.provider = chat.provider;
+        effective.provider = Some(chat.provider);
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
         let session = ChatSession {
             ephemeral: false,

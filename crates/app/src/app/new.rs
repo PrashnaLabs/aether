@@ -530,6 +530,7 @@ impl ChatApp {
             provider_plan_usages: HashMap::new(),
             plan_usage_at: HashMap::new(),
             usage_attempt_at: 0,
+            detected_provider: None,
             sys_sample: None,
             usage_pop: super::status_bar::UsagePop::new(cx),
             crew_pop: false,
@@ -899,6 +900,7 @@ impl ChatApp {
             .detach();
         }
         app.refresh_all_provider_usages(cx);
+        app.detect_subscription(cx);
         app
     }
 }
