@@ -729,8 +729,8 @@ impl ChatSidebar {
     }
 
     /// Adds a chat row; `id` keeps its scroll anchor and focus across reorders.
-    /// Pinned chats go to Pinned and, with a project, stay in it; others to project `project` (an index from
-    /// [`Self::project`]), its worktree `worktree` (an index from
+    /// Pinned chats go to Pinned and also stay in their normal place: project
+    /// `project` (an index from [`Self::project`]), its worktree `worktree` (an index from
     /// [`Self::worktree`]), or the plain Chats list. `line` makes it a
     /// two-line agent row. `on_remove_worktree` adds "Remove worktree…" to
     /// its menu.
@@ -785,7 +785,6 @@ impl ChatSidebar {
             self.pinned.push(ChatItem { pin: true, ..item.clone() });
         }
         match (project, worktree) {
-            _ if pinned && project.is_none() => {}
             (Some(k), Some(w))
                 if k < self.projects.len() && w < self.projects[k].worktrees.len() =>
             {

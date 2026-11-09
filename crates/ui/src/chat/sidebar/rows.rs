@@ -1063,13 +1063,16 @@ impl ChatSidebar {
                 tools,
             });
         }
-        let mut renaming = false;
-        for row in &mut rows {
-            if let ChatRow::Chat { rename_editor, .. } = row
-                && rename_editor.is_some()
-                && std::mem::replace(&mut renaming, true)
-            {
-                *rename_editor = None;
+        let in_place = rows
+            .iter()
+            .any(|r| matches!(r, ChatRow::Chat { chat, rename_editor: Some(_), .. } if !chat.pin));
+        if in_place {
+            for row in &mut rows {
+                if let ChatRow::Chat { chat, rename_editor, .. } = row
+                    && chat.pin
+                {
+                    *rename_editor = None;
+                }
             }
         }
         if rows.is_empty() {

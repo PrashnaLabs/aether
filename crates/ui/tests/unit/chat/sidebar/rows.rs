@@ -575,6 +575,7 @@ fn agents_and_pinned_collapse_independently() {
         if !pinned_collapsed {
             expected.push("pin:7");
         }
+        expected.extend(["caption:Chats", "chat:7"]);
         assert_eq!(actual, expected);
         for (title, collapsed) in [("Agents", agents_collapsed), ("Pinned", pinned_collapsed)] {
             let heading =
@@ -809,4 +810,29 @@ fn pinned_lead_shows_rollup_without_crew_in_pinned() {
 
 fn keys_of(rows: &[ChatRow]) -> Vec<String> {
     rows.iter().map(|r| r.key().to_string()).collect()
+}
+
+#[test]
+fn pinned_chat_without_project_also_lists_in_chats() {
+    let mut sidebar = ChatSidebar::new("Aether").chat(
+        0,
+        7,
+        "t",
+        false,
+        ChatStatus::Idle,
+        true,
+        None,
+        None,
+        None,
+        |_, _, _| {},
+        |_, _, _| {},
+        |_, _, _| {},
+        |_, _, _| {},
+        |_, _, _| {},
+        |_, _, _| {},
+        None,
+        None,
+    );
+    let keys = keys(&mut sidebar);
+    assert!(keys.contains(&"pin:7".to_string()) && keys.contains(&"chat:7".to_string()));
 }
