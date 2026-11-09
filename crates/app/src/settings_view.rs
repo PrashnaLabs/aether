@@ -81,14 +81,18 @@ fn next_settings_tab(current: SettingsTab, next: bool) -> SettingsTab {
 }
 
 impl ChatApp {
-    pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn render_settings(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         use crate::actions::{SettingsDismiss, SettingsSearch};
         let query = self.settings_search_input.read(cx).value();
         let searching = !query.trim().is_empty();
         let matches = if searching { search_settings(&query) } else { Vec::new() };
         let mut page =
             SettingsPage::new(if searching { "Search Results" } else { self.settings_tab.label() })
-                .sidebar(self.render_settings_sidebar(&matches, searching, cx))
+                .sidebar(self.render_settings_sidebar(&matches, searching, window, cx))
                 .subtitle(if searching {
                     format!("{} matches for \"{}\"", matches.len(), query)
                 } else {
@@ -1852,6 +1856,7 @@ impl ChatApp {
         &self,
         matches: &[&SettingItem],
         searching: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         use crate::actions::{SettingsNext, SettingsPrevious};
@@ -1952,6 +1957,12 @@ impl ChatApp {
             .min_h_0()
             .overflow_y_scroll()
             .p_4()
+            .when(
+                cfg!(target_os = "macos")
+                    && self.settings.sidebar_collapsed
+                    && !window.is_fullscreen(),
+                |el| el.pt(px(40.)),
+            )
             .gap_5()
             .border_r_1()
             .border_color(cx.theme().border)

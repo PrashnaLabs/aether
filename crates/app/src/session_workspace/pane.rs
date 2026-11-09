@@ -308,6 +308,16 @@ impl ChatApp {
                         layout.root.as_ref().and_then(|root| root.leaves().first().copied())
                     })
                     .or_else(|| layout.panes().first().copied());
+                let inset = leading == Some(pane) && self.settings.sidebar_collapsed;
+                let beside_rail = inset
+                    && cfg!(target_os = "macos")
+                    && !window.is_fullscreen()
+                    && crate::side_panel::chat_body_in_sidebar(
+                        self.settings.chat_layout,
+                        self.side_open(),
+                    );
+                let lights = aether_ui::traffic_lights_gap(inset, window, cx)
+                    .when(beside_rail, |gap| gap.w(px(40.)));
                 let pop = focused.then(|| self.render_workspace_pop(window, cx)).flatten();
                 let merged = self.render_header_with_pane(
                     pop,
@@ -325,6 +335,7 @@ impl ChatApp {
                     .bg(cx.theme().foreground.opacity(if focused { 0.035 } else { 0.015 }))
                     .border_b_1()
                     .border_color(cx.theme().foreground.opacity(0.055))
+                    .child(lights)
                     .child(merged)
                     .when(!self.side_open(), |header| {
                         header.child(aether_ui::window_controls_gap(window))

@@ -59,6 +59,8 @@ pub struct TerminalWorkspace {
     pub full_page: bool,
     /// Header sits at the window's top edge, under the floating window controls.
     pub window_top: bool,
+    /// Header sits under the macOS traffic lights.
+    pub lights: bool,
     /// Shows the hide (X) button.
     pub hideable: bool,
     pub watched: Option<bool>,
@@ -105,6 +107,7 @@ impl TerminalWorkspace {
             shown: false,
             full_page: false,
             window_top: false,
+            lights: false,
             hideable: false,
             watched: None,
             option_as_meta: false,

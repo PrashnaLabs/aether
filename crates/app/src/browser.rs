@@ -438,6 +438,8 @@ pub(crate) struct Browser {
     pub(crate) covered: bool,
     /// Keep the bottom strip clear for the watch-list button, which a native view would cover.
     pub(crate) watch_strip: bool,
+    /// Toolbar sits under the macOS traffic lights.
+    pub(crate) lights: bool,
     browsers: Vec<OpenApp>,
     browsers_found: bool,
     selected_browser: Option<usize>,
@@ -518,6 +520,7 @@ impl Browser {
             error: None,
             shown: false,
             covered: false,
+            lights: false,
             watch_strip: true,
             browsers: Vec::new(),
             browsers_found: false,
@@ -751,6 +754,7 @@ impl Browser {
 impl Render for Browser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.show_url(window, cx);
+        let lights = aether_ui::traffic_lights_gap(self.lights, window, cx);
         let theme = cx.theme();
         let (border, muted, bg, danger) = (
             theme.sidebar_border,
@@ -843,6 +847,7 @@ impl Render for Browser {
             .items_center()
             .border_b_1()
             .border_color(border)
+            .child(lights)
             .child(match self.home.clone() {
                 Some((icon, label, on_click)) => aether_ui::button("browser-home")
                     .ghost()
