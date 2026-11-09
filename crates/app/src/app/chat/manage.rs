@@ -12,7 +12,7 @@ use aether_ui::{
 };
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{ButtonVariant, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Sizable, h_flex};
+use gpui_kit::component::{ActiveTheme, Sizable, checkbox::Checkbox, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, ClipboardItem, Context, FontWeight, Role, SharedString, Window, div, prelude::*, px,
 };
@@ -108,19 +108,93 @@ impl ChatApp {
         if let Some(job) = self.terminal_job(chat.id, cx) {
             text.push_str(&format!(" Its terminal is running {job}, which will be stopped."));
         }
+        let crew = if chat.lead { self.crew_ids(id) } else { Vec::new() };
+        let with_crew = Rc::new(std::cell::Cell::new(false));
         let view = cx.entity();
         aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
-            let view = view.clone();
+            let (view, crew, with_crew) = (view.clone(), crew.clone(), with_crew.clone());
             alert
                 .confirm()
                 .title(SharedString::from(format!("Delete “{title}”?")))
-                .description(SharedString::from(text.clone()))
+                .description(crew_choice(
+                    text.clone(),
+                    "delete-crew",
+                    format!("Also delete the {} agents under this lead", crew.len()),
+                    &crew,
+                    &with_crew,
+                ))
                 .ok_text("Delete")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
+                    let crew = if with_crew.get() { crew.clone() } else { Vec::new() };
                     view.update(cx, |this, cx| {
-                        if let Some(ix) = this.chat_ix(id) {
-                            this.delete_chat(ix, window, cx);
+                        for id in crew.into_iter().chain([id]) {
+                            if let Some(ix) = this.chat_ix(id) {
+                                this.delete_chat(ix, window, cx);
+                            }
+                        }
+                    });
+                    true
+                })
+        });
+    }
+
+    /// Every chat a lead spawned, and theirs in turn.
+    pub(crate) fn crew_ids(&self, lead: i64) -> Vec<i64> {
+        let mut out = Vec::new();
+        let mut queue = vec![lead];
+        while let Some(parent) = queue.pop() {
+            for chat in self.chats.iter().filter(|c| c.parent == Some(parent)) {
+                if chat.id != lead && !out.contains(&chat.id) {
+                    out.push(chat.id);
+                    queue.push(chat.id);
+                }
+            }
+        }
+        out
+    }
+
+    /// Archives a plain chat at once; a lead asks first and offers its crew too.
+    pub(crate) fn confirm_archive_chat(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = self.chats.get(ix) else {
+            return;
+        };
+        if !chat.lead {
+            return self.archive_chat(ix, window, cx);
+        }
+        let (id, title) = (chat.id, chat.title.to_string());
+        let crew: Vec<i64> = self
+            .crew_ids(id)
+            .into_iter()
+            .filter(|id| self.chat_ix(*id).is_some_and(|ix| !self.chats[ix].archived))
+            .collect();
+        let with_crew = Rc::new(std::cell::Cell::new(true));
+        let view = cx.entity();
+        aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
+            let (view, crew, with_crew) = (view.clone(), crew.clone(), with_crew.clone());
+            alert
+                .confirm()
+                .title(SharedString::from(format!("Archive “{title}”?")))
+                .description(crew_choice(
+                    "It moves to Archive; open it from there or the palette to restore it.".into(),
+                    "archive-crew",
+                    format!("Also archive the {} agents under this lead", crew.len()),
+                    &crew,
+                    &with_crew,
+                ))
+                .ok_text("Archive")
+                .on_ok(move |_, window, cx| {
+                    let crew = if with_crew.get() { crew.clone() } else { Vec::new() };
+                    view.update(cx, |this, cx| {
+                        for id in crew.into_iter().chain([id]) {
+                            if let Some(ix) = this.chat_ix(id) {
+                                this.archive_chat(ix, window, cx);
+                            }
                         }
                     });
                     true
@@ -712,4 +786,26 @@ impl ChatApp {
             .on_reflow(row_reflow(view, ix))
             .into_any_element()
     }
+}
+
+fn crew_choice(
+    text: String,
+    id: &'static str,
+    label: String,
+    crew: &[i64],
+    checked: &Rc<std::cell::Cell<bool>>,
+) -> AnyElement {
+    let toggle = checked.clone();
+    v_flex()
+        .gap_3()
+        .child(div().child(text))
+        .when(!crew.is_empty(), |column| {
+            column.child(Checkbox::new(id).label(label).checked(checked.get()).on_click(
+                move |on: &bool, window, _| {
+                    toggle.set(*on);
+                    window.refresh();
+                },
+            ))
+        })
+        .into_any_element()
 }

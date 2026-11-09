@@ -193,7 +193,7 @@ impl ChatApp {
             Some(PaletteCommand::RenameChat) => self.begin_rename(self.active, window, cx),
             Some(PaletteCommand::TogglePin) => self.toggle_pin(self.active, cx),
             Some(PaletteCommand::ToggleLead) => self.toggle_lead(self.active, window, cx),
-            Some(PaletteCommand::ArchiveChat) => self.archive_chat(self.active, window, cx),
+            Some(PaletteCommand::ArchiveChat) => self.confirm_archive_chat(self.active, window, cx),
             Some(PaletteCommand::DeleteChat) => self.confirm_delete_chat(self.active, window, cx),
             Some(PaletteCommand::RemoveWorktree) => self.remove_worktree(self.active, window, cx),
             Some(PaletteCommand::CleanUpWorktrees) => self.open_worktrees(cx),

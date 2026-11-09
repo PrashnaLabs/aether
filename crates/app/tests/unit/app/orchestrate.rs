@@ -1912,3 +1912,19 @@ fn deleted_card_ids_are_not_reused(cx: &mut TestAppContext) {
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn crew_ids_cover_children_and_grandchildren(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let kid = with_child(app, 10);
+            let grandkid = with_child(app, kid);
+            let other = with_child(app, 99);
+            let crew = app.crew_ids(10);
+            assert_eq!(crew, [kid, grandkid]);
+            assert!(!crew.contains(&other));
+            assert!(app.crew_ids(grandkid).is_empty());
+        })
+        .unwrap();
+}
