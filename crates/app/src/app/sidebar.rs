@@ -535,9 +535,18 @@ impl ChatApp {
             .collect();
         let sections: Vec<(String, Vec<usize>)> = match style {
             SidebarStyle::Focus => {
+                let leads: HashMap<i64, usize> = listed
+                    .iter()
+                    .filter(|(ix, _)| self.chats[*ix].lead)
+                    .map(|(ix, _)| (self.chats[*ix].id, *ix))
+                    .collect();
                 let chats: Vec<_> = listed
                     .iter()
-                    .map(|(ix, _)| (*ix, self.chats[*ix].status(now), self.chats[*ix].activity()))
+                    .map(|(ix, _)| {
+                        let chat = &self.chats[*ix];
+                        let parent = chat.parent.and_then(|p| leads.get(&p).copied());
+                        (*ix, chat.status(now), chat.activity(), parent)
+                    })
                     .collect();
                 projects::focus_sections(&chats)
                     .into_iter()
@@ -563,14 +572,7 @@ impl ChatApp {
                 )
             }
         };
-        let mut sections = if style == SidebarStyle::Minimal {
-            nest_section_children(&self.chats, sections)
-        } else {
-            sections
-                .into_iter()
-                .map(|(label, ixs)| (label, ixs.into_iter().map(|ix| (ix, 0)).collect()))
-                .collect()
-        };
+        let mut sections = nest_section_children(&self.chats, sections);
         sections.insert(0, ("Pinned".to_string(), pinned.into_iter().map(|ix| (ix, 0)).collect()));
         sidebar = sidebar.child_agents(
             sections

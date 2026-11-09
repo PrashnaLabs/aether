@@ -319,7 +319,7 @@ impl gpui_kit::Render for CrewPreview {
         let mut sidebar = if self.style == SidebarStyle::Default {
             default_crew_sidebar(&[ChatStatus::Done; 7], None)
         } else {
-            crew_sidebar(&[ChatStatus::Done; 7], None)
+            crew_sidebar(&[ChatStatus::Done; 7], None).style(self.style)
         };
         let opened = self.opened.clone();
         let on_click: RowHandler = Rc::new(move |_, _, _| opened.set(true));
@@ -336,7 +336,7 @@ impl gpui_kit::Render for CrewPreview {
 #[gpui_kit::test]
 fn crew_toggle_supports_click_and_keyboard_and_retains_state(cx: &mut gpui_kit::TestAppContext) {
     cx.update(gpui_kit::init);
-    for style in [SidebarStyle::Minimal, SidebarStyle::Default] {
+    for style in [SidebarStyle::Minimal, SidebarStyle::Default, SidebarStyle::Focus] {
         let opened = Rc::new(Cell::new(false));
         let window =
             cx.add_window(|_, _| CrewPreview { state: None, style, opened: opened.clone() });
@@ -370,6 +370,26 @@ fn crew_toggle_supports_click_and_keyboard_and_retains_state(cx: &mut gpui_kit::
         visual.simulate_keystrokes("right");
         assert_eq!(open(&mut visual), Some(true));
     }
+}
+
+#[gpui_kit::test]
+fn focus_lead_is_one_line_with_glyph_rollup(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 15], None).style(SidebarStyle::Focus);
+    assert_eq!(keys(&mut sidebar), ["caption:Today", "chat:10"]);
+    let window = cx.add_window(|_, _| CrewPreview {
+        state: None,
+        style: SidebarStyle::Focus,
+        opened: Rc::new(Cell::new(false)),
+    });
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    let chevron = visual.debug_bounds("crew-chevron-10").expect("lead chevron");
+    let rollup = visual.debug_bounds("chat-rollup-10").expect("lead rollup");
+    assert!(rollup.left() > chevron.right(), "rollup sits right of the title");
+    assert!((rollup.center().y - chevron.center().y).abs() < gpui_kit::px(4.), "one line");
 }
 
 fn outside(id: &str) -> OutsideLine {

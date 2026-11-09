@@ -793,7 +793,7 @@ impl ChatSidebar {
             && head.child()
             && matches!((parent, &head.line), (Some(a), Some(b)) if git_differs(a, b));
         let parent = parent.map(|line| line.provider);
-        if self.style == SidebarStyle::Focus || !head.lead || rest.is_empty() || head.pin {
+        if !head.lead || rest.is_empty() || head.pin {
             out.push(self.chat_row(head, nested, None, None, 0, parent, carded, git));
             out.extend(self.crew_rows(rest, nested));
             return;

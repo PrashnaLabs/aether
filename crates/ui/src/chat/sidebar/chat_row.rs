@@ -586,6 +586,26 @@ pub(super) fn render_chat(
             Some(line) => provider_icon(line.provider).size(rems(0.875)).into_any_element(),
             None => Icon::new(Lucide::Users).size(rems(0.875)).text_color(muted).into_any_element(),
         };
+        if style == SidebarStyle::Focus {
+            let one = h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(slot(swap(icon, chevron)))
+                .child(title_cell(title.clone()))
+                .when(status != ChatStatus::Idle, |el| {
+                    el.child(status.badge(("chat-status-badge", ix), Some(now), cx))
+                })
+                .child(
+                    div()
+                        .flex_none()
+                        .debug_selector(move || format!("chat-rollup-{}", chat.id))
+                        .child(rollup(summary, Tier::Narrow, cx)),
+                )
+                .children(approve_action)
+                .child(actions);
+            return row.child(one).context_menu(context).into_any_element();
+        }
         let trailing = match status {
             ChatStatus::Idle => time_text(time).into_any_element(),
             _ => status.badge(("chat-status-badge", ix), Some(now), cx),
@@ -712,7 +732,7 @@ pub(super) fn render_chat(
                 .items_center()
                 .child(slot(project_mark(line.project.as_ref(), cx)))
                 .child(title_cell(title.clone()))
-                .child(trailing)
+                .child(tally.unwrap_or(trailing))
                 .children(approve_action)
                 .child(actions);
             return row.child(one).context_menu(context).into_any_element();

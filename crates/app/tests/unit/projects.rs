@@ -190,15 +190,46 @@ fn minimal_sections_group_by_time_or_project_and_order_rows() {
 fn focus_sections_put_what_needs_you_first() {
     use aether_ui::ChatStatus;
     let chats = [
-        (0, ChatStatus::Idle, 5),
-        (1, ChatStatus::Working { since_ms: 0 }, 4),
-        (2, ChatStatus::Waiting, 3),
-        (3, ChatStatus::Done, 9),
-        (4, ChatStatus::Idle, 7),
-        (5, ChatStatus::Quiet { since_ms: 0 }, 2),
+        (0, ChatStatus::Idle, 5, None),
+        (1, ChatStatus::Working { since_ms: 0 }, 4, None),
+        (2, ChatStatus::Waiting, 3, None),
+        (3, ChatStatus::Done, 9, None),
+        (4, ChatStatus::Idle, 7, None),
+        (5, ChatStatus::Quiet { since_ms: 0 }, 2, None),
     ];
     assert_eq!(
         focus_sections(&chats),
         [("Needs you", vec![3, 2]), ("Working", vec![1, 5]), ("Recent", vec![4, 0])]
     );
+}
+
+#[test]
+fn lead_with_waiting_child_sits_in_needs_you() {
+    use aether_ui::ChatStatus;
+    let chats = [
+        (0, ChatStatus::Idle, 9, None),
+        (1, ChatStatus::Working { since_ms: 0 }, 8, Some(0)),
+        (2, ChatStatus::Waiting, 1, Some(1)),
+        (3, ChatStatus::Idle, 7, Some(0)),
+        (4, ChatStatus::Idle, 5, None),
+        (5, ChatStatus::Working { since_ms: 0 }, 4, None),
+    ];
+    assert_eq!(
+        focus_sections(&chats),
+        [("Needs you", vec![0, 1, 3, 2]), ("Working", vec![5]), ("Recent", vec![4])]
+    );
+}
+
+#[test]
+fn focus_section_count_counts_rows_needing_attention() {
+    use aether_ui::ChatStatus;
+    let mut chats = vec![(0, ChatStatus::Idle, 99, None)];
+    chats.push((1, ChatStatus::Waiting, 1, Some(0)));
+    chats.extend((2..16).map(|ix| (ix, ChatStatus::Idle, ix as i64 + 1, Some(0))));
+    let sections = focus_sections(&chats);
+    assert_eq!(sections.len(), 1);
+    let (label, rows) = &sections[0];
+    assert_eq!((*label, rows.len()), ("Needs you", 16));
+    let attention = rows.iter().filter(|&&ix| chats[ix].1 == ChatStatus::Waiting).count();
+    assert_eq!(attention, 1);
 }

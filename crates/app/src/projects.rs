@@ -308,22 +308,50 @@ pub(crate) fn minimal_sections<Tz: TimeZone>(
 }
 
 /// Focus sidebar buckets: what needs you, what runs, and the rest; newest first in each.
+/// A crew sits with its most urgent member, members right after their top lead.
 pub(crate) fn focus_sections(
-    chats: &[(usize, ChatStatus, i64)],
+    chats: &[(usize, ChatStatus, i64, Option<usize>)],
 ) -> Vec<(&'static str, Vec<usize>)> {
     let mut sorted = chats.to_vec();
-    sorted.sort_by_key(|(ix, _, activity)| std::cmp::Reverse((*activity, *ix)));
+    sorted.sort_by_key(|(ix, _, activity, _)| std::cmp::Reverse((*activity, *ix)));
     let bucket = |status: &ChatStatus| match status {
         ChatStatus::Waiting | ChatStatus::Failed | ChatStatus::Done => 0,
         ChatStatus::Idle => 2,
         _ => 1,
     };
+    let parent: HashMap<usize, usize> =
+        chats.iter().filter_map(|(ix, _, _, p)| p.map(|p| (*ix, p))).collect();
+    let root = |mut ix: usize| {
+        for _ in 0..chats.len() {
+            let Some(&p) = parent.get(&ix) else { break };
+            ix = p;
+        }
+        ix
+    };
+    let mut families: Vec<(usize, usize, Vec<usize>)> = Vec::new();
+    let mut slot: HashMap<usize, usize> = HashMap::new();
+    for (ix, status, ..) in &sorted {
+        let top = root(*ix);
+        let at = *slot.entry(top).or_insert_with(|| {
+            families.push((top, 2, Vec::new()));
+            families.len() - 1
+        });
+        let (_, rank, members) = &mut families[at];
+        *rank = (*rank).min(bucket(status));
+        members.push(*ix);
+    }
+    for (top, _, members) in &mut families {
+        members.sort_by_key(|ix| ix != top);
+    }
     ["Needs you", "Working", "Recent"]
         .into_iter()
         .enumerate()
         .map(|(k, label)| {
-            let ixs =
-                sorted.iter().filter(|(_, s, _)| bucket(s) == k).map(|(ix, ..)| *ix).collect();
+            let ixs = families
+                .iter()
+                .filter(|(_, rank, _)| *rank == k)
+                .flat_map(|(_, _, members)| members.iter().copied())
+                .collect();
             (label, ixs)
         })
         .filter(|(_, ixs): &(_, Vec<usize>)| !ixs.is_empty())
