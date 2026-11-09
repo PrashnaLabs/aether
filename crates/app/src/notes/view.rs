@@ -96,6 +96,7 @@ impl ChatApp {
                 explorer.tree_state = aether_explorer::FileTreeState::new(tree_root)
             });
         }
+        let lights = aether_ui::traffic_lights_gap(self.settings.sidebar_collapsed, window, cx);
         let mut sidebar = v_flex()
             .w(px(270.))
             .h_full()
@@ -112,6 +113,7 @@ impl ChatApp {
                     .gap_1()
                     .border_b_1()
                     .border_color(border)
+                    .child(lights)
                     .child(div().text_xs().font_semibold().text_color(muted).child("NOTES"))
                     .child(
                         aether_ui::button("notes-scope-toggle")

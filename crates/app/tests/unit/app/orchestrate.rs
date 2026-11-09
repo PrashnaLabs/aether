@@ -359,7 +359,16 @@ fn tools_refuse_another_leads_child(cx: &mut TestAppContext) {
             let id = with_child(app, 20);
             let want = Err(format!("agent {id} isn't one of this lead's children"));
             assert_eq!(app.read_agent(1, &json!({"id": id})), want);
-            assert_eq!(app.message_agent(1, &json!({"id": id, "text": "x"}), window, cx), want);
+            let ix = child_ix(app, id);
+            app.chats[ix].cancel = Some(aether_agent::Cancel::inert());
+            let sent = app.message_agent(1, &json!({"id": id, "text": "x"}), window, cx).unwrap();
+            assert_eq!(sent["status"], "queued");
+            assert!(sent["reply"].as_str().unwrap().starts_with("not your child"));
+            app.chats[ix].cancel = None;
+            assert_eq!(
+                app.message_agent(1, &json!({"id": 10, "text": "x"}), window, cx),
+                Err("a lead can't message itself".into())
+            );
             assert_eq!(app.stop_agent(1, &json!({"id": id}), cx), want);
         })
         .unwrap();
@@ -1037,7 +1046,10 @@ fn tools_treat_archived_children_as_absent(cx: &mut TestAppContext) {
             assert_eq!(app.list_agents(1)["children"], json!([]));
             let want = Err(format!("agent {id} isn't one of this lead's children"));
             assert_eq!(app.read_agent(1, &json!({"id": id})), want);
-            assert_eq!(app.message_agent(1, &json!({"id": id, "text": "x"}), window, cx), want);
+            assert_eq!(
+                app.message_agent(1, &json!({"id": id, "text": "x"}), window, cx),
+                Err(format!("chat {id} is archived; unarchive it first"))
+            );
             assert_eq!(app.stop_agent(1, &json!({"id": id}), cx), want);
         })
         .unwrap();
@@ -1669,6 +1681,14 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
                 None,
                 false,
             );
+            let shipped = app.board_add(
+                "Shipped".into(),
+                String::new(),
+                Col::Done,
+                "/tmp/proj".into(),
+                None,
+                false,
+            );
             let mut call = |tool: &str, args: Value| {
                 let (reply, answer) = std::sync::mpsc::channel();
                 app.orchestrate(
@@ -1680,14 +1700,50 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
             };
             assert_eq!(
                 call("add_card", json!({"title": "Mine"})),
-                Ok(Value::String("Created #2 in todo: Mine".into()))
+                Ok(Value::String("Created #3 in todo: Mine".into()))
             );
-            assert_eq!(call("list_cards", json!({})), Ok(Value::String("#2 [todo] Mine".into())));
+            assert_eq!(call("list_cards", json!({})), Ok(Value::String("#3 [todo] Mine".into())));
+            assert_eq!(
+                call("list_cards", json!({"filter": {"col": "done", "search": "ship"}})),
+                Ok(Value::String(format!("#{shipped} [done] Shipped")))
+            );
             assert_eq!(
                 call("move_card", json!({"id": other, "col": "review"})),
                 Err(format!("card #{other} not found"))
             );
-            let mine = app.cards.iter().find(|c| c.id == 2).unwrap();
+            assert_eq!(
+                call("update_card", json!({"id": other, "body": "x"})),
+                Err(format!("card #{other} not found"))
+            );
+            assert_eq!(
+                call("update_card", json!({"id": 3, "body": "Details", "col": "doing"})),
+                Ok(Value::String("Updated #3 doing (description, column): Mine".into()))
+            );
+            assert_eq!(
+                call("list_cards", json!({"bodies": true})),
+                Ok(Value::String("#3 [doing] Mine\n    Details".into()))
+            );
+            assert_eq!(
+                call("list_cards", json!({"filter": {"project": "all", "col": "todo"}})),
+                Ok(Value::String(format!("#{other} [todo] Other [project x]")))
+            );
+            assert_eq!(
+                call("add_card", json!({"title": "First"})),
+                Ok(Value::String("Created #4 in todo: First".into()))
+            );
+            assert_eq!(
+                call("update_card", json!({"id": 4, "col": "doing", "before": 3, "chat": 10})),
+                Ok(Value::String("Updated #4 doing (column, position, chat): First".into()))
+            );
+            assert_eq!(
+                call("update_card", json!({"id": 4, "chat": 999})),
+                Err("chat 999 not found".into())
+            );
+            assert_eq!(
+                call("list_cards", json!({})),
+                Ok(Value::String("#4 [doing] First (agent 10)\n#3 [doing] Mine".into()))
+            );
+            let mine = app.cards.iter().find(|c| c.id == 3).unwrap();
             assert_eq!((mine.project.as_str(), mine.by_agent), ("/tmp/proj", true));
         })
         .unwrap();

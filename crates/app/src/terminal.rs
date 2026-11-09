@@ -620,6 +620,7 @@ impl ChatApp {
         view.update(cx, |t, cx| {
             t.open = true;
             t.window_top = true;
+            t.lights = self.settings.sidebar_collapsed;
             t.sync_settings(
                 folder,
                 option_as_meta,

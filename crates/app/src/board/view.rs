@@ -83,7 +83,8 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.board_view(None, Some(aether_ui::window_controls_gap(window)), cx)
+        let lights = aether_ui::traffic_lights_gap(self.settings.sidebar_collapsed, window, cx);
+        self.board_view(None, Some((lights, aether_ui::window_controls_gap(window))), cx)
     }
 
     pub(crate) fn render_board_tab(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -93,7 +94,7 @@ impl ChatApp {
     fn board_view(
         &mut self,
         project: Option<PathBuf>,
-        controls_gap: Option<gpui_kit::Div>,
+        window_top: Option<(gpui_kit::Stateful<gpui_kit::Div>, gpui_kit::Div)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let now = now_ms();
@@ -184,7 +185,9 @@ impl ChatApp {
                 .icon(gpui_kit::component::IconName::Search)
                 .aria_label("Search cards"),
         );
+        let (lights, controls_gap) = window_top.unzip();
         let header = h_flex()
+            .children(lights)
             .px(px(20.))
             .pt(px(16.))
             .pb(px(14.))

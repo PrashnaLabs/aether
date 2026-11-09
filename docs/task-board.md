@@ -24,9 +24,10 @@ but their cards still update automatically.
 
 | Tool | Arguments | Reply |
 | --- | --- | --- |
-| `list_cards` | none | One line per card not in Done: `#<id> [<column>] <title> (agent <chat id>)` |
+| `list_cards` | `filter?` (same fields as `delete_cards`: `ids`, `col`, `project`, `added_by`, `search`), `bodies?` (show descriptions, indented) | One line per card: `#<id> [<column>] <title> (agent <chat id>)`, plus `[project <folder>]` for other projects. Without `col` or `ids`, Done cards are left out |
 | `add_card` | `title`, `body?`, `col?` (`backlog`, `todo`, `doing`, `review`; default `todo`) | `Created #<id> in todo: <title>` |
 | `move_card` | `id`, `col` | `Moved #<id> todo -> review: <title>` |
+| `update_card` | `id`, any of `title?`, `body?` (replaces; empty clears), `append?` (adds a paragraph), `col?`, `before?` (card id to sit above), `chat?` (chat id to link) | `Updated #<id> todo (title, description): <title>` |
 | `spawn_agent` | usual arguments plus optional `card` | Reply includes `card` |
 
 Replies are plain text to keep tokens low. With Pi the tools appear as
@@ -66,8 +67,8 @@ Replies are plain text to keep tokens low. With Pi the tools appear as
 
 ## Limits
 
-- Board tools are not scoped to the lead's project: `list_cards` shows every
-  project's cards and `move_card` can move any of them.
+- `move_card` and `update_card` only reach cards in the lead's own project;
+  `list_cards` and `delete_cards` take `project: "all"` for the rest.
 - Card ids are millisecond timestamps, so ids in replies are long.
 - A lead running in a worktree records the worktree folder on the cards it
   creates, so they may be missing from **This project**; **All projects** shows

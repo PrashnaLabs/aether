@@ -19,9 +19,10 @@ use super::{RenameTarget, TerminalWorkspace, WORKSPACE_HEADER_HEIGHT};
 impl TerminalWorkspace {
     pub(super) fn render_header(
         &self,
-        window: &Window,
-        cx: &Context<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let lights = aether_ui::traffic_lights_gap(self.window_top && self.lights, window, cx);
         let theme = cx.theme();
         let workspace_view = cx.entity();
         let active_group_id = self.model.active_group_id();
@@ -153,6 +154,7 @@ impl TerminalWorkspace {
             .tabs_id("terminal-group-tabs")
             .when_some(selected, |bar, ix| bar.selected_index(ix))
             .height(px(WORKSPACE_HEADER_HEIGHT))
+            .leading(lights)
             .border_top(!self.full_page && !self.model.maximized)
             .tabs(tabs)
             .trailing(

@@ -28,6 +28,7 @@ use chrome::tabular;
 
 pub use chat_row::{middle_truncate, project_color, project_mark, project_mark_sized};
 pub use chrome::{count_badge, row_hover, row_style};
+pub use render::traffic_lights_gap;
 pub use rows::outside_aria;
 pub use state::splice_range;
 
