@@ -14,10 +14,10 @@ fn missing_fields_fall_back_to_defaults() {
 #[test]
 fn provider_defaults_to_openrouter_with_empty_overrides() {
     let s = Settings::default();
-    assert_eq!(s.provider, Provider::OpenRouter);
+    assert_eq!((s.provider, s.provider()), (None, Provider::OpenRouter));
     assert!(s.provider_models.is_empty() && s.claude_binary.is_empty());
     let parsed: Settings = serde_json::from_str(r#"{"model":"x"}"#).unwrap();
-    assert_eq!(parsed.provider, Provider::OpenRouter);
+    assert_eq!(parsed.provider(), Provider::OpenRouter);
 }
 
 #[test]

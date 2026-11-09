@@ -7,7 +7,7 @@ fn skill_instructions_preview_preserves_source(cx: &mut gpui_kit::TestAppContext
         let mut app = ChatApp::with_state(
             aether_agent::Agent::new().unwrap(),
             aether_core::Settings {
-                provider: aether_core::Provider::OpenRouter,
+                provider: Some(aether_core::Provider::OpenRouter),
                 workspace_root: std::env::temp_dir().display().to_string(),
                 ..Default::default()
             },

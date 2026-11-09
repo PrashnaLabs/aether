@@ -519,6 +519,8 @@ pub(crate) struct ChatApp {
     /// Unix ms when each provider's usage last arrived.
     plan_usage_at: HashMap<Provider, i64>,
     usage_attempt_at: i64,
+    /// Subscribed provider found at startup; used while `settings.provider` is unset.
+    detected_provider: Option<Provider>,
     pub(crate) sys_sample: Option<crate::sysinfo::Sample>,
     pub(crate) usage_pop: status_bar::UsagePop,
     pub(crate) crew_pop: bool,

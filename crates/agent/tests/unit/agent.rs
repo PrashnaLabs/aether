@@ -154,7 +154,7 @@ fn any_binary() -> String {
 }
 
 fn cli_settings() -> Settings {
-    Settings { provider: Provider::Claude, claude_binary: any_binary(), ..Settings::default() }
+    Settings { provider: Some(Provider::Claude), claude_binary: any_binary(), ..Settings::default() }
 }
 
 fn chat(effort: &str) -> ChatSession {
@@ -638,7 +638,7 @@ fn missing_chat() -> ChatSession {
 fn cli_send_with_missing_binary_errors_not_panics() {
     let agent = Agent::new().unwrap();
     let settings = Settings {
-        provider: Provider::Claude,
+        provider: Some(Provider::Claude),
         claude_binary: "/definitely/not/here-xyz".into(),
         ..Settings::default()
     };
@@ -656,7 +656,7 @@ fn opencode_send_with_missing_binary_and_no_hub_errors_and_closes() {
     }
     let agent = Agent::new().unwrap();
     let settings = Settings {
-        provider: Provider::OpenCode,
+        provider: Some(Provider::OpenCode),
         opencode_binary: "/definitely/not/here-xyz".into(),
         ..Settings::default()
     };
@@ -743,7 +743,7 @@ fn png(path: &str) -> Attachment {
 fn cli_prompt_lists_files_the_agent_cannot_take_inline() {
     let (agent, log, _) = fake_agent(true, Duration::from_secs(600));
     let s = Settings {
-        provider: Provider::Antigravity,
+        provider: Some(Provider::Antigravity),
         antigravity_binary: any_binary(),
         ..Settings::default()
     };
