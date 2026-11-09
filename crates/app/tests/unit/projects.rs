@@ -51,6 +51,20 @@ fn rollup_prefers_needs_you_then_working_failed_done() {
 }
 
 #[test]
+fn agent_state_buckets_statuses() {
+    use ChatStatus::*;
+    let of = AgentState::of;
+    assert_eq!(of(Waiting), AgentState::Blocked);
+    assert_eq!(of(Working { since_ms: 0 }), AgentState::Working);
+    assert_eq!(of(Quiet { since_ms: 0 }), AgentState::Working);
+    assert_eq!(of(Background(2)), AgentState::Working);
+    assert_eq!(of(Done), AgentState::Done);
+    assert_eq!(of(Idle), AgentState::Idle);
+    assert_eq!(AgentState::Blocked.filter(), "state:blocked");
+    assert_eq!(of(rollup([Idle, Done, Waiting, Starting])), AgentState::Blocked);
+}
+
+#[test]
 fn relative_time_steps_from_now_to_dates() {
     let now = at(2026, 10, 15, 12, 0);
     let t = |ms| relative_time(ms, now, &Utc);
