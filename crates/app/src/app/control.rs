@@ -9,7 +9,7 @@ use gpui_kit::{Context, SharedString, Window};
 use serde_json::{Value, json};
 
 use super::{Bulk, CLIS, Chat, ChatApp, Delivery, now_ms, project_dir};
-use crate::board::model::{Col, shown};
+use crate::board::model::{BoardCard, Col, shown};
 
 /// Which chats a chat-control tool acts on.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -22,6 +22,8 @@ pub(crate) struct Filter {
     pub provider: Option<Provider>,
     pub archived: bool,
     pub include_pinned: bool,
+    /// Words that must all appear in the title, any case.
+    pub search: String,
 }
 
 const STATES: [&str; 5] = ["running", "done", "failed", "empty", "not_running"];
@@ -86,6 +88,7 @@ pub(crate) fn parse_filter(args: &Value, archived_default: bool) -> Result<Filte
         provider,
         archived: f["archived"].as_bool().unwrap_or(archived_default),
         include_pinned: f["include_pinned"].as_bool().unwrap_or(false),
+        search: text("search").unwrap_or_default().to_lowercase(),
     })
 }
 
@@ -151,7 +154,9 @@ impl ChatApp {
                     None => f.ids.is_some() || dir == home,
                 };
                 let state = state_of(chat, self.chat_running(ix));
+                let title = chat.title.to_lowercase();
                 in_project
+                    && f.search.split_whitespace().all(|w| title.contains(w))
                     && chat.archived == f.archived
                     && f.ids.as_ref().is_none_or(|ids| ids.contains(&chat.id))
                     && f.provider.is_none_or(|p| chat.provider == p)
@@ -375,7 +380,7 @@ impl ChatApp {
         Ok(json!({"unarchived": chats.len(), "chats": chats}))
     }
 
-    fn target(&self, args: &Value) -> Result<usize, String> {
+    pub(super) fn target(&self, args: &Value) -> Result<usize, String> {
         let id = args["id"]
             .as_i64()
             .or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()))
@@ -445,9 +450,23 @@ impl ChatApp {
         let int = |k: &str, default: i64, lo: i64, hi: i64| {
             args[k].as_i64().unwrap_or(default).clamp(lo, hi) as usize
         };
-        let (offset, limit) = (int("offset", 0, 0, i64::MAX), int("limit", 5, 1, 20));
-        let max = int("max_chars", 4_000, 500, 20_000);
+        let ix = match args["id"].is_null() {
+            true => ix,
+            false => {
+                let target = self.target(args)?;
+                if target != ix && !self.chats[ix].lead {
+                    return Err("only a lead can read another chat's history".into());
+                }
+                target
+            }
+        };
         let messages = &self.chats[ix].messages;
+        let offset = match args["offset"].as_i64().unwrap_or(0) {
+            n if n < 0 => messages.len().saturating_sub(n.unsigned_abs() as usize),
+            n => n as usize,
+        };
+        let limit = int("limit", 5, 1, 20);
+        let max = int("max_chars", 4_000, 500, 20_000);
         let items: Vec<Value> = messages
             .iter()
             .enumerate()
@@ -536,17 +555,10 @@ fn card_names(cards: &[(i64, String)]) -> String {
 }
 
 impl ChatApp {
-    pub(super) fn delete_cards(
-        &mut self,
-        lead_ix: usize,
-        args: &Value,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<Value, String> {
-        let f = parse_card_filter(args)?;
+    /// Cards matching `f` for the lead at `lead_ix`.
+    pub(super) fn matching_cards(&self, lead_ix: usize, f: &CardFilter) -> Vec<&BoardCard> {
         let home = self.lead_project(lead_ix);
-        let ids: Vec<i64> = self
-            .cards
+        self.cards
             .iter()
             .filter(|c| match f.project.as_deref() {
                 Some("all") => true,
@@ -556,8 +568,18 @@ impl ChatApp {
             .filter(|c| f.ids.as_ref().is_none_or(|ids| ids.contains(&c.id)))
             .filter(|c| f.col.is_none_or(|col| c.col == col))
             .filter(|c| shown(c, &f.search, f.by_agent))
-            .map(|c| c.id)
-            .collect();
+            .collect()
+    }
+
+    pub(super) fn delete_cards(
+        &mut self,
+        lead_ix: usize,
+        args: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Value, String> {
+        let f = parse_card_filter(args)?;
+        let ids: Vec<i64> = self.matching_cards(lead_ix, &f).iter().map(|c| c.id).collect();
         if ids.is_empty() {
             return Ok(json!({"status": "nothing_to_do", "action": "delete_cards"}));
         }

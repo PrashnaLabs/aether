@@ -75,7 +75,22 @@ fn chat_filter(about: &str) -> Value {
             "state": {"type": "string", "description": "One of: running, done (last reply succeeded), failed (last reply errored), empty, not_running"},
             "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity, openrouter"},
             "archived": {"type": "boolean", "description": "Match archived chats instead of active ones"},
-            "include_pinned": {"type": "boolean", "description": "Also act on pinned chats (skipped by default)"}
+            "include_pinned": {"type": "boolean", "description": "Also act on pinned chats (skipped by default)"},
+            "search": {"type": "string", "description": "Words that must all appear in the title, any case"}
+        }
+    })
+}
+
+fn card_filter(about: &str) -> Value {
+    json!({
+        "type": "object",
+        "description": about,
+        "properties": {
+            "ids": {"type": "array", "items": {"type": "integer"}, "description": "Only these card ids; then any project unless project is set"},
+            "col": {"type": "string", "description": "One of: backlog, todo, doing, review, done"},
+            "project": {"type": "string", "description": "Project folder name or path; \"all\" for every project. Default: your own project"},
+            "added_by": {"type": "string", "description": "agent or user"},
+            "search": {"type": "string", "description": "Words that must all appear in the title or body"}
         }
     })
 }
@@ -89,7 +104,7 @@ pub fn tool_specs() -> Value {
     json!([
         {
             "name": "list_agents",
-            "description": "List the agent chats in this Aether workspace.",
+            "description": "List the installed agent providers with their models, and your own child agents with their status. For other chats use list_chats.",
             "inputSchema": {"type": "object", "properties": {}}
         },
         {
@@ -124,11 +139,11 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "message_agent",
-            "description": "Send a message to a child agent; queued if it is busy.",
+            "description": "Send a message to a child agent or any other chat; queued if it is busy. Only your children's answers come back to you automatically.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "integer", "description": "Child agent id from the list_agents tool"},
+                    "id": {"type": "integer", "description": "Chat id from list_agents or list_chats"},
                     "text": {"type": "string", "description": "Message to send"}
                 },
                 "required": ["id", "text"]
@@ -147,8 +162,14 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "list_cards",
-            "description": "List this project's open task-board cards, one line each.",
-            "inputSchema": {"type": "object", "properties": {}}
+            "description": "List task-board cards, one line each. Default: this project's cards not in done.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "filter": card_filter("Which cards; all fields optional"),
+                    "bodies": {"type": "boolean", "description": "Also show each card's description, indented under its line"}
+                }
+            }
         },
         {
             "name": "add_card",
@@ -176,33 +197,41 @@ pub fn tool_specs() -> Value {
             }
         },
         {
+            "name": "update_card",
+            "description": "Edit a task-board card: any of its title, description and column; omitted fields stay.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "Card id from the list_cards tool"},
+                    "title": {"type": "string", "description": "New title"},
+                    "body": {"type": "string", "description": "New description, replacing the old one; empty clears it"},
+                    "append": {"type": "string", "description": "Text added to the end of the description, as a new paragraph"},
+                    "col": {"type": "string", "description": "One of: backlog, todo, doing, review"},
+                    "before": {"type": "integer", "description": "Place the card just above this card id in its column"},
+                    "chat": {"type": "integer", "description": "Link the card to this chat id"}
+                },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "delete_cards",
             "description": "Permanently delete task-board cards matching a filter (linked chats stay). The user must confirm in Aether; this returns at once and the outcome arrives as your next turn, so don't poll.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "filter": {
-                        "type": "object",
-                        "description": "Which cards; all fields optional",
-                        "properties": {
-                            "ids": {"type": "array", "items": {"type": "integer"}, "description": "Only these card ids; then any project unless project is set"},
-                            "col": {"type": "string", "description": "One of: backlog, todo, doing, review, done"},
-                            "project": {"type": "string", "description": "Project folder name or path; \"all\" for every project. Default: your own project"},
-                            "added_by": {"type": "string", "description": "agent or user"},
-                            "search": {"type": "string", "description": "Words that must all appear in the title or body"}
-                        }
-                    }
+                    "filter": card_filter("Which cards; all fields optional")
                 },
                 "required": ["filter"]
             }
         },
         {
             "name": "read_history",
-            "description": "Read earlier messages of this chat in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted.",
+            "description": "Read earlier messages of this chat (or, for a lead, any chat) in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "offset": {"type": "integer", "description": "First message number (default 0)"},
+                    "id": {"type": "integer", "description": "Leads only: another chat's id from list_chats (default: this chat)"},
+                    "offset": {"type": "integer", "description": "First message number (default 0); negative counts back from the end, so -3 reads the last 3"},
                     "limit": {"type": "integer", "description": "How many messages, 1 to 20 (default 5)"},
                     "max_chars": {"type": "integer", "description": "Cap per message, 500 to 20000 (default 4000)"}
                 }
@@ -275,7 +304,12 @@ pub fn board_specs() -> Value {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|s| matches!(s["name"].as_str(), Some("list_cards" | "add_card" | "move_card")))
+            .filter(|s| {
+                matches!(
+                    s["name"].as_str(),
+                    Some("list_cards" | "add_card" | "move_card" | "update_card")
+                )
+            })
             .cloned()
             .collect(),
     )
