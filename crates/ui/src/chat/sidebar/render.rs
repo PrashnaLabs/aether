@@ -140,6 +140,16 @@ impl RenderOnce for ChatSidebar {
         let rows = self.rows();
         let keys: Vec<SharedString> = rows.iter().map(ChatRow::key).collect();
         let focusable: Vec<bool> = rows.iter().map(ChatRow::focusable).collect();
+        let parents: Vec<Option<usize>> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| match row {
+                ChatRow::Chat { chat, .. } if chat.depth > 0 => rows[..i].iter().rposition(
+                    |r| matches!(r, ChatRow::Chat { chat: c, .. } if c.depth < chat.depth),
+                ),
+                _ => None,
+            })
+            .collect();
         let shown = rows.iter().find_map(|row| match row {
             ChatRow::Chat { chat, rename_editor, .. }
                 if rename_editor.is_some() || (chat.active && self.rename_ix.is_none()) =>
@@ -149,7 +159,7 @@ impl RenderOnce for ChatSidebar {
             _ => None,
         });
         state.update(cx, |s, cx| {
-            s.sync(keys.clone(), &focusable, cx);
+            s.sync(keys.clone(), &focusable, parents, cx);
             s.reveal(shown);
         });
         let list_state = state.read(cx).list.clone();

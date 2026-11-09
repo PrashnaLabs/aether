@@ -12,16 +12,27 @@ enum Nav {
     Down,
     Home,
     End,
+    Left,
+    Right,
 }
 
 /// Row that arrow keys move focus to, skipping section captions.
-fn target_row(focusable: &[bool], from: usize, nav: Nav) -> Option<usize> {
+fn target_row(
+    focusable: &[bool],
+    parents: &[Option<usize>],
+    from: usize,
+    nav: Nav,
+) -> Option<usize> {
     let n = focusable.len();
     match nav {
         Nav::Down => (from + 1..n).find(|&i| focusable[i]),
         Nav::Up => (0..from.min(n)).rev().find(|&i| focusable[i]),
         Nav::Home => (0..n).find(|&i| focusable[i]),
         Nav::End => (0..n).rev().find(|&i| focusable[i]),
+        Nav::Left => parents.get(from).copied().flatten().filter(|&p| focusable[p]),
+        Nav::Right => (from + 1..n)
+            .find(|&i| focusable[i])
+            .filter(|&i| parents.get(i).copied().flatten() == Some(from)),
     }
 }
 
@@ -43,6 +54,7 @@ pub fn splice_range<T: PartialEq>(old: &[T], new: &[T]) -> (Range<usize>, usize)
 pub(super) struct SidebarState {
     pub(super) list: ListState,
     keys: Vec<SharedString>,
+    parents: Vec<Option<usize>>,
     pub(super) focus: HashMap<SharedString, FocusHandle>,
     pub(super) open_menu: Option<SharedString>,
     pub(super) crew_open: HashMap<i64, bool>,
@@ -57,6 +69,7 @@ impl SidebarState {
         Self {
             list: ListState::new(0, ListAlignment::Top, overdraw),
             keys: Vec::new(),
+            parents: Vec::new(),
             focus: HashMap::new(),
             open_menu: None,
             crew_open: HashMap::new(),
@@ -71,6 +84,7 @@ impl SidebarState {
         &mut self,
         keys: Vec<SharedString>,
         focusable: &[bool],
+        parents: Vec<Option<usize>>,
         cx: &mut Context<Self>,
     ) {
         if keys == self.keys {
@@ -94,6 +108,7 @@ impl SidebarState {
             self.list.scroll_to(ListOffset { item_ix: ix, offset_in_item: top.offset_in_item });
         }
         self.keys = keys;
+        self.parents = parents;
     }
 
     pub(super) fn reveal(&mut self, key: Option<SharedString>) {
@@ -107,7 +122,7 @@ impl SidebarState {
     }
 }
 
-/// Moves focus with Up/Down/Home/End, scrolling the target row into view.
+/// Moves focus with Up/Down/Home/End and the tree's Left/Right, scrolling the target row into view.
 /// Returns whether the key was one of those.
 pub(super) fn navigate(
     state: &Entity<SidebarState>,
@@ -121,6 +136,8 @@ pub(super) fn navigate(
         "down" => Nav::Down,
         "home" => Nav::Home,
         "end" => Nav::End,
+        "left" => Nav::Left,
+        "right" => Nav::Right,
         _ => return false,
     };
     if ev.keystroke.modifiers.modified() {
@@ -132,7 +149,7 @@ pub(super) fn navigate(
         .keys
         .iter()
         .position(|k| k == key)
-        .and_then(|from| target_row(&focusable, from, nav))
+        .and_then(|from| target_row(&focusable, &s.parents, from, nav))
         .map(|to| {
             s.list.scroll_to_reveal_item(to);
             s.focus[&s.keys[to]].clone()

@@ -484,11 +484,14 @@ impl ChatRow {
                         "right" => true,
                         _ => return nav(ev, window, cx),
                     };
-                    if let Some(toggle) = &toggle
-                        && !ev.keystroke.modifiers.modified()
-                    {
-                        cx.stop_propagation();
-                        toggle(next, window, cx);
+                    match &toggle {
+                        Some(toggle)
+                            if open == Some(!next) && !ev.keystroke.modifiers.modified() =>
+                        {
+                            cx.stop_propagation();
+                            toggle(next, window, cx);
+                        }
+                        _ => nav(ev, window, cx),
                     }
                 };
                 let row = render_chat(
