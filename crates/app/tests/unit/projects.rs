@@ -44,7 +44,7 @@ fn rollup_prefers_needs_you_then_working_failed_done() {
     assert_eq!(rollup([Idle, Done, working]), working);
     assert_eq!(rollup([Done, Failed, Idle]), Failed);
     assert_eq!(rollup([working, Waiting, Failed]), Waiting);
-    assert_eq!(rollup([Quiet { since_ms: 0 }, Waiting]), Waiting);
+    assert_eq!(rollup([Quiet { since_ms: 0, turn_ms: 0 }, Waiting]), Waiting);
     assert_eq!(rollup([Done, Background(1)]), Background(1));
     assert_eq!(rollup([Idle, Done]), Done);
     assert_eq!(rollup([]), Idle);
@@ -195,7 +195,7 @@ fn focus_sections_put_what_needs_you_first() {
         (2, ChatStatus::Waiting, 3, None),
         (3, ChatStatus::Done, 9, None),
         (4, ChatStatus::Idle, 7, None),
-        (5, ChatStatus::Quiet { since_ms: 0 }, 2, None),
+        (5, ChatStatus::Quiet { since_ms: 0, turn_ms: 0 }, 2, None),
     ];
     assert_eq!(
         focus_sections(&chats),

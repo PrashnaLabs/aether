@@ -209,7 +209,7 @@ pub(crate) fn chat_status(f: &StatusFacts, now_ms: i64) -> ChatStatus {
         } else if f.retrying {
             ChatStatus::Retrying
         } else if quiet {
-            ChatStatus::Quiet { since_ms: anchor }
+            ChatStatus::Quiet { since_ms: anchor, turn_ms: f.turn_at }
         } else {
             ChatStatus::Working { since_ms: f.turn_at }
         };

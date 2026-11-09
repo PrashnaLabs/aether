@@ -1,18 +1,24 @@
-use crate::theme::Corners;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt,
     button::ButtonVariants,
     h_flex,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu},
+    v_flex,
 };
 use gpui_kit::{
-    Anchor, AnyElement, App, FocusHandle, KeyDownEvent, Role, SharedString, Window, div,
+    Anchor, AnyElement, App, FocusHandle, Hsla, KeyDownEvent, Role, SharedString, Window, div,
     prelude::*, px, relative, rems,
 };
 
+use super::chat_row::status_mark;
 use super::chrome::{nest, reveal_on_hover, row_style, swallow_click, tabular, tooltip};
+use super::crew::Bucket;
 use super::menu::project_menu;
-use super::{ChatStatus, CollapseHandler, NEST, ProjectHeader, RowHandler};
+use super::{
+    ChatStatus, CollapseHandler, LONG_BRANCH, NEST, ProjectHeader, RowHandler, middle_truncate,
+};
+use crate::theme::{danger_text, mango_text, success_text};
 
 pub fn project_aria(
     name: &str,
@@ -50,6 +56,7 @@ pub(super) struct ProjectRow {
     pub(super) guide: bool,
     pub(super) nested: bool,
     pub(super) worktree: bool,
+    pub(super) active: bool,
     pub(super) on_collapse: CollapseHandler,
     pub(super) on_new: RowHandler,
     pub(super) on_files: Option<RowHandler>,
@@ -75,6 +82,7 @@ impl ProjectRow {
             guide,
             nested,
             worktree,
+            active,
             on_collapse,
             on_new,
             on_files,
@@ -82,7 +90,21 @@ impl ProjectRow {
             on_page,
             now,
         } = self;
-        let ProjectHeader { name, path, count, collapsed, status, missing } = header;
+        let ProjectHeader {
+            name,
+            path,
+            count,
+            collapsed,
+            status,
+            missing,
+            branch,
+            no_git,
+            added,
+            deleted,
+            ahead,
+            needs_you,
+            failed,
+        } = header;
         let muted = cx.theme().muted_foreground;
         let color = if missing || worktree { muted } else { super::project_color(&name, cx) };
         let aria = project_aria(&name, count, worktree, missing, collapsed, status);
@@ -109,17 +131,24 @@ impl ProjectRow {
             }
         };
         let context = menu.clone();
-        let count_label = div()
+        let chip = |n: usize, mark: AnyElement, color: Hsla| {
+            (n > 0).then(|| {
+                h_flex().gap_1().items_center().text_color(color).child(mark).child(n.to_string())
+            })
+        };
+        let chips = h_flex()
             .absolute()
             .right_0()
-            .px_1p5()
-            .py_0p5()
-            .corner(px(4.))
-            .bg(cx.theme().muted.opacity(0.3))
-            .text_color(muted)
+            .gap_2()
+            .items_center()
             .text_xs()
             .font_features(tabular())
-            .child(if missing { "Missing".to_string() } else { count.to_string() })
+            .when(missing, |el| el.text_color(muted).child("Missing"))
+            .children(chip(needs_you, status_mark(ChatStatus::Waiting, false, cx), mango_text(cx)))
+            .children(chip(failed, status_mark(ChatStatus::Failed, false, cx), danger_text(cx)))
+            .when(collapsed && Bucket::of(status) == Bucket::Working, |el| {
+                el.child(status.badge(("project-status", id), Some(now), cx))
+            })
             .map(|el| {
                 if show_actions {
                     el.opacity(0.)
@@ -127,6 +156,55 @@ impl ProjectRow {
                     el.group_hover(group.clone(), |s| s.opacity(0.))
                 }
             });
+        let diff = added > 0 || deleted > 0;
+        let no_git = (branch.is_none() && no_git).then(|| {
+            h_flex()
+                .ml(-(rems(0.8125) + rems(0.5)))
+                .h(px(15.))
+                .gap_1()
+                .items_center()
+                .text_size(px(10.5))
+                .text_color(muted.opacity(0.7))
+                .child(Icon::new(Lucide::Folder).size(px(12.)).flex_none())
+                .child("Not a git repository")
+        });
+        let git = branch.map(|branch| {
+            h_flex()
+                .ml(-(rems(0.8125) + rems(0.5)))
+                .flex_wrap()
+                .h(px(15.))
+                .overflow_hidden()
+                .gap_x(px(7.))
+                .items_center()
+                .text_size(px(10.5))
+                .text_color(muted)
+                .font_features(tabular())
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .max_w_full()
+                        .gap_1()
+                        .items_center()
+                        .child(Icon::new(Lucide::GitBranch).size(px(12.)).flex_none())
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .child(middle_truncate(&branch, LONG_BRANCH)),
+                        ),
+                )
+                .when(diff, |el| {
+                    el.child(
+                        h_flex()
+                            .flex_none()
+                            .gap(px(6.))
+                            .child(div().text_color(success_text(cx)).child(format!("+{added}")))
+                            .child(div().text_color(danger_text(cx)).child(format!("−{deleted}"))),
+                    )
+                })
+                .when(ahead > 0, |el| el.child(div().flex_none().child(format!("↑{ahead}"))))
+        });
         let actions = reveal_on_hover(
             h_flex().flex_none().justify_end().items_center().gap_1(),
             group.clone(),
@@ -179,44 +257,53 @@ impl ProjectRow {
                 .role(Role::Button)
                 .aria_label(aria)
                 .aria_expanded(!collapsed),
-            false,
+            active,
             cx,
         )
+        .when(active, |row| row.bg(cx.theme().sidebar_accent))
         .group(group)
         .relative()
         .w_full()
         .when(spaced, |row| row.mt_0p5())
+        .items_start()
         .gap_2()
         .px_2()
         .py_1()
         .text_sm()
         .text_color(muted)
         .child(
-            Icon::new(project_chevron_icon(collapsed))
-                .size(rems(0.6875))
-                .text_color(muted)
-                .flex_none(),
+            h_flex()
+                .flex_none()
+                .h(rems(1.25))
+                .gap_2()
+                .items_center()
+                .child(
+                    Icon::new(project_chevron_icon(collapsed)).size(rems(0.6875)).text_color(muted),
+                )
+                .child(
+                    Icon::new(project_folder_icon(collapsed)).size(rems(0.8125)).text_color(color),
+                ),
         )
         .child(
-            Icon::new(project_folder_icon(collapsed))
-                .size(rems(0.8125))
-                .text_color(color)
-                .flex_none(),
-        )
-        .child(
-            div()
-                .id(("project-name", id))
-                .text_color(color)
+            v_flex()
                 .flex_1()
                 .min_w_0()
-                .truncate()
-                .font_medium()
-                .tooltip(tooltip(name_tip))
-                .child(name),
+                .child(
+                    h_flex().h(rems(1.25)).gap_2().items_center().child(
+                        div()
+                            .id(("project-name", id))
+                            .text_color(if missing { muted } else { cx.theme().sidebar_foreground })
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_semibold()
+                            .tooltip(tooltip(name_tip))
+                            .child(name),
+                    ),
+                )
+                .children(git)
+                .children(no_git),
         )
-        .when(collapsed && status != ChatStatus::Idle, |row| {
-            row.child(status.badge(("project-status", id), Some(now), cx))
-        })
         .child(
             div()
                 .relative()
@@ -224,7 +311,7 @@ impl ProjectRow {
                 .h(rems(1.25))
                 .flex()
                 .items_center()
-                .child(count_label)
+                .child(chips)
                 .child(actions),
         )
         .when(guide, |row| {

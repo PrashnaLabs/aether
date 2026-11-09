@@ -135,12 +135,18 @@ pub(super) struct Preview {
 pub(super) fn preview(members: &[CrewMember], expanded: bool, show_all: bool) -> Preview {
     let mut visible: Vec<bool> = members
         .iter()
-        .map(|m| show_all || m.keep || (expanded && m.bucket() <= Bucket::Failed))
+        .map(|m| show_all || (expanded && m.bucket() <= Bucket::Failed) || (!expanded && m.keep))
         .collect();
     if expanded && !show_all {
         let mut rest: Vec<usize> = (0..members.len()).filter(|&i| !visible[i]).collect();
         rest.sort_by_key(|&i| (members[i].bucket(), std::cmp::Reverse(members[i].activity)));
-        for i in rest.into_iter().take(5) {
+        let mut top: Vec<usize> = rest.iter().copied().take(5).collect();
+        for &i in rest.iter().skip(5).filter(|&&i| members[i].keep) {
+            if let Some(slot) = top.iter().rposition(|&t| !members[t].keep) {
+                top[slot] = i;
+            }
+        }
+        for i in top {
             visible[i] = true;
         }
     }
@@ -149,10 +155,6 @@ pub(super) fn preview(members: &[CrewMember], expanded: bool, show_all: bool) ->
         hidden.add(m.status);
     }
     Preview { visible, hidden }
-}
-
-pub(super) fn starts_collapsed(children: usize) -> bool {
-    children > 5
 }
 
 #[cfg(test)]

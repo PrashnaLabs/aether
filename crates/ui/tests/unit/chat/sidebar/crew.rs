@@ -77,12 +77,6 @@ fn preview_show_all_shows_every_child() {
 }
 
 #[test]
-fn crews_over_five_start_collapsed() {
-    assert!(!starts_collapsed(5));
-    assert!(starts_collapsed(6));
-}
-
-#[test]
 fn preview_expanded_cap_picks_by_priority_then_newest() {
     let mut v = vec![m(0, ChatStatus::Waiting, 0)];
     v.extend((1..=3).map(|i| m(i, working(), i as i64)));
@@ -90,4 +84,17 @@ fn preview_expanded_cap_picks_by_priority_then_newest() {
     let p = preview(&v, true, false);
     let shown: Vec<_> = (0..v.len()).filter(|&i| p.visible[i]).collect();
     assert_eq!(shown, [0, 1, 2, 3, 9, 10]);
+}
+
+#[test]
+fn selected_child_takes_a_slot_instead_of_adding_one() {
+    let mut v: Vec<_> = (0..10).map(|i| m(i, ChatStatus::Done, 100 - i as i64)).collect();
+    v[1].keep = true;
+    let p = preview(&v, true, false);
+    assert_eq!(p.visible.iter().filter(|&&s| s).count(), 5);
+    v[1].keep = false;
+    v[8].keep = true;
+    let p = preview(&v, true, false);
+    assert_eq!(p.visible.iter().filter(|&&s| s).count(), 5);
+    assert!(p.visible[8] && !p.visible[4]);
 }

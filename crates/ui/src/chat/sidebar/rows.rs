@@ -10,7 +10,7 @@ use gpui_kit::{
 
 use super::chat_row::render_chat;
 use super::chrome::{nest, reveal_on_hover, row_hover, row_style, tabular, tooltip};
-use super::crew::{CrewMember, CrewSummary, Tier, order, preview, starts_collapsed};
+use super::crew::{CrewMember, CrewSummary, Tier, order, preview};
 use super::menu::track_menu;
 use super::project_row::ProjectRow;
 use super::state::{SidebarState, crew_fold, navigate};
@@ -68,6 +68,7 @@ pub(super) enum ChatRow {
         on_files: RowHandler,
         on_hide: RowHandler,
         on_page: RowHandler,
+        active: bool,
         now: i64,
     },
     Worktree {
@@ -75,6 +76,7 @@ pub(super) enum ChatRow {
         header: ProjectHeader,
         on_collapse: CollapseHandler,
         on_new: RowHandler,
+        active: bool,
         now: i64,
     },
     Chat {
@@ -85,10 +87,9 @@ pub(super) enum ChatRow {
         crew: Option<CrewSummary>,
         open: Option<bool>,
         members: usize,
-        parent: Option<Provider>,
         tier: Tier,
-        carded: bool,
         git: bool,
+        big: bool,
     },
     CardHeader {
         lead: i64,
@@ -105,7 +106,6 @@ pub(super) enum ChatRow {
         total: usize,
         depth: u8,
         nested: bool,
-        tier: Tier,
     },
     SectionButton {
         icon: Icon,
@@ -344,6 +344,7 @@ impl ChatRow {
                 on_files,
                 on_hide,
                 on_page,
+                active,
                 now,
             } => {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
@@ -356,6 +357,7 @@ impl ChatRow {
                     guide,
                     nested,
                     worktree: false,
+                    active,
                     on_collapse,
                     on_new,
                     on_files: Some(on_files),
@@ -372,7 +374,7 @@ impl ChatRow {
                     cx,
                 )
             }
-            Self::Worktree { id, header, on_collapse, on_new, now } => {
+            Self::Worktree { id, header, on_collapse, on_new, active, now } => {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
                     && window.last_input_was_keyboard();
@@ -383,6 +385,7 @@ impl ChatRow {
                     guide: true,
                     nested: true,
                     worktree: true,
+                    active,
                     on_collapse,
                     on_new,
                     on_files: None,
@@ -407,10 +410,10 @@ impl ChatRow {
                 crew,
                 open,
                 members,
-                parent,
                 tier,
-                carded,
                 git,
+                big,
+                ..
             } => {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
@@ -505,10 +508,9 @@ impl ChatRow {
                     chevron,
                     crew.zip(open).map(|(summary, open)| (summary, open, members)),
                     show_all,
-                    parent,
                     tier,
-                    carded,
                     git,
+                    big,
                     cx,
                 );
                 (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
@@ -527,40 +529,34 @@ impl ChatRow {
                     .child(div().flex_none().font_features(tabular()).child(count.to_string()));
                 (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
             }
-            Self::CrewMore { lead, hidden, all, total, depth, nested, tier } => {
+            Self::CrewMore { lead, hidden, all, total, depth, nested } => {
                 let state = state.clone();
                 let row = h_flex()
                     .w_full()
-                    .px_2()
+                    .pl(px(31.))
+                    .pr_2()
                     .py_1()
                     .gap_2()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .justify_between()
-                    .child(div().min_w_0().truncate().when(!all, |el| {
-                        el.child(if tier == Tier::Wide {
-                            hidden
-                                .parts(Tier::Wide)
-                                .iter()
-                                .map(|(b, n)| format!("+{n} {}", b.word()))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        } else {
-                            format!("+{} more", hidden.total())
-                        })
-                    }))
                     .child(
                         div()
                             .id("crew-more")
                             .debug_selector(move || format!("crew-more-{lead}"))
-                            .flex_none()
+                            .min_w_0()
+                            .truncate()
                             .role(Role::Button)
+                            .aria_label(if all {
+                                "Show fewer agents".to_string()
+                            } else {
+                                format!("Show all {total} agents")
+                            })
                             .cursor_pointer()
                             .hover(|s| s.text_color(cx.theme().sidebar_foreground))
                             .child(if all {
                                 "Show fewer".to_string()
                             } else {
-                                format!("Show all {total}")
+                                hidden_words(hidden)
                             })
                             .on_click(move |_, window, cx| {
                                 state.update(cx, |s, cx| {
@@ -698,6 +694,16 @@ pub fn outside_aria(count: usize) -> String {
     format!("Outside aether, {agents}")
 }
 
+/// What a crew's More line hides: "+2 working, +11 done".
+pub(super) fn hidden_words(hidden: CrewSummary) -> String {
+    hidden
+        .parts(Tier::Wide)
+        .iter()
+        .map(|(b, n)| format!("+{n} {}", b.word()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn show_all_label(all: bool, total: usize) -> SharedString {
     if all { "Show fewer agents".into() } else { format!("Show all {total} agents").into() }
 }
@@ -740,8 +746,8 @@ fn summarize(chats: &[ChatItem]) -> CrewSummary {
 }
 
 impl ChatSidebar {
-    fn crew_is_open(&self, lead: i64, children: usize) -> bool {
-        self.crew_open.get(&lead).copied().unwrap_or_else(|| !starts_collapsed(children))
+    fn crew_is_open(&self, lead: i64) -> bool {
+        self.crew_open.get(&lead).copied().unwrap_or(false)
     }
 
     fn chat_row(
@@ -751,8 +757,6 @@ impl ChatSidebar {
         crew: Option<CrewSummary>,
         open: Option<bool>,
         members: usize,
-        parent: Option<Provider>,
-        carded: bool,
         git: bool,
     ) -> ChatRow {
         chat.now = self.now;
@@ -766,36 +770,33 @@ impl ChatSidebar {
             crew,
             open,
             members,
-            parent,
             tier: self.tier,
-            carded,
             git,
+            big: false,
         }
     }
 
     fn crew_rows(&self, chats: Vec<ChatItem>, nested: bool) -> Vec<ChatRow> {
         let mut out = Vec::new();
         for (head, rest) in families(chats) {
-            self.family(head, rest, nested, None, false, &mut out);
+            self.family(head, rest, nested, None, &mut out);
         }
         out
     }
 
     fn family(
         &self,
-        head: ChatItem,
+        mut head: ChatItem,
         rest: Vec<ChatItem>,
         nested: bool,
         parent: Option<&ChatLine>,
-        carded: bool,
         out: &mut Vec<ChatRow>,
     ) {
         let git = self.style == SidebarStyle::Default
             && head.child()
             && matches!((parent, &head.line), (Some(a), Some(b)) if git_differs(a, b));
-        let parent = parent.map(|line| line.provider);
         if !head.lead || rest.is_empty() || head.pin {
-            out.push(self.chat_row(head, nested, None, None, 0, parent, carded, git));
+            out.push(self.chat_row(head, nested, None, None, 0, git));
             out.extend(self.crew_rows(rest, nested));
             return;
         }
@@ -803,8 +804,13 @@ impl ChatSidebar {
         let line = head.line.clone();
         let depth = head.depth.saturating_add(1).min(2);
         let summary = summarize(&rest);
+        for provider in rest.iter().filter_map(|c| c.line.as_ref().map(|l| l.provider)) {
+            if !head.providers.contains(&provider) {
+                head.providers.push(provider);
+            }
+        }
         let members = families(rest);
-        let open = self.crew_is_open(lead, members.len());
+        let open = self.crew_is_open(lead);
         let all = open && self.crew_all.contains(&lead);
         let mut crew: Vec<CrewMember> = members
             .iter()
@@ -821,16 +827,13 @@ impl ChatSidebar {
             .collect();
         order(&mut crew);
         let shown = preview(&crew, open, all);
-        out.push(self.chat_row(
-            head,
-            nested,
-            Some(summary),
-            Some(open),
-            crew.len(),
-            parent,
-            carded,
-            git,
-        ));
+        let big =
+            head.active || members.iter().any(|(c, r)| c.active || r.iter().any(|c| c.active));
+        let mut row = self.chat_row(head, nested, Some(summary), Some(open), crew.len(), git);
+        if let ChatRow::Chat { big: b, .. } = &mut row {
+            *b = big;
+        }
+        out.push(row);
         let mut members: Vec<_> = members.into_iter().map(Some).collect();
         let mut visible: Vec<usize> = crew
             .iter()
@@ -882,7 +885,7 @@ impl ChatSidebar {
                 });
             }
             if let Some((chat, rest)) = members[ix].take() {
-                self.family(chat, rest, nested, line.as_ref(), card.is_some(), out);
+                self.family(chat, rest, nested, line.as_ref(), out);
             }
         }
         if open && (shown.hidden.total() > 0 || (all && crew.len() > 5)) {
@@ -893,7 +896,6 @@ impl ChatSidebar {
                 total: crew.len(),
                 depth,
                 nested,
-                tier: self.tier,
             });
         }
     }
@@ -917,10 +919,37 @@ impl ChatSidebar {
         }
     }
 
+    /// A pinned open chat highlights in Pinned only, while Pinned is visible.
+    fn highlight_pinned_only(&mut self) {
+        let folded = self.pinned_collapse.as_ref().is_some_and(|(folded, _)| *folded);
+        let Some(id) = self
+            .pinned
+            .iter()
+            .filter(|_| !folded)
+            .chain(self.custom_sections.iter().flat_map(|(_, l)| l).filter(|c| c.pin))
+            .find(|c| c.active)
+            .map(|c| c.id)
+        else {
+            return;
+        };
+        let in_place = self
+            .chats
+            .iter_mut()
+            .chain(self.projects.iter_mut().flat_map(|p| {
+                p.chats.iter_mut().chain(p.worktrees.iter_mut().flat_map(|w| w.chats.iter_mut()))
+            }))
+            .chain(self.custom_sections.iter_mut().flat_map(|(_, l)| l.iter_mut()))
+            .filter(|c| !c.pin && c.id == id);
+        for chat in in_place {
+            chat.active = false;
+        }
+    }
+
     /// Body rows in display order.
     pub(super) fn rows(&mut self) -> Vec<ChatRow> {
         let now = self.now;
         self.tally_pinned();
+        self.highlight_pinned_only();
         let header = |title: &str| ChatRow::Header {
             tools: None,
             title: SharedString::from(title.to_string()),
@@ -994,18 +1023,18 @@ impl ChatSidebar {
         let mut id = 0;
         for (k, project) in projects.into_iter().filter(|_| !projects_collapsed).enumerate() {
             let collapsed = project.header.collapsed;
-            // a folded group still shows the open chat, so the selection never vanishes
-            let chats: Vec<ChatItem> =
-                project.chats.into_iter().filter(|chat| !collapsed || chat.active).collect();
-            let mut held: Vec<(WorktreeItem, Vec<ChatItem>)> = Vec::new();
-            for mut worktree in project.worktrees {
-                let folded = collapsed || worktree.header.collapsed;
-                let chats: Vec<ChatItem> = std::mem::take(&mut worktree.chats)
-                    .into_iter()
-                    .filter(|chat| !folded || chat.active)
-                    .collect();
-                if !chats.is_empty() {
-                    held.push((worktree, chats));
+            let holds = |chats: &[ChatItem]| chats.iter().any(|chat| chat.active);
+            let active = collapsed
+                && (holds(&project.chats) || project.worktrees.iter().any(|w| holds(&w.chats)));
+            let chats: Vec<ChatItem> = project.chats.into_iter().filter(|_| !collapsed).collect();
+            let mut held: Vec<(WorktreeItem, Vec<ChatItem>, bool)> = Vec::new();
+            for mut worktree in project.worktrees.into_iter().filter(|_| !collapsed) {
+                let all = std::mem::take(&mut worktree.chats);
+                let folded = worktree.header.collapsed;
+                let active = folded && holds(&all);
+                let chats: Vec<ChatItem> = all.into_iter().filter(|_| !folded).collect();
+                if !chats.is_empty() || active {
+                    held.push((worktree, chats, active));
                 }
             }
             rows.push(ChatRow::Project {
@@ -1019,16 +1048,18 @@ impl ChatSidebar {
                 on_files: project.on_files,
                 on_hide: project.on_hide,
                 on_page: project.on_page,
+                active,
                 now,
             });
             id += 1;
             rows.extend(self.crew_rows(chats, true));
-            for (worktree, chats) in held {
+            for (worktree, chats, active) in held {
                 rows.push(ChatRow::Worktree {
                     id,
                     header: worktree.header,
                     on_collapse: worktree.on_collapse,
                     on_new: worktree.on_new,
+                    active,
                     now,
                 });
                 id += 1;

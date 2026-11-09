@@ -48,9 +48,10 @@ pub enum ChatStatus {
     Waiting,
     /// The provider is retrying or rate limited.
     Retrying,
-    /// Running but silent since `since_ms`.
+    /// Running since `turn_ms` but silent since `since_ms`.
     Quiet {
         since_ms: i64,
+        turn_ms: i64,
     },
     /// Turn over; this many background tasks still run.
     Background(usize),
@@ -81,7 +82,7 @@ impl ChatStatus {
             Self::Working { since_ms } => format!("Working · {}", clock(since_ms)),
             Self::Waiting => "Needs you".into(),
             Self::Retrying => "Retrying".into(),
-            Self::Quiet { since_ms } => format!("No output {}", clock(since_ms)),
+            Self::Quiet { since_ms, .. } => format!("No output {}", clock(since_ms)),
             Self::Background(n) => format!("{n} in background"),
             Self::Done => "Done".into(),
             Self::Failed => "Failed".into(),
@@ -141,6 +142,20 @@ impl ChatStatus {
                     .text_color(mango)
                     .font_features(tabular())
                     .child(Spinner::new().xsmall().color(mango))
+                    .when_some(timer, |el, t| el.child(div().text_xs().child(t)))
+                    .into_any_element()
+            }
+            Self::Quiet { turn_ms, .. } => {
+                let muted = cx.theme().muted_foreground;
+                let timer = now_ms.and_then(|now| live::since(Some(turn_ms), now));
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .px_1p5()
+                    .py_0p5()
+                    .text_color(muted)
+                    .font_features(tabular())
+                    .child(Spinner::new().xsmall().color(muted))
                     .when_some(timer, |el, t| el.child(div().text_xs().child(t)))
                     .into_any_element()
             }
@@ -351,6 +366,16 @@ pub struct ProjectHeader {
     pub status: ChatStatus,
     /// The folder no longer exists.
     pub missing: bool,
+    /// Checked-out branch of the folder, if it is a git repository.
+    pub branch: Option<SharedString>,
+    /// Checked and found no git repository.
+    pub no_git: bool,
+    pub added: u32,
+    pub deleted: u32,
+    pub ahead: u32,
+    /// Chats waiting on the user and failed chats, for the header chips.
+    pub needs_you: usize,
+    pub failed: usize,
 }
 
 type RowHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -394,6 +419,8 @@ struct ChatItem {
     /// The Pinned section's copy; the in-place copy keeps the crew.
     pin: bool,
     tally: Option<CrewSummary>,
+    /// Providers across its crew, for the Minimal lead's avatar stack.
+    providers: Vec<Provider>,
     watched: bool,
     depth: u8,
     lead: bool,
@@ -765,6 +792,7 @@ impl ChatSidebar {
             pinned,
             pin: false,
             tally: None,
+            providers: Vec::new(),
             watched: self.watched.contains(&id),
             depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
@@ -996,6 +1024,7 @@ impl ChatSidebar {
             pinned,
             pin: false,
             tally: None,
+            providers: Vec::new(),
             watched: self.watched.contains(&id),
             depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),

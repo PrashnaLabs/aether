@@ -137,14 +137,11 @@ fn fifteen_child_crew_starts_as_one_row() {
 }
 
 #[test]
-fn six_children_collapse_but_five_expand() {
+fn every_crew_starts_collapsed() {
     let mut six = crew_sidebar(&[ChatStatus::Done; 6], None);
     assert_eq!(keys(&mut six), ["caption:Today", "chat:10"]);
-    let mut five = crew_sidebar(&[ChatStatus::Done; 5], None);
-    assert_eq!(
-        keys(&mut five),
-        ["caption:Today", "chat:10", "chat:104", "chat:103", "chat:102", "chat:101", "chat:100"]
-    );
+    let mut two = crew_sidebar(&[ChatStatus::Working { since_ms: 0 }; 2], None);
+    assert_eq!(keys(&mut two), ["caption:Today", "chat:10"]);
 }
 
 fn mixed_crew() -> Vec<ChatStatus> {
@@ -262,6 +259,7 @@ fn lead_row_carries_transitive_summary() {
             None,
         );
     }
+    sidebar.crew_open.extend([(10, true), (100, true)]);
     let rows = sidebar.rows();
     assert_eq!(chat_ids(&rows), [10, 100, 200]);
     let crew = |id: i64| {
@@ -291,6 +289,13 @@ fn default_crew_sidebar(statuses: &[ChatStatus], selected: Option<usize>) -> Cha
             status: ChatStatus::Idle,
             missing: false,
             path: "/w/aether".into(),
+            branch: None,
+            no_git: false,
+            added: 0,
+            deleted: 0,
+            ahead: 0,
+            needs_you: 0,
+            failed: 0,
         },
         |_, _, _| {},
         |_, _, _| {},
@@ -454,6 +459,13 @@ fn project_headers_only_show_when_agents_count_is_positive() {
                 collapsed: false,
                 status: ChatStatus::Idle,
                 missing: false,
+                branch: None,
+                no_git: false,
+                added: 0,
+                deleted: 0,
+                ahead: 0,
+                needs_you: 0,
+                failed: 0,
             },
             |_, _, _| {},
             |_, _, _| {},
@@ -522,6 +534,13 @@ fn projects_section_collapse_hides_groups_and_preserves_add_button() {
                     collapsed: false,
                     status: ChatStatus::Idle,
                     missing: false,
+                    branch: None,
+                    no_git: false,
+                    added: 0,
+                    deleted: 0,
+                    ahead: 0,
+                    needs_you: 0,
+                    failed: 0,
                 },
                 |_, _, _| {},
                 |_, _, _| {},
@@ -626,6 +645,7 @@ fn line(branch: &str, added: u32) -> ChatLine {
 }
 
 fn git_flags(sidebar: &mut ChatSidebar) -> Vec<(i64, bool)> {
+    sidebar.crew_open.extend([(10, true), (100, true)]);
     sidebar
         .rows()
         .iter()
@@ -660,14 +680,6 @@ fn show_all_groups_consecutive_children_by_card() {
     );
     assert!(matches!(&rows[4], ChatRow::CardHeader { count: 2, card: 7, .. }));
     assert!(!rows[4].focusable());
-    let carded: Vec<_> = rows
-        .iter()
-        .filter_map(|r| match r {
-            ChatRow::Chat { chat, carded, .. } => Some((chat.id, *carded)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(carded[1..5], [(102, false), (101, true), (100, true), (105, false)]);
 }
 
 #[test]
@@ -678,7 +690,6 @@ fn single_card_child_gets_no_header_and_keeps_its_title() {
     sidebar.cards = [(100, (7, "Auth".into()))].into();
     let rows = sidebar.rows();
     assert!(!keys_of(&rows).iter().any(|k| k.starts_with("card:")));
-    assert!(rows.iter().all(|r| !matches!(r, ChatRow::Chat { carded: true, .. })));
 }
 
 #[test]
@@ -778,6 +789,13 @@ fn pinned_in_project(chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
                 status: ChatStatus::Idle,
                 missing: false,
                 path: "/w/aether".into(),
+                branch: None,
+                no_git: false,
+                added: 0,
+                deleted: 0,
+                ahead: 0,
+                needs_you: 0,
+                failed: 0,
             },
             |_, _, _| {},
             |_, _, _| {},
@@ -838,7 +856,22 @@ fn pinned_and_project_copies_have_distinct_keys() {
             _ => None,
         })
         .collect();
-    assert_eq!(active, ["pin:10", "chat:10"]);
+    assert_eq!(active, ["pin:10"]);
+}
+
+#[test]
+fn pinned_open_chat_highlights_in_place_when_pinned_is_folded() {
+    let mut sidebar = pinned_in_project(&[(10, ChatStatus::Idle, true, true)]);
+    sidebar.pinned_collapse = Some((true, std::rc::Rc::new(|_, _, _| {})));
+    let rows = sidebar.rows();
+    let active: Vec<_> = rows
+        .iter()
+        .filter_map(|r| match r {
+            ChatRow::Chat { chat, .. } if chat.active => Some(r.key().to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(active, ["chat:10"]);
 }
 
 #[test]
@@ -848,6 +881,7 @@ fn pinned_lead_shows_rollup_without_crew_in_pinned() {
         (100, ChatStatus::Waiting, false, false),
         (101, ChatStatus::Working { since_ms: 0 }, false, false),
     ]);
+    sidebar.crew_open.insert(10, true);
     let rows = sidebar.rows();
     let find = |key: &str| {
         rows.iter()
@@ -915,4 +949,35 @@ fn pinned_chat_without_project_also_lists_in_chats() {
     );
     let keys = keys(&mut sidebar);
     assert!(keys.contains(&"pin:7".to_string()) && keys.contains(&"chat:7".to_string()));
+}
+
+#[test]
+fn more_line_names_hidden_statuses() {
+    let hidden = CrewSummary { working: 2, done: 11, ..Default::default() };
+    assert_eq!(hidden_words(hidden), "+2 working, +11 done");
+}
+
+#[test]
+fn collapsed_project_hides_the_open_chat_and_highlights_itself() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 3], Some(1));
+    sidebar.projects[0].header.collapsed = true;
+    let rows = sidebar.rows();
+    assert!(!keys_of(&rows).iter().any(|k| k.starts_with("chat:")));
+    assert!(rows.iter().any(|r| matches!(r, ChatRow::Project { active: true, .. })));
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 3], None);
+    sidebar.projects[0].header.collapsed = true;
+    let rows = sidebar.rows();
+    assert!(rows.iter().any(|r| matches!(r, ChatRow::Project { active: false, .. })));
+}
+
+#[test]
+fn lead_card_is_big_only_while_its_crew_is_open_in_a_pane() {
+    let big = |sidebar: &mut ChatSidebar| {
+        sidebar.rows().iter().find_map(|r| match r {
+            ChatRow::Chat { chat, big, .. } if chat.id == 10 => Some(*big),
+            _ => None,
+        })
+    };
+    assert_eq!(big(&mut crew_sidebar(&[ChatStatus::Done; 3], None)), Some(false));
+    assert_eq!(big(&mut crew_sidebar(&[ChatStatus::Done; 3], Some(1))), Some(true));
 }

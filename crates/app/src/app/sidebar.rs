@@ -434,13 +434,29 @@ impl ChatApp {
         for (k, group) in groups.iter().enumerate() {
             let name = names.remove(&group.folder).unwrap_or_default();
             let path = group.folder.display().to_string();
+            let statuses: Vec<ChatStatus> =
+                group.chats.iter().map(|&ix| self.chats[ix].status(now)).collect();
+            let (_, added, deleted, ahead_behind) =
+                self.sidebar_git_summary(&group.folder).unwrap_or((0, 0, 0, None));
             let header = ProjectHeader {
                 name: name.into(),
                 count: group.chats.len(),
                 collapsed: projects::listed(&self.settings.collapsed_projects, &group.folder),
-                status: projects::rollup(group.chats.iter().map(|&ix| self.chats[ix].status(now))),
+                status: projects::rollup(statuses.iter().copied()),
                 missing: self.missing_folders.contains(&group.folder),
                 path: path.into(),
+                branch: self
+                    .branches
+                    .get(&group.folder)
+                    .cloned()
+                    .flatten()
+                    .map(|b| b.branch.into()),
+                no_git: matches!(self.branches.get(&group.folder), Some(None)),
+                added,
+                deleted,
+                ahead: ahead_behind.map_or(0, |(ahead, _)| ahead),
+                needs_you: statuses.iter().filter(|s| s.is_waiting()).count(),
+                failed: statuses.iter().filter(|s| **s == ChatStatus::Failed).count(),
             };
             let (fold, new, files, hide, page) = (
                 group.folder.clone(),
@@ -752,7 +768,7 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
             cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-            cx.listener(move |this, _, window, cx| this.archive_chat(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             None,
             None,
@@ -941,7 +957,7 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
             cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-            cx.listener(move |this, _, window, cx| this.archive_chat(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             None,
             None,
@@ -978,7 +994,7 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
             cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-            cx.listener(move |this, _, window, cx| this.archive_chat(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             remove,
             None,
