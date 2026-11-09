@@ -62,6 +62,42 @@ pub(crate) fn rollup(statuses: impl IntoIterator<Item = ChatStatus>) -> ChatStat
         .unwrap_or(ChatStatus::Idle)
 }
 
+/// Coarse chat state for the goto picker's filters, derived from `ChatStatus`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AgentState {
+    Blocked,
+    Working,
+    Done,
+    Idle,
+}
+
+impl AgentState {
+    pub(crate) const ALL: [Self; 4] = [Self::Blocked, Self::Working, Self::Done, Self::Idle];
+
+    pub(crate) fn of(status: ChatStatus) -> Self {
+        match status {
+            ChatStatus::Waiting => Self::Blocked,
+            ChatStatus::Idle => Self::Idle,
+            ChatStatus::Done | ChatStatus::Failed => Self::Done,
+            _ => Self::Working,
+        }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Blocked => "blocked",
+            Self::Working => "working",
+            Self::Done => "done",
+            Self::Idle => "idle",
+        }
+    }
+
+    /// Query that picks only this state in the picker.
+    pub(crate) fn filter(self) -> String {
+        format!("state:{}", self.name())
+    }
+}
+
 /// Age of `at_ms` as seen at `now_ms`: now, 5m, 3h, Yesterday, Oct 12,
 /// with the year added once it differs.
 pub(crate) fn relative_time<Tz: TimeZone>(at_ms: i64, now_ms: i64, tz: &Tz) -> String
