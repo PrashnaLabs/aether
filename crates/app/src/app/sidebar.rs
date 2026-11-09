@@ -767,6 +767,16 @@ impl ChatApp {
         )
     }
 
+    fn child_cards(&self) -> std::collections::HashMap<i64, (i64, SharedString)> {
+        let mut cards: Vec<_> =
+            self.cards.iter().filter(|c| c.col != crate::board::model::Col::Done).collect();
+        cards.sort_by_key(|c| std::cmp::Reverse(c.id));
+        cards
+            .into_iter()
+            .flat_map(|c| c.chats.iter().map(|&chat| (chat, (c.id, c.title.clone().into()))))
+            .collect()
+    }
+
     /// Header and resizable edge shared by every sidebar view.
     fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
         let (resize, resize_end, watch, handoff) =
@@ -774,6 +784,7 @@ impl ChatApp {
         ChatSidebar::new(title)
             .width(self.settings.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
             .now(now_ms())
+            .child_cards(self.child_cards())
             .handoff(
                 self.handoff_targets(None),
                 self.chats

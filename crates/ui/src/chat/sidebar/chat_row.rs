@@ -376,6 +376,8 @@ pub(super) fn render_chat(
     show_all: Option<(SharedString, RowHandler)>,
     parent: Option<Provider>,
     tier: Tier,
+    carded: bool,
+    git: bool,
     cx: &App,
 ) -> AnyElement {
     let muted = cx.theme().muted_foreground;
@@ -511,10 +513,51 @@ pub(super) fn render_chat(
             (ChatStatus::Idle, _) => div().into_any_element(),
             _ => status.badge(("chat-status-badge", ix), None, cx),
         };
-        let model = line
-            .as_ref()
-            .map(|line| line.model.clone())
-            .filter(|model| tier != Tier::Narrow && !model.is_empty());
+        let model_name = line.as_ref().map(|line| line.model.clone()).filter(|m| !m.is_empty());
+        let model = model_name.clone().filter(|_| tier != Tier::Narrow && !carded);
+        let name = model_name.filter(|_| carded).unwrap_or_else(|| title.clone());
+        let chip = line.as_ref().filter(|_| git && tier != Tier::Narrow).and_then(|line| {
+            let place = line.place.as_ref().map(|place| {
+                let short = match place {
+                    RowPlace::Branch { name, .. } => middle_truncate(name, LONG_BRANCH),
+                    RowPlace::Folder(name) => name.to_string(),
+                    RowPlace::NoGit => "No git".to_string(),
+                };
+                h_flex()
+                    .min_w_0()
+                    .gap_0p5()
+                    .items_center()
+                    .child(Icon::new(place.icon()).size(rems(0.75)).flex_none())
+                    .child(div().min_w_0().truncate().child(short))
+            });
+            let diff = line.changed > 0 && (line.added > 0 || line.deleted > 0);
+            (place.is_some() || diff).then(|| {
+                h_flex()
+                    .id(("chat-child-git", ix))
+                    .min_w_0()
+                    .max_w(rems(9.))
+                    .gap_1()
+                    .items_center()
+                    .text_xs()
+                    .text_color(muted)
+                    .font_features(tabular())
+                    .children(place)
+                    .when(diff, |el| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .text_color(crate::theme::success_text(cx))
+                                .child(format!("+{}", line.added)),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(crate::theme::danger_text(cx))
+                                .child(format!("−{}", line.deleted)),
+                        )
+                    })
+            })
+        });
         let provider = line
             .as_ref()
             .map(|line| line.provider)
@@ -524,7 +567,8 @@ pub(super) fn render_chat(
             .gap_1p5()
             .items_center()
             .child(slot(swap(mark, chevron)))
-            .child(title_cell(title.clone()))
+            .child(title_cell(name))
+            .children(chip)
             .children(model.map(|model| {
                 let mut name = div().min_w(rems(2.)).truncate();
                 name.style().flex_shrink = Some(100.);

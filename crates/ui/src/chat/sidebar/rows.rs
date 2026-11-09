@@ -15,8 +15,8 @@ use super::menu::track_menu;
 use super::project_row::ProjectRow;
 use super::state::{SidebarState, navigate};
 use super::{
-    AgentState, ChatItem, ChatSidebar, CollapseHandler, OutsideLine, OutsideState, ProjectHeader,
-    ProjectItem, RowHandler, ToolsFactory, WorktreeItem,
+    AgentState, ChatItem, ChatLine, ChatSidebar, CollapseHandler, OutsideLine, OutsideState,
+    ProjectHeader, ProjectItem, RowHandler, ToolsFactory, WorktreeItem,
 };
 use crate::components::provider_icon;
 use aether_core::{Provider, SidebarStyle};
@@ -86,6 +86,16 @@ pub(super) enum ChatRow {
         members: usize,
         parent: Option<Provider>,
         tier: Tier,
+        carded: bool,
+        git: bool,
+    },
+    CardHeader {
+        lead: i64,
+        card: i64,
+        title: SharedString,
+        count: usize,
+        depth: u8,
+        nested: bool,
     },
     CrewMore {
         lead: i64,
@@ -115,6 +125,7 @@ impl ChatRow {
             Self::Project { header, .. } => format!("project:{}", header.path).into(),
             Self::Worktree { header, .. } => format!("worktree:{}", header.path).into(),
             Self::Chat { chat, .. } => chat_key(chat.id),
+            Self::CardHeader { lead, card, .. } => format!("card:{lead}:{card}").into(),
             Self::CrewMore { lead, .. } => format!("crew-more:{lead}").into(),
             Self::SectionButton { label, .. } => format!("section-btn:{label}").into(),
         }
@@ -124,7 +135,7 @@ impl ChatRow {
         match self {
             Self::Header { collapse, .. } => collapse.is_some(),
             Self::Chat { rename_editor, .. } => rename_editor.is_none(),
-            Self::CrewMore { .. } => false,
+            Self::CrewMore { .. } | Self::CardHeader { .. } => false,
             _ => true,
         }
     }
@@ -396,6 +407,8 @@ impl ChatRow {
                 members,
                 parent,
                 tier,
+                carded,
+                git,
             } => {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
@@ -491,8 +504,24 @@ impl ChatRow {
                     show_all,
                     parent,
                     tier,
+                    carded,
+                    git,
                     cx,
                 );
+                (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
+            }
+            Self::CardHeader { card, title, count, depth, nested, .. } => {
+                let row = h_flex()
+                    .w_full()
+                    .px_2()
+                    .pt_1p5()
+                    .pb_0p5()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .justify_between()
+                    .child(div().min_w_0().truncate().child(format!("#{card} {title}")))
+                    .child(div().flex_none().font_features(tabular()).child(count.to_string()));
                 (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
             }
             Self::CrewMore { lead, hidden, all, total, depth, nested, tier } => {
@@ -685,6 +714,10 @@ fn families(chats: Vec<ChatItem>) -> Vec<(ChatItem, Vec<ChatItem>)> {
     out
 }
 
+fn git_differs(a: &ChatLine, b: &ChatLine) -> bool {
+    (&a.place, a.added, a.deleted) != (&b.place, b.added, b.deleted)
+}
+
 fn summarize(chats: &[ChatItem]) -> CrewSummary {
     let mut summary = CrewSummary::default();
     for chat in chats {
@@ -706,6 +739,8 @@ impl ChatSidebar {
         open: Option<bool>,
         members: usize,
         parent: Option<Provider>,
+        carded: bool,
+        git: bool,
     ) -> ChatRow {
         chat.now = self.now;
         let rename_editor =
@@ -720,13 +755,15 @@ impl ChatSidebar {
             members,
             parent,
             tier: self.tier,
+            carded,
+            git,
         }
     }
 
     fn crew_rows(&self, chats: Vec<ChatItem>, nested: bool) -> Vec<ChatRow> {
         let mut out = Vec::new();
         for (head, rest) in families(chats) {
-            self.family(head, rest, nested, None, &mut out);
+            self.family(head, rest, nested, None, false, &mut out);
         }
         out
     }
@@ -736,16 +773,21 @@ impl ChatSidebar {
         head: ChatItem,
         rest: Vec<ChatItem>,
         nested: bool,
-        parent: Option<Provider>,
+        parent: Option<&ChatLine>,
+        carded: bool,
         out: &mut Vec<ChatRow>,
     ) {
+        let git = self.style == SidebarStyle::Default
+            && head.child()
+            && matches!((parent, &head.line), (Some(a), Some(b)) if git_differs(a, b));
+        let parent = parent.map(|line| line.provider);
         if self.style == SidebarStyle::Focus || !head.lead || rest.is_empty() {
-            out.push(self.chat_row(head, nested, None, None, 0, parent));
+            out.push(self.chat_row(head, nested, None, None, 0, parent, carded, git));
             out.extend(self.crew_rows(rest, nested));
             return;
         }
         let lead = head.id;
-        let provider = head.line.as_ref().map(|line| line.provider);
+        let line = head.line.clone();
         let depth = head.depth.saturating_add(1).min(2);
         let summary = summarize(&rest);
         let members = families(rest);
@@ -766,11 +808,52 @@ impl ChatSidebar {
             .collect();
         order(&mut crew);
         let shown = preview(&crew, open, all);
-        out.push(self.chat_row(head, nested, Some(summary), Some(open), crew.len(), parent));
+        out.push(self.chat_row(
+            head,
+            nested,
+            Some(summary),
+            Some(open),
+            crew.len(),
+            parent,
+            carded,
+            false,
+        ));
         let mut members: Vec<_> = members.into_iter().map(Some).collect();
-        for (member, _) in crew.iter().zip(&shown.visible).filter(|(_, v)| **v) {
-            if let Some((chat, rest)) = members[member.ix].take() {
-                self.family(chat, rest, nested, provider, out);
+        let visible: Vec<usize> = crew
+            .iter()
+            .zip(&shown.visible)
+            .filter(|(_, v)| **v)
+            .map(|(member, _)| member.ix)
+            .collect();
+        let cards: Vec<Option<&(i64, SharedString)>> = visible
+            .iter()
+            .map(|&ix| {
+                let grouped = all && self.style == SidebarStyle::Default;
+                grouped
+                    .then(|| members[ix].as_ref())
+                    .flatten()
+                    .and_then(|(chat, _)| self.cards.get(&chat.id))
+            })
+            .collect();
+        for (n, &ix) in visible.iter().enumerate() {
+            let card = cards[n];
+            if let Some((id, title)) = card
+                && n.checked_sub(1).and_then(|p| cards[p]).is_none_or(|(prev, _)| prev != id)
+            {
+                out.push(ChatRow::CardHeader {
+                    lead,
+                    card: *id,
+                    title: title.clone(),
+                    count: cards[n..]
+                        .iter()
+                        .take_while(|c| c.is_some_and(|(i, _)| i == id))
+                        .count(),
+                    depth,
+                    nested,
+                });
+            }
+            if let Some((chat, rest)) = members[ix].take() {
+                self.family(chat, rest, nested, line.as_ref(), card.is_some(), out);
             }
         }
         if open && (shown.hidden.total() > 0 || (all && crew.len() > 5)) {

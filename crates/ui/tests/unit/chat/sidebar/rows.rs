@@ -1,4 +1,4 @@
-use super::super::{ChatStatus, ClickEvent};
+use super::super::{ChatStatus, ClickEvent, RowPlace};
 use super::*;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -585,4 +585,84 @@ fn agents_and_pinned_collapse_independently() {
             );
         }
     }
+}
+
+fn line(branch: &str, added: u32) -> ChatLine {
+    ChatLine {
+        provider: Provider::Claude,
+        project: None,
+        model: "Sonnet".into(),
+        place: Some(RowPlace::Branch { name: branch.into(), worktree: false, detached: false }),
+        time: "1m".into(),
+        path: "/w".into(),
+        removed: false,
+        changed: usize::from(added > 0),
+        added,
+        deleted: 0,
+        ahead_behind: None,
+        background: 0,
+    }
+}
+
+fn git_flags(sidebar: &mut ChatSidebar) -> Vec<(i64, bool)> {
+    sidebar
+        .rows()
+        .iter()
+        .filter_map(|r| match r {
+            ChatRow::Chat { chat, git, .. } if chat.child() => Some((chat.id, *git)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn show_all_groups_consecutive_children_by_card() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 4], None);
+    sidebar.crew_open.insert(10, true);
+    sidebar.crew_all.insert(10);
+    sidebar.cards =
+        [(100, (7, "Auth".into())), (101, (7, "Auth".into())), (102, (9, "Docs".into()))].into();
+    let rows = sidebar.rows();
+    let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
+    assert_eq!(
+        keys[3..],
+        ["chat:103", "card:10:9", "chat:102", "card:10:7", "chat:101", "chat:100"]
+    );
+    assert!(matches!(&rows[6], ChatRow::CardHeader { count: 2, card: 7, .. }));
+    assert!(!rows[6].focusable());
+    let carded: Vec<_> = rows
+        .iter()
+        .filter_map(|r| match r {
+            ChatRow::Chat { chat, carded, .. } => Some((chat.id, *carded)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(carded[1..], [(103, false), (102, true), (101, true), (100, true)]);
+}
+
+#[test]
+fn card_headers_need_show_all() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 2], None);
+    sidebar.cards = [(100, (7, "Auth".into()))].into();
+    assert!(!keys(&mut sidebar).iter().any(|k| k.starts_with("card:")));
+}
+
+fn with_lines(sidebar: &mut ChatSidebar, lines: &[(&str, u32)]) {
+    for (chat, (branch, added)) in sidebar.projects[0].chats.iter_mut().zip(lines) {
+        chat.line = Some(line(branch, *added));
+    }
+}
+
+#[test]
+fn child_with_same_branch_hides_git_line() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 2], None);
+    with_lines(&mut sidebar, &[("main", 3), ("main", 3), ("main", 3)]);
+    assert_eq!(git_flags(&mut sidebar), [(101, false), (100, false)]);
+}
+
+#[test]
+fn child_in_own_worktree_shows_git_line() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 3], None);
+    with_lines(&mut sidebar, &[("main", 3), ("main", 3), ("wt/x", 3), ("main", 5)]);
+    assert_eq!(git_flags(&mut sidebar), [(102, true), (101, true), (100, false)]);
 }

@@ -500,6 +500,7 @@ pub struct ChatSidebar {
     children: std::collections::HashMap<i64, u8>,
     crew_open: std::collections::HashMap<i64, bool>,
     crew_all: std::collections::HashSet<i64>,
+    cards: std::collections::HashMap<i64, (i64, SharedString)>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
@@ -545,6 +546,7 @@ impl ChatSidebar {
             children: std::collections::HashMap::new(),
             crew_open: std::collections::HashMap::new(),
             crew_all: std::collections::HashSet::new(),
+            cards: std::collections::HashMap::new(),
             leads: Vec::new(),
             on_watch: None,
             handoff: None,
@@ -578,6 +580,15 @@ impl ChatSidebar {
     /// Chat ids drawn one level deeper, under their lead.
     pub fn child_agents(mut self, depths: Vec<(i64, u8)>) -> Self {
         self.children = depths.into_iter().collect();
+        self
+    }
+
+    /// Chat id to the (card id, title) it hangs off, for Show all headers.
+    pub fn child_cards(
+        mut self,
+        cards: std::collections::HashMap<i64, (i64, SharedString)>,
+    ) -> Self {
+        self.cards = cards;
         self
     }
 
