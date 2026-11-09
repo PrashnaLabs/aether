@@ -314,29 +314,37 @@ fn children_follow_their_lead_in_group_order() {
         crew(2, None, true),
         crew(3, Some(2), false),
     ];
-    assert_eq!(
-        nest_children(&chats, &[0, 1, 2, 3]),
-        [(0, false), (2, false), (3, true), (1, true)]
-    );
+    assert_eq!(nest_children(&chats, &[0, 1, 2, 3]), [(0, 0), (2, 0), (3, 1), (1, 1)]);
 }
 
 #[test]
 fn orphan_child_keeps_normal_position() {
     let chats = [crew(1, Some(9), false), crew(2, None, false), crew(3, Some(2), false)];
-    assert_eq!(nest_children(&chats, &[0, 1, 2]), [(0, false), (1, false), (2, false)]);
+    assert_eq!(nest_children(&chats, &[0, 1, 2]), [(0, 0), (1, 0), (2, 0)]);
 }
 
 #[test]
 fn child_in_other_group_is_not_nested() {
     let chats = [crew(1, None, true), crew(2, Some(1), false)];
-    assert_eq!(nest_children(&chats, &[1]), [(1, false)]);
-    assert_eq!(nest_children(&chats, &[0]), [(0, false)]);
+    assert_eq!(nest_children(&chats, &[1]), [(1, 0)]);
+    assert_eq!(nest_children(&chats, &[0]), [(0, 0)]);
 }
 
 #[test]
 fn nested_lead_keeps_its_row_and_its_children() {
     let chats = [crew(1, None, true), crew(2, Some(1), true), crew(3, Some(2), false)];
-    assert_eq!(nest_children(&chats, &[0, 1, 2]), [(0, false), (1, false), (2, true)]);
+    assert_eq!(nest_children(&chats, &[0, 1, 2]), [(0, 0), (1, 1), (2, 2)]);
+}
+
+#[test]
+fn great_grandchildren_cap_at_depth_two() {
+    let chats = [
+        crew(1, None, true),
+        crew(2, Some(1), true),
+        crew(3, Some(2), true),
+        crew(4, Some(3), false),
+    ];
+    assert_eq!(nest_children(&chats, &[0, 1, 2, 3]), [(0, 0), (1, 1), (2, 2), (3, 2)]);
 }
 
 #[test]
@@ -350,10 +358,7 @@ fn minimal_crews_follow_leads_across_sections_without_duplicates() {
     let sections = vec![("Today".into(), vec![1, 3]), ("Yesterday".into(), vec![2, 0])];
     assert_eq!(
         nest_section_children(&chats, sections),
-        vec![
-            ("Today".into(), vec![(3, false)]),
-            ("Yesterday".into(), vec![(0, false), (2, true), (1, true)]),
-        ]
+        vec![("Today".into(), vec![(3, 0)]), ("Yesterday".into(), vec![(0, 0), (2, 1), (1, 1)]),]
     );
 }
 
@@ -365,7 +370,7 @@ fn minimal_pinned_lead_keeps_crew_but_pinned_children_stay_independent() {
     let sections = vec![("Pinned".into(), vec![2, 0]), ("Today".into(), vec![1])];
     assert_eq!(
         nest_section_children(&chats, sections),
-        vec![("Pinned".into(), vec![(2, false), (0, false), (1, true)])]
+        vec![("Pinned".into(), vec![(2, 0), (0, 0), (1, 1)])]
     );
 }
 
@@ -376,8 +381,8 @@ fn minimal_missing_leads_and_normal_chats_keep_their_section_order() {
     assert_eq!(
         nest_section_children(&chats, sections),
         vec![
-            ("Project B".into(), vec![(2, false), (0, false)]),
-            ("Project A".into(), vec![(1, false)]),
+            ("Project B".into(), vec![(2, 0), (0, 0)]),
+            ("Project A".into(), vec![(1, 0)]),
         ]
     );
 }

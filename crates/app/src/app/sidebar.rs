@@ -143,10 +143,11 @@ fn agent_state(chat: &Chat, live: bool) -> Option<AgentState> {
 }
 
 /// Group order with each lead's live children (same group, `parent` is a lead) right after it, by id.
-pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, bool)> {
+/// Depth is 0 for top-level rows, 1 for children, 2 for grandchildren and deeper.
+pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, u8)> {
     let leads: std::collections::HashSet<i64> =
         group.iter().filter(|&&ix| chats[ix].lead).map(|&ix| chats[ix].id).collect();
-    let live = |ix: usize| !chats[ix].lead && chats[ix].parent.is_some_and(|p| leads.contains(&p));
+    let live = |ix: usize| chats[ix].parent.is_some_and(|p| leads.contains(&p));
     let mut kids: std::collections::HashMap<i64, Vec<usize>> = std::collections::HashMap::new();
     for &ix in group {
         if live(ix) {
@@ -156,14 +157,25 @@ pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, bool
     for list in kids.values_mut() {
         list.sort_by_key(|&k| chats[k].id);
     }
-    let mut out = Vec::with_capacity(group.len());
-    for &ix in group.iter().filter(|&&ix| !live(ix)) {
-        out.push((ix, false));
+    fn walk(
+        chats: &[Chat],
+        kids: &std::collections::HashMap<i64, Vec<usize>>,
+        ix: usize,
+        level: u8,
+        out: &mut Vec<(usize, u8)>,
+    ) {
+        out.push((ix, level.min(2)));
         if chats[ix].lead
             && let Some(list) = kids.get(&chats[ix].id)
         {
-            out.extend(list.iter().map(|&k| (k, true)));
+            for &k in list {
+                walk(chats, kids, k, level + 1, out);
+            }
         }
+    }
+    let mut out = Vec::with_capacity(group.len());
+    for &ix in group.iter().filter(|&&ix| !live(ix)) {
+        walk(chats, &kids, ix, 0, &mut out);
     }
     out
 }
@@ -173,20 +185,20 @@ pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, bool
 pub(super) fn nest_section_children(
     chats: &[Chat],
     sections: Vec<(String, Vec<usize>)>,
-) -> Vec<(String, Vec<(usize, bool)>)> {
+) -> Vec<(String, Vec<(usize, u8)>)> {
     let group: Vec<usize> = sections
         .iter()
         .flat_map(|(_, ixs)| ixs.iter().copied())
         .filter(|&ix| !chats[ix].pinned || chats[ix].lead)
         .collect();
-    let mut families: HashMap<usize, Vec<(usize, bool)>> = HashMap::new();
+    let mut families: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
     let mut lead = None;
-    for (ix, child) in nest_children(chats, &group) {
-        if !child {
+    for (ix, depth) in nest_children(chats, &group) {
+        if depth == 0 {
             lead = Some(ix);
         }
         if let Some(lead) = lead {
-            families.entry(lead).or_default().push((ix, child));
+            families.entry(lead).or_default().push((ix, depth));
         }
     }
     sections
@@ -196,7 +208,7 @@ pub(super) fn nest_section_children(
                 .into_iter()
                 .flat_map(|ix| {
                     if chats[ix].pinned && !chats[ix].lead {
-                        vec![(ix, false)]
+                        vec![(ix, 0)]
                     } else {
                         families.remove(&ix).unwrap_or_default()
                     }
@@ -411,10 +423,15 @@ impl ChatApp {
         let now = now_ms();
         let (groups, hidden) = self.project_groups();
         // Keep each lead's children together for the sidebar's crew preview.
-        let nested: Vec<Vec<(usize, bool)>> =
+        let nested: Vec<Vec<(usize, u8)>> =
             groups.iter().map(|g| nest_children(&self.chats, &g.chats)).collect();
         sidebar = sidebar.child_agents(
-            nested.iter().flatten().filter(|(_, c)| *c).map(|&(ix, _)| self.chats[ix].id).collect(),
+            nested
+                .iter()
+                .flatten()
+                .filter(|(_, d)| *d > 0)
+                .map(|&(ix, d)| (self.chats[ix].id, d))
+                .collect(),
         );
         for (ix, chat) in self.chats.iter().enumerate().rev() {
             if chat.pinned && !chat.archived && chat.is_agent() {
@@ -562,15 +579,15 @@ impl ChatApp {
         } else {
             sections
                 .into_iter()
-                .map(|(label, ixs)| (label, ixs.into_iter().map(|ix| (ix, false)).collect()))
+                .map(|(label, ixs)| (label, ixs.into_iter().map(|ix| (ix, 0)).collect()))
                 .collect()
         };
         sidebar = sidebar.child_agents(
             sections
                 .iter()
                 .flat_map(|(_, rows)| rows)
-                .filter(|(_, child)| *child)
-                .map(|&(ix, _)| self.chats[ix].id)
+                .filter(|(_, d)| *d > 0)
+                .map(|&(ix, d)| (self.chats[ix].id, d))
                 .collect(),
         );
         for (label, rows) in sections {

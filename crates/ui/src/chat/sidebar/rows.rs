@@ -380,7 +380,7 @@ impl ChatRow {
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
                     && window.last_input_was_keyboard();
                 let show = chat.active || keyboard || menu_open;
-                let child = chat.child;
+                let child = chat.child();
                 let row = render_chat(
                     chat,
                     nested,
@@ -637,7 +637,7 @@ impl ChatSidebar {
                     continue;
                 }
                 let mut children = Vec::new();
-                while chats.peek().is_some_and(|chat| chat.child) {
+                while chats.peek().is_some_and(|chat| chat.child()) {
                     children.push(chats.next().unwrap());
                 }
                 let visible = collapsed_crew(&children, rename_ix);

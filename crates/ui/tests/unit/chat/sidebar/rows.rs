@@ -41,7 +41,7 @@ fn sidebar_custom_sections() {
 fn custom_section_children_keep_their_grouping_and_navigation() {
     let mut sidebar = ChatSidebar::new("Aether")
         .style(aether_core::SidebarStyle::Minimal)
-        .child_agents(vec![100])
+        .child_agents(vec![(100, 1)])
         .chat_in_section(
             "Today",
             0,
@@ -65,7 +65,7 @@ fn custom_section_children_keep_their_grouping_and_navigation() {
     assert!(rows[1].focusable());
     match &rows[1] {
         ChatRow::Chat { chat, .. } => {
-            assert!(chat.child);
+            assert!(chat.child());
             assert!(chat.active);
             assert_eq!(chat.id, 100);
         }
@@ -77,7 +77,7 @@ fn crew_sidebar(statuses: &[ChatStatus], selected: Option<usize>) -> ChatSidebar
     let mut sidebar = ChatSidebar::new("Aether")
         .style(SidebarStyle::Minimal)
         .lead_agents(vec![10])
-        .child_agents((0..statuses.len()).map(|i| 100 + i as i64).collect())
+        .child_agents((0..statuses.len()).map(|i| (100 + i as i64, 1)).collect())
         .chat_in_section(
             "Today",
             0,

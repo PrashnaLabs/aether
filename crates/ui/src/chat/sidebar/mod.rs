@@ -393,7 +393,7 @@ struct ChatItem {
     status: ChatStatus,
     pinned: bool,
     watched: bool,
-    child: bool,
+    depth: u8,
     lead: bool,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, HandoffHandler)>,
@@ -410,6 +410,12 @@ struct ChatItem {
     archived: bool,
     pick: Option<Pick>,
     now: i64,
+}
+
+impl ChatItem {
+    fn child(&self) -> bool {
+        self.depth > 0
+    }
 }
 
 struct AgentItem {
@@ -491,7 +497,7 @@ pub struct ChatSidebar {
     on_resize_end: Option<ResizeEndHandler>,
     now: i64,
     watched: Vec<i64>,
-    children: Vec<i64>,
+    children: std::collections::HashMap<i64, u8>,
     collapsed_crews: std::collections::HashSet<i64>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
@@ -534,7 +540,7 @@ impl ChatSidebar {
             on_resize_end: None,
             now: 0,
             watched: Vec::new(),
-            children: Vec::new(),
+            children: std::collections::HashMap::new(),
             collapsed_crews: std::collections::HashSet::new(),
             leads: Vec::new(),
             on_watch: None,
@@ -567,8 +573,8 @@ impl ChatSidebar {
     }
 
     /// Chat ids drawn one level deeper, under their lead.
-    pub fn child_agents(mut self, ids: Vec<i64>) -> Self {
-        self.children = ids;
+    pub fn child_agents(mut self, depths: Vec<(i64, u8)>) -> Self {
+        self.children = depths.into_iter().collect();
         self
     }
 
@@ -739,7 +745,7 @@ impl ChatSidebar {
             status,
             pinned,
             watched: self.watched.contains(&id),
-            child: self.children.contains(&id),
+            depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
@@ -949,7 +955,7 @@ impl ChatSidebar {
             status,
             pinned,
             watched: self.watched.contains(&id),
-            child: self.children.contains(&id),
+            depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
