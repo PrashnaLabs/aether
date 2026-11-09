@@ -819,7 +819,7 @@ impl ChatSidebar {
             false,
         ));
         let mut members: Vec<_> = members.into_iter().map(Some).collect();
-        let visible: Vec<usize> = crew
+        let mut visible: Vec<usize> = crew
             .iter()
             .zip(&shown.visible)
             .filter(|(_, v)| **v)
@@ -835,6 +835,20 @@ impl ChatSidebar {
                     .and_then(|(chat, _)| self.cards.get(&chat.id))
             })
             .collect();
+        let mut seen: Vec<i64> = Vec::new();
+        let mut paired: Vec<_> = visible.iter().copied().zip(cards).collect();
+        for (_, card) in &paired {
+            if let Some((id, _)) = card
+                && !seen.contains(id)
+            {
+                seen.push(*id);
+            }
+        }
+        paired.sort_by_key(|(_, card)| {
+            card.map_or(usize::MAX, |(id, _)| seen.iter().position(|s| s == id).unwrap_or(0))
+        });
+        let (ixs, cards): (Vec<usize>, Vec<_>) = paired.into_iter().unzip();
+        visible = ixs;
         for (n, &ix) in visible.iter().enumerate() {
             let card = cards[n];
             if let Some((id, title)) = card

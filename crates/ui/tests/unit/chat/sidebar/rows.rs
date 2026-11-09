@@ -626,10 +626,10 @@ fn show_all_groups_consecutive_children_by_card() {
     let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
     assert_eq!(
         keys[3..],
-        ["chat:103", "card:10:9", "chat:102", "card:10:7", "chat:101", "chat:100"]
+        ["card:10:9", "chat:102", "card:10:7", "chat:101", "chat:100", "chat:103"]
     );
-    assert!(matches!(&rows[6], ChatRow::CardHeader { count: 2, card: 7, .. }));
-    assert!(!rows[6].focusable());
+    assert!(matches!(&rows[5], ChatRow::CardHeader { count: 2, card: 7, .. }));
+    assert!(!rows[5].focusable());
     let carded: Vec<_> = rows
         .iter()
         .filter_map(|r| match r {
@@ -637,7 +637,7 @@ fn show_all_groups_consecutive_children_by_card() {
             _ => None,
         })
         .collect();
-    assert_eq!(carded[1..], [(103, false), (102, true), (101, true), (100, true)]);
+    assert_eq!(carded[1..], [(102, true), (101, true), (100, true), (103, false)]);
 }
 
 #[test]
@@ -665,4 +665,40 @@ fn child_in_own_worktree_shows_git_line() {
     let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 3], None);
     with_lines(&mut sidebar, &[("main", 3), ("main", 3), ("wt/x", 3), ("main", 5)]);
     assert_eq!(git_flags(&mut sidebar), [(102, true), (101, true), (100, false)]);
+}
+
+#[test]
+fn show_all_groups_same_card_once_across_statuses() {
+    let statuses = [
+        ChatStatus::Working { since_ms: 0 },
+        ChatStatus::Done,
+        ChatStatus::Working { since_ms: 0 },
+        ChatStatus::Done,
+    ];
+    let mut sidebar = default_crew_sidebar(&statuses, None);
+    sidebar.crew_open.insert(10, true);
+    sidebar.crew_all.insert(10);
+    sidebar.cards = [
+        (100, (7, "Auth".into())),
+        (101, (9, "Docs".into())),
+        (102, (7, "Auth".into())),
+        (103, (7, "Auth".into())),
+    ]
+    .into();
+    let rows = sidebar.rows();
+    let headers: Vec<_> = rows
+        .iter()
+        .filter_map(|r| match r {
+            ChatRow::CardHeader { card, count, .. } => Some((r.key().to_string(), *card, *count)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(headers.len(), 2);
+    assert!(headers.contains(&("card:10:7".into(), 7, 3)));
+    assert!(headers.contains(&("card:10:9".into(), 9, 1)));
+    let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
+    let mut unique = keys.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), keys.len());
 }
