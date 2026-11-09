@@ -26,11 +26,7 @@ pub(super) fn usage_due(newest: Option<i64>, attempted: i64, configured: bool, n
 
 /// First of Claude, Codex with a login; Claude wins when both have one.
 pub(super) fn subscription_provider(claude: bool, codex: bool) -> Option<Provider> {
-    if claude {
-        Some(Provider::Claude)
-    } else {
-        codex.then_some(Provider::Codex)
-    }
+    if claude { Some(Provider::Claude) } else { codex.then_some(Provider::Codex) }
 }
 
 impl ChatApp {

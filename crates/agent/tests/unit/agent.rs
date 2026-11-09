@@ -154,7 +154,11 @@ fn any_binary() -> String {
 }
 
 fn cli_settings() -> Settings {
-    Settings { provider: Some(Provider::Claude), claude_binary: any_binary(), ..Settings::default() }
+    Settings {
+        provider: Some(Provider::Claude),
+        claude_binary: any_binary(),
+        ..Settings::default()
+    }
 }
 
 fn chat(effort: &str) -> ChatSession {
