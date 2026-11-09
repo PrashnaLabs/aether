@@ -111,6 +111,17 @@ Speech turns into text on this device. The first use offers a one-time 141 MB
 model download and asks for microphone permission. Dictation is English only.
 **Settings > Composer** turns it off and downloads or removes the model.
 
+## Notifications
+
+Aether tells you when a chat needs an answer or finishes a turn while you are looking
+elsewhere, never for the chat you are viewing. **Settings > Appearance > Notifications** picks
+the delivery (off, in-app toast, or system notification; Linux uses `notify-send`) and **Notification sound** plays a sound on finish or on request. Repeats for the same
+chat and kind are held back for 10 seconds.
+
+For a webhook, set `notify_webhook` in `settings.json` to a URL. Each notification then POSTs
+`{"title", "body", "chat", "state"}` there, where `state` is `done` or `request`. It is empty
+(off) by default.
+
 ## Notes
 
 Press `Alt+N` to open Notes. The default folder is `~/notes`; configure the

@@ -163,6 +163,25 @@ pub fn family_index(a: Appearance) -> usize {
     THEME_FAMILIES.iter().position(|f| f.variants.contains(&a)).unwrap_or(0)
 }
 
+/// Where a chat notification shows up; `Settings::notifications` off silences both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyDelivery {
+    Toast,
+    #[default]
+    Os,
+}
+
+/// Which notifications also play a sound.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifySound {
+    #[default]
+    None,
+    Done,
+    Request,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CornerStyle {
@@ -910,6 +929,13 @@ pub struct Settings {
     pub background_panel_width: f32,
     /// Desktop notifications when a chat finishes, fails or needs you while you look elsewhere.
     pub notifications: bool,
+    #[serde(default, deserialize_with = "or_default")]
+    pub notify_delivery: NotifyDelivery,
+    #[serde(default, deserialize_with = "or_default")]
+    pub notify_sound: NotifySound,
+    /// POST target for `{title, body, chat, state}` on each notification; empty is off.
+    #[serde(default)]
+    pub notify_webhook: String,
     /// Status bar clock 12-hour or 24-hour time format.
     #[serde(default)]
     pub status_bar_time_format: TimeFormat,
@@ -1088,6 +1114,9 @@ impl Default for Settings {
             browser_panel_width: 480.,
             background_panel_width: default_background_panel_width(),
             notifications: true,
+            notify_delivery: NotifyDelivery::default(),
+            notify_sound: NotifySound::default(),
+            notify_webhook: String::new(),
             status_bar_time_format: TimeFormat::default(),
             status_bar_date_format: DateFormat::default(),
             status_bar_show_seconds: false,

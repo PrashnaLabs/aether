@@ -1,8 +1,8 @@
 use crate::settings_search::{SettingItem, search_settings, tab_match_count};
 use aether_core::{
-    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor, Reasoning,
-    Settings, THEME_FAMILIES, TerminalCursor, TerminalTheme, ThemeFamily, TileLayout, TimeFormat,
-    ToolPolicy, WatchCorner, family_index,
+    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor,
+    NotifyDelivery, NotifySound, Reasoning, Settings, THEME_FAMILIES, TerminalCursor,
+    TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, WatchCorner, family_index,
 };
 use aether_driver::{DriverStartOptions, ProviderProbe};
 use aether_git::Listed;
@@ -460,13 +460,42 @@ impl ChatApp {
                                     "Notify when a chat finishes, fails or needs you while you're looking elsewhere.",
                                 )
                                 .control(
-                                    Switch::new("notifications-setting")
-                                        .checked(settings.notifications)
-                                        .accessibility_label("Desktop notifications")
-                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                            let checked = *checked;
-                                            this.update_settings(cx, |s| s.notifications = checked);
-                                        })),
+                                    settings_dropdown(
+                                        "notifications-setting", "Notifications",
+                                        match (settings.notifications, settings.notify_delivery) {
+                                            (false, _) => 0,
+                                            (true, NotifyDelivery::Toast) => 1,
+                                            (true, NotifyDelivery::Os) => 2,
+                                        },
+                                        ["Off", "In-app toast", "System notification"],
+                                        cx.listener(|this, ix: &usize, _, cx| {
+                                            let ix = *ix;
+                                            this.update_settings(cx, |s| {
+                                                s.notifications = ix != 0;
+                                                s.notify_delivery =
+                                                    if ix == 1 { NotifyDelivery::Toast } else { NotifyDelivery::Os };
+                                            });
+                                        }),
+                                        cx,
+                                    ),
+                                ))) })
+                        .when(show("notifications"), |section| { section.child(div().id("notify-sound").child(SettingsRow::new("Notification sound")
+                                .description("Play a sound when a chat finishes, or when it needs you.")
+                                .control(
+                                    settings_dropdown(
+                                        "notify-sound-setting", "Notification sound",
+                                        match settings.notify_sound {
+                                            NotifySound::None => 0,
+                                            NotifySound::Done => 1,
+                                            NotifySound::Request => 2,
+                                        },
+                                        ["None", "When done", "When it needs me"],
+                                        cx.listener(|this, ix: &usize, _, cx| {
+                                            let sound = [NotifySound::None, NotifySound::Done, NotifySound::Request][*ix];
+                                            this.update_settings(cx, |s| s.notify_sound = sound);
+                                        }),
+                                        cx,
+                                    ),
                                 ))) })
                         .when(show("watch-enabled"), |section| { section.child(div().id("watch-enabled").debug_selector(|| "watch-enabled".into()).child(SettingsRow::new("Watch list")
                                 .description("Shows the corner button, its shortcut, and Watch in session and terminal menus.")
