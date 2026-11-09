@@ -140,14 +140,14 @@ pub(super) fn aria(
     status: ChatStatus,
     lead: bool,
     line: Option<&ChatLine>,
-    crew: Option<(CrewSummary, bool)>,
+    crew: Option<(CrewSummary, bool, usize)>,
 ) -> String {
-    if let Some((summary, open)) = crew {
+    if let Some((summary, open, members)) = crew {
         let mut aria = vec!["Lead".to_string(), title.to_string()];
         if status != ChatStatus::Idle {
             aria.push(status.label().into());
         }
-        aria.push(format!("{} spawned agents", summary.total()));
+        aria.push(format!("{members} spawned agents"));
         aria.push(summary.words(Tier::Wide));
         aria.push(if open { "expanded" } else { "collapsed" }.into());
         return aria.join(", ");
@@ -201,7 +201,7 @@ pub(super) fn rollup(summary: CrewSummary, tier: Tier, cx: &App) -> AnyElement {
                 Bucket::NeedsYou => icon(Lucide::CircleDot, color(bucket)),
                 Bucket::Failed => icon(Lucide::CircleX, color(bucket)),
                 Bucket::Working => Spinner::new().xsmall().color(color(bucket)).into_any_element(),
-                Bucket::Done => icon(Lucide::CircleCheck, info_text(cx)),
+                Bucket::Done => icon(Lucide::CircleCheck, muted),
             }
         };
         return h_flex()
@@ -372,7 +372,7 @@ pub(super) fn render_chat(
     rename: Option<Entity<InputState>>,
     style: SidebarStyle,
     chevron: Option<AnyElement>,
-    crew: Option<(CrewSummary, bool)>,
+    crew: Option<(CrewSummary, bool, usize)>,
     show_all: Option<(SharedString, RowHandler)>,
     parent: Option<Provider>,
     tier: Tier,
@@ -435,6 +435,9 @@ pub(super) fn render_chat(
                     .truncate()
                     .when(removed, |el| el.text_color(muted))
                     .when(crew.is_some() && !child, |el| el.font_semibold())
+                    .when(child && style != SidebarStyle::Focus, |el| {
+                        el.flex_auto().min_w(rems(2.25))
+                    })
                     .when_some(tip, |el, tip| el.tooltip(tooltip(tip)))
                     .child(title);
                 if !lead || crew.is_some() || child {
@@ -500,7 +503,7 @@ pub(super) fn render_chat(
     let time_text = |time: SharedString| {
         div().flex_none().text_xs().text_color(muted).font_features(tabular()).child(time)
     };
-    if child {
+    if child && style != SidebarStyle::Focus {
         let mark = match (status, line.as_ref()) {
             (ChatStatus::Idle, Some(line)) if crew.is_some() => {
                 provider_icon(line.provider).size(rems(0.8125)).into_any_element()
@@ -523,22 +526,18 @@ pub(super) fn render_chat(
             .child(slot(swap(mark, chevron)))
             .child(title_cell(title.clone()))
             .children(model.map(|model| {
-                div()
-                    .flex_none()
-                    .max_w(rems(7.))
-                    .truncate()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(model)
+                let mut name = div().min_w(rems(2.)).truncate();
+                name.style().flex_shrink = Some(100.);
+                name.text_xs().text_color(muted).child(model)
             }))
             .children(provider.map(|p| provider_icon(p).size(rems(0.8125)).flex_none()))
-            .children(crew.map(|(summary, _)| rollup(summary, Tier::Narrow, cx)))
+            .children(crew.map(|(summary, ..)| rollup(summary, Tier::Narrow, cx)))
             .when(tier != Tier::Narrow && !time.is_empty(), |el| el.child(time_text(time)))
-            .children(approve_action)
+            .when(tier == Tier::Wide, |el| el.children(approve_action))
             .child(actions);
         return with_card(row.child(one).context_menu(context), ix, title, card_line);
     }
-    if let Some((summary, _)) = crew {
+    if let Some((summary, ..)) = crew {
         let icon = match line.as_ref() {
             Some(line) => provider_icon(line.provider).size(rems(0.875)).into_any_element(),
             None => Icon::new(Lucide::Users).size(rems(0.875)).text_color(muted).into_any_element(),

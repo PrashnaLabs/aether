@@ -487,7 +487,7 @@ impl ChatRow {
                     rename_editor,
                     style,
                     chevron,
-                    crew.zip(open),
+                    crew.zip(open).map(|(summary, open)| (summary, open, members)),
                     show_all,
                     parent,
                     tier,

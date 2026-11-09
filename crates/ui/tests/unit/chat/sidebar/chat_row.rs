@@ -99,11 +99,11 @@ fn lead_aria_reads_spawned_count_and_rollup() {
     };
     let summary = CrewSummary { needs_you: 1, failed: 0, working: 2, done: 12 };
     assert_eq!(
-        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, false))),
-        "Lead, Title, 15 spawned agents, 1 needs you, 2 working, 12 done, collapsed"
+        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, false, 4))),
+        "Lead, Title, 4 spawned agents, 1 needs you, 2 working, 12 done, collapsed"
     );
     assert!(
-        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, true)))
+        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, true, 4)))
             .ends_with(", expanded")
     );
 }
