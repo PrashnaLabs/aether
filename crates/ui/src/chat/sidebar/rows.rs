@@ -13,7 +13,7 @@ use super::chrome::{nest, reveal_on_hover, row_hover, row_style, tabular, toolti
 use super::crew::{CrewMember, CrewSummary, Tier, order, preview, starts_collapsed};
 use super::menu::track_menu;
 use super::project_row::ProjectRow;
-use super::state::{SidebarState, navigate};
+use super::state::{SidebarState, crew_fold, navigate};
 use super::{
     AgentState, ChatItem, ChatLine, ChatSidebar, CollapseHandler, OutsideLine, OutsideState,
     ProjectHeader, ProjectItem, RowHandler, ToolsFactory, WorktreeItem,
@@ -484,10 +484,8 @@ impl ChatRow {
                         "right" => true,
                         _ => return nav(ev, window, cx),
                     };
-                    match &toggle {
-                        Some(toggle)
-                            if open == Some(!next) && !ev.keystroke.modifiers.modified() =>
-                        {
+                    match (&toggle, crew_fold(open, next, ev.keystroke.modifiers.modified())) {
+                        (Some(toggle), Some(next)) => {
                             cx.stop_propagation();
                             toggle(next, window, cx);
                         }

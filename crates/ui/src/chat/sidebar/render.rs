@@ -24,7 +24,7 @@ fn fade(color: gpui_kit::Hsla, angle: f32, opacity: f32) -> gpui_kit::Div {
 
 use super::ChatSidebar;
 use super::rows::{ChatRow, count_chip};
-use super::state::SidebarState;
+use super::state::{SidebarState, Tree, parent_rows};
 use crate::components::BrandMark;
 
 #[derive(Clone)]
@@ -140,16 +140,11 @@ impl RenderOnce for ChatSidebar {
         let rows = self.rows();
         let keys: Vec<SharedString> = rows.iter().map(ChatRow::key).collect();
         let focusable: Vec<bool> = rows.iter().map(ChatRow::focusable).collect();
-        let parents: Vec<Option<usize>> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, row)| match row {
-                ChatRow::Chat { chat, .. } if chat.depth > 0 => rows[..i].iter().rposition(
-                    |r| matches!(r, ChatRow::Chat { chat: c, .. } if c.depth < chat.depth),
-                ),
-                _ => None,
-            })
-            .collect();
+        let parents = parent_rows(rows.iter().map(|row| match row {
+            ChatRow::Chat { chat, .. } => Tree::Chat { depth: chat.depth, pin: chat.pin },
+            ChatRow::CrewMore { .. } | ChatRow::CardHeader { .. } => Tree::Inside,
+            _ => Tree::Break,
+        }));
         let shown = rows.iter().find_map(|row| match row {
             ChatRow::Chat { chat, rename_editor, .. }
                 if rename_editor.is_some() || (chat.active && self.rename_ix.is_none()) =>

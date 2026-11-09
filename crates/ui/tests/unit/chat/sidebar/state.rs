@@ -34,3 +34,35 @@ fn right_goes_to_first_child_and_left_to_lead() {
     assert_eq!(target_row(&rows, &parents, 1, Nav::Left), Some(0));
     assert_eq!(target_row(&rows, &parents, 0, Nav::Left), None);
 }
+
+fn chat(depth: u8, pin: bool) -> Tree {
+    Tree::Chat { depth, pin }
+}
+
+#[test]
+fn left_on_grandchild_goes_to_sub_lead() {
+    let rows = [chat(0, false), chat(1, false), chat(2, false), Tree::Inside, chat(1, false)];
+    assert_eq!(parent_rows(rows), [None, Some(0), Some(1), None, Some(0)]);
+}
+
+#[test]
+fn left_on_pinned_child_without_lead_does_nothing() {
+    let rows = [chat(0, false), Tree::Break, chat(1, false), chat(0, false), chat(0, true)];
+    assert_eq!(parent_rows(rows), [None; 5]);
+    assert_eq!(parent_rows([chat(0, true), chat(1, true)]), [None, Some(0)]);
+    assert_eq!(parent_rows([chat(0, false), chat(1, true)]), [None, None]);
+}
+
+#[test]
+fn right_on_closed_lead_opens() {
+    assert_eq!(crew_fold(Some(false), true, false), Some(true));
+    assert_eq!(crew_fold(Some(true), true, false), None);
+    assert_eq!(crew_fold(None, true, false), None);
+    assert_eq!(crew_fold(Some(false), true, true), None);
+}
+
+#[test]
+fn left_on_open_lead_closes() {
+    assert_eq!(crew_fold(Some(true), false, false), Some(false));
+    assert_eq!(crew_fold(Some(false), false, false), None);
+}

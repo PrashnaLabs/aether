@@ -36,6 +36,45 @@ fn target_row(
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Tree {
+    Chat { depth: u8, pin: bool },
+    Inside,
+    Break,
+}
+
+pub(super) fn parent_rows(rows: impl IntoIterator<Item = Tree>) -> Vec<Option<usize>> {
+    let mut stack: Vec<(usize, u8)> = Vec::new();
+    let mut pin = false;
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, row)| match row {
+            Tree::Chat { depth, pin: p } => {
+                if p != pin {
+                    stack.clear();
+                    pin = p;
+                }
+                while stack.last().is_some_and(|&(_, d)| d >= depth) {
+                    stack.pop();
+                }
+                let parent = if depth > 0 { stack.last().map(|&(ix, _)| ix) } else { None };
+                stack.push((i, depth));
+                parent
+            }
+            Tree::Inside => None,
+            Tree::Break => {
+                stack.clear();
+                None
+            }
+        })
+        .collect()
+}
+
+/// New open state a Left/Right press gives a crew lead, if it changes one.
+pub(super) fn crew_fold(open: Option<bool>, right: bool, modified: bool) -> Option<bool> {
+    open.filter(|&o| o != right && !modified).map(|_| right)
+}
+
 /// The old rows to replace and how many new rows replace them; rows shared
 /// at both ends stay, keeping their measured heights.
 pub fn splice_range<T: PartialEq>(old: &[T], new: &[T]) -> (Range<usize>, usize) {
