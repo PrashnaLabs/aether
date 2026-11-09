@@ -18,6 +18,8 @@ use aether_core::{Provider, SidebarStyle};
 
 mod chat_row;
 mod chrome;
+#[allow(dead_code)]
+mod crew;
 mod menu;
 mod project_row;
 mod render;
@@ -28,6 +30,7 @@ use chrome::tabular;
 
 pub use chat_row::{middle_truncate, project_color, project_mark, project_mark_sized};
 pub use chrome::{count_badge, row_hover, row_style};
+pub use crew::{Bucket, CrewSummary, Tier};
 pub use render::traffic_lights_gap;
 pub use rows::outside_aria;
 pub use state::splice_range;

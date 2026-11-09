@@ -55,8 +55,8 @@ pub use recent::{RecentChats, RecentRow, recent_row_label};
 pub use request::*;
 pub use scroller::{ChatScroller, ChatScrollerState};
 pub use sidebar::{
-    AgentState, ChatLine, ChatSidebar, ChatStatus, OutsideLine, OutsideState, ProjectHeader,
-    RowPlace, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, count_badge, middle_truncate,
+    AgentState, ChatLine, Bucket, ChatSidebar, ChatStatus, CrewSummary, OutsideLine, OutsideState, ProjectHeader,
+    RowPlace, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, Tier, count_badge, middle_truncate,
     outside_aria, project_color, project_mark, project_mark_sized, row_hover, row_style,
     splice_range, traffic_lights_gap,
 };
