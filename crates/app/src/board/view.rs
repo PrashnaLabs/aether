@@ -902,6 +902,9 @@ impl ChatApp {
                         }))
                 });
                 v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
                     .gap(px(3.))
                     .p(px(8.))
                     .corner(px(8.))
@@ -916,6 +919,8 @@ impl ChatApp {
                     )
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .text_size(px(12.5))
                             .line_height(px(17.))
                             .when(long && !open, |d| d.line_clamp(6))
