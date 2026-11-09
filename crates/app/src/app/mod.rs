@@ -481,6 +481,9 @@ pub(crate) struct ChatApp {
     chat_id_highwater: i64,
     stopped_by_lead: HashSet<i64>,
     spawn_nonces: HashMap<(i64, String), serde_json::Value>,
+    /// (lead id, spawn_agent args) waiting for a free agent slot, oldest first.
+    // ponytail: in memory only; a restart drops queued spawns
+    pub(crate) spawn_queue: Vec<(i64, serde_json::Value)>,
     pub(crate) session_views: HashMap<i64, SessionState>,
     pub(crate) session_subscriptions: HashMap<i64, Vec<Subscription>>,
     pub(crate) session_windows: HashMap<i64, gpui_kit::WindowId>,

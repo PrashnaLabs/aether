@@ -55,6 +55,7 @@ fn tools_list_is_empty_without_token() {
             "stop_agent",
             "list_cards",
             "add_card",
+            "read_card",
             "move_card",
             "update_card",
             "delete_cards",
@@ -213,4 +214,24 @@ fn spawn_agent_offers_an_optional_nonce() {
     let spawn = specs.as_array().unwrap().iter().find(|t| t["name"] == "spawn_agent").unwrap();
     assert!(spawn["inputSchema"]["properties"]["nonce"].is_object());
     assert!(!spawn["inputSchema"]["required"].as_array().unwrap().contains(&"nonce".into()));
+}
+
+#[test]
+fn unknown_arguments_are_named() {
+    use crate::orchestrator::check_args;
+    assert_eq!(
+        check_args("list_cards", &json!({"filter": {"search": "x"}, "bodies": true})),
+        Ok(())
+    );
+    assert_eq!(
+        check_args("list_cards", &json!({"search": "x"})),
+        Err(r#"unknown argument "search"; expected one of: bodies, filter"#.into())
+    );
+    assert!(
+        check_args("list_cards", &json!({"filter": {"serch": "x"}}))
+            .unwrap_err()
+            .starts_with(r#"unknown argument "filter.serch""#)
+    );
+    assert_eq!(check_args("list_tools", &json!({"anything": 1})), Ok(()));
+    assert_eq!(check_args("list_agents", &Value::Null), Ok(()));
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use aether_agent::orchestrator::{OrchCall, history_specs, tool_specs};
+use aether_agent::orchestrator::{OrchCall, check_args, history_specs, tool_specs};
 use aether_core::{AccessMode, Message, Provider, Role, ToolDetail};
 use aether_driver::ProviderProbe;
 use aether_driver::antigravity::AgyEntry;
@@ -253,6 +253,7 @@ impl ChatApp {
     ) {
         let result = match self.chats.iter().position(|c| c.id.to_string() == call.lead) {
             None => Err("lead chat not found".to_string()),
+            Some(_) if let Err(e) = check_args(&call.tool, &call.args) => Err(e),
             Some(ix) => match call.tool.as_str() {
                 "list_tools" if self.chats[ix].lead => Ok(tool_specs()),
                 "list_tools" => {
@@ -267,7 +268,7 @@ impl ChatApp {
                 _ if !self.chats[ix].lead
                     && !matches!(
                         call.tool.as_str(),
-                        "list_cards" | "add_card" | "move_card" | "update_card"
+                        "list_cards" | "read_card" | "add_card" | "move_card" | "update_card"
                     ) =>
                 {
                     Err("lead chat not found".to_string())
@@ -278,6 +279,7 @@ impl ChatApp {
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
                 "list_cards" => self.list_cards(ix, &call.args),
+                "read_card" => self.read_card(&call.args),
                 "add_card" => self.add_card(ix, &call.args),
                 "move_card" => self.move_card(ix, &call.args),
                 "update_card" => self.update_card(ix, &call.args),
@@ -338,6 +340,10 @@ impl ChatApp {
                 format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
             })?,
         };
+        let labels = crate::board::model::parse_labels(&args["labels"])?.unwrap_or_default();
+        let blocked_by =
+            crate::board::model::parse_ids(&args["blocked_by"], "blocked_by")?.unwrap_or_default();
+        self.check_blockers(&blocked_by)?;
         let id = self.board_add(
             title.clone(),
             text("body"),
@@ -346,6 +352,13 @@ impl ChatApp {
             None,
             true,
         );
+        if let Some(card) = self.cards.iter_mut().find(|c| c.id == id)
+            && (!labels.is_empty() || !blocked_by.is_empty())
+        {
+            card.labels = labels;
+            card.blocked_by = blocked_by;
+            self.board_save(id);
+        }
         Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
     }
 
@@ -384,6 +397,57 @@ impl ChatApp {
         Ok(Value::String(card_lines(&cards, bodies, &self.lead_project(ix))))
     }
 
+    fn read_card(&self, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_i64()
+            .or_else(|| {
+                args["id"].as_str().and_then(|s| s.trim().trim_start_matches('#').parse().ok())
+            })
+            .ok_or_else(|| r#"missing "id""#.to_string())?;
+        let card = self
+            .cards
+            .iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        let now = now_ms();
+        let chats: Vec<Value> = card
+            .chats
+            .iter()
+            .map(|id| match self.chat_ix(*id) {
+                Some(ix) => {
+                    let c = &self.chats[ix];
+                    json!({"id": id, "title": c.title.as_ref(), "provider": c.provider.key(), "state": super::control::state_of(c, c.busy())})
+                }
+                None => json!({"id": id, "state": "deleted"}),
+            })
+            .collect();
+        let blockers: Vec<Value> = card
+            .blocked_by
+            .iter()
+            .map(|b| {
+                let c = self.cards.iter().find(|c| c.id == *b);
+                json!({"id": b, "title": c.map(|c| c.title.as_str()), "col": c.map(|c| c.col.key())})
+            })
+            .collect();
+        let notes: Vec<Value> = card
+            .notes
+            .iter()
+            .map(|n| json!({"by": n.by, "age": super::control::age_label(now - n.at), "text": n.text}))
+            .collect();
+        Ok(json!({
+            "id": card.id,
+            "title": card.title,
+            "col": card.col.key(),
+            "project": card.project,
+            "body": card.body,
+            "labels": card.labels,
+            "blocked_by": blockers,
+            "chats": chats,
+            "notes": notes,
+            "added_by": if card.by_agent { "agent" } else { "user" },
+        }))
+    }
+
     fn update_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
         let id = args["id"]
             .as_i64()
@@ -394,7 +458,11 @@ impl ChatApp {
         {
             return Err(format!("chat {chat} not found"));
         }
+        if let Some(ids) = crate::board::model::parse_ids(&args["blocked_by"], "blocked_by")? {
+            self.check_blockers(&ids)?;
+        }
         let before = args["before"].as_i64();
+        let by = self.card_author(lead_ix);
         let project = self.lead_project(lead_ix);
         let card = self
             .cards
@@ -402,7 +470,7 @@ impl ChatApp {
             .find(|c| c.id == id && c.project == project)
             .ok_or_else(|| format!("card #{id} not found"))?;
         let from = card.col;
-        let msg = lead_update(card, args)?;
+        let msg = lead_update(card, args, &by, now_ms())?;
         card.updated_at = now_ms();
         let col = card.col;
         if col == from && before.is_none() {
@@ -411,6 +479,25 @@ impl ChatApp {
             self.board_move(id, col, before);
         }
         Ok(Value::String(msg))
+    }
+
+    /// Note author for a board tool call: "lead <id>" or "agent <id>".
+    fn card_author(&self, ix: usize) -> String {
+        let chat = &self.chats[ix];
+        format!("{} {}", if chat.lead { "lead" } else { "agent" }, chat.id)
+    }
+
+    fn check_blockers(&self, ids: &[i64]) -> Result<(), String> {
+        for id in ids {
+            match self.cards.iter().find(|c| c.id == *id) {
+                None => return Err(format!("blocker card #{id} not found")),
+                Some(c) if c.col == Col::Done => {
+                    return Err(format!("blocker card #{id} is already done"));
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn own_child(&self, lead_ix: usize, args: &Value) -> Result<usize, String> {
@@ -684,11 +771,28 @@ impl ChatApp {
                 self.spawn_nonces.remove(&key);
             }
         }
-        let max_children = self.settings.max_children;
-        if self.running_children(lead_ix) >= max_children {
-            return Err(format!(
-                "this lead already has {max_children} running agents; wait for one to finish or stop one with the stop_agent tool"
-            ));
+        let project = self.lead_project(lead_ix);
+        if let Some(id) = a.card {
+            self.check_spawn_card(id, &project)?;
+        }
+        if self.running_children(lead_ix) >= self.settings.max_children {
+            let same = |(lead, queued): &(i64, Value)| {
+                *lead == lead_id && !a.nonce.is_empty() && queued["nonce"] == a.nonce.as_str()
+            };
+            let at = self.spawn_queue.iter().position(same).unwrap_or_else(|| {
+                self.spawn_queue.push((lead_id, args.clone()));
+                self.spawn_queue.len() - 1
+            });
+            let position =
+                self.spawn_queue[..=at].iter().filter(|(lead, _)| *lead == lead_id).count();
+            return Ok(json!({
+                "status": "queued",
+                "position": position,
+                "note": format!(
+                    "all {} agent slots are busy; this starts when one finishes, and its id arrives as your next turn. Don't poll.",
+                    self.settings.max_children
+                ),
+            }));
         }
         let lead = &self.chats[lead_ix];
         if lead.cwd.is_empty() && self.settings.workspace_root.is_empty() {
@@ -699,12 +803,6 @@ impl ChatApp {
         } else {
             None
         };
-        let project = self.lead_project(lead_ix);
-        if let Some(id) = a.card
-            && !self.cards.iter().any(|c| c.id == id && c.project == project)
-        {
-            return Err(format!("card #{id} not found"));
-        }
         let ix = self.create_child(lead_ix, &a)?;
         if let Some(reason) = self.worktree_blocks_send(ix) {
             self.chats.remove(ix);
@@ -745,6 +843,45 @@ impl ChatApp {
             self.spawn_nonces.insert((lead_id, a.nonce.clone()), reply.clone());
         }
         Ok(reply)
+    }
+
+    fn check_spawn_card(&self, id: i64, project: &str) -> Result<(), String> {
+        let card = self
+            .cards
+            .iter()
+            .find(|c| c.id == id && c.project == project)
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        if card.blocked_by.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<String> = card.blocked_by.iter().map(|b| format!("#{b}")).collect();
+        Err(format!(
+            "card #{id} is blocked by {}; finish those first or clear blocked_by with update_card",
+            ids.join(", ")
+        ))
+    }
+
+    /// Starts queued spawns while their leads have free slots; each lead hears the outcome.
+    pub(crate) fn drain_spawn_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut i = 0;
+        while i < self.spawn_queue.len() {
+            let (lead_id, args) = self.spawn_queue[i].clone();
+            let Some(lead_ix) = self.chat_ix(lead_id).filter(|ix| self.chats[*ix].lead) else {
+                self.spawn_queue.remove(i);
+                continue;
+            };
+            if self.running_children(lead_ix) >= self.settings.max_children {
+                i += 1;
+                continue;
+            }
+            self.spawn_queue.remove(i);
+            let title = args["title"].as_str().unwrap_or_default().to_string();
+            let text = match self.spawn_agent(lead_ix, &args, window, cx) {
+                Ok(reply) => format!("[Aether] Queued spawn \"{title}\" started: {reply}"),
+                Err(e) => format!("[Aether] Queued spawn \"{title}\" failed: {e}"),
+            };
+            self.tell_lead(lead_id, text, window, cx);
+        }
     }
 
     pub(super) fn crew(&self, lead_ix: usize) -> Vec<usize> {

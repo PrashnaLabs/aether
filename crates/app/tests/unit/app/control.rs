@@ -318,7 +318,7 @@ fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
             };
             assert_eq!(
                 names(call("20", "list_tools").unwrap()),
-                ["list_cards", "add_card", "move_card", "update_card", "read_history"]
+                ["list_cards", "add_card", "read_card", "move_card", "update_card", "read_history"]
             );
             assert!(names(call("10", "list_tools").unwrap()).len() > 1);
             assert!(call("20", "read_history").is_ok());

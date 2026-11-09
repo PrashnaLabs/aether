@@ -1,19 +1,21 @@
 use aether_ui::theme::Corners;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use aether_ui::{field, field_area, overlay, overlay_strong, provider_icon};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, checkbox::Checkbox, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*,
-    px,
+    AnyElement, ClickEvent, Context, Entity, FontWeight, Hsla, Role, SharedString, Subscription,
+    Window, div, prelude::*, px,
 };
 
 use super::model::{BoardCard, Col, preview, shown};
 use crate::app::{Chat, ChatApp, now_ms};
-use crate::project_page::model::{CardStatus, badge};
+use crate::project_page::model::{CardStatus, badge, card_status};
 use crate::project_page::view::{pill, status_tint};
 use crate::projects::relative_time;
 
@@ -66,9 +68,119 @@ fn meta_row(label: &'static str, value: impl IntoElement, muted: Hsla) -> impl I
         .child(div().flex_1().min_w_0().child(value))
 }
 
+/// Detail panel inputs; keyed window state, since ChatApp has no fields for them.
+struct Editors {
+    labels: Entity<InputState>,
+    blockers: Entity<InputState>,
+    note: Entity<InputState>,
+    /// card id, labels text, blockers text last pushed into the inputs
+    synced: (i64, String, String),
+    expanded: HashSet<usize>,
+    _subs: Vec<Subscription>,
+}
+
+type Apply = fn(&mut ChatApp, i64, &str, &mut Context<ChatApp>);
+
+impl Editors {
+    fn new(app: Entity<ChatApp>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut input =
+            |hint: &'static str| cx.new(|cx| InputState::new(window, cx).placeholder(hint));
+        let labels = input("bug, ui, backend");
+        let blockers = input("#12, #15");
+        let note = input("Add a note, Enter to save");
+        // labels and blockers commit on enter or blur; a note only on enter, then clears
+        let wire =
+            |cx: &mut Context<Self>, input: &Entity<InputState>, apply: Apply, is_note: bool| {
+                let app = app.clone();
+                cx.subscribe_in(input, window, move |_, input, ev: &InputEvent, window, cx| {
+                    let go = match ev {
+                        InputEvent::PressEnter { .. } => true,
+                        InputEvent::Blur => !is_note,
+                        _ => false,
+                    };
+                    if !go {
+                        return;
+                    }
+                    let text = input.read(cx).value().to_string();
+                    if is_note {
+                        input.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+                    }
+                    app.update(cx, |this, cx| {
+                        if let Some(id) = this.board_selected {
+                            apply(this, id, &text, cx);
+                        }
+                    });
+                })
+            };
+        let _subs = vec![
+            wire(cx, &labels, ChatApp::board_set_labels, false),
+            wire(cx, &blockers, ChatApp::board_set_blockers, false),
+            wire(cx, &note, ChatApp::board_add_note, true),
+        ];
+        Self {
+            labels,
+            blockers,
+            note,
+            synced: (0, String::new(), String::new()),
+            expanded: HashSet::new(),
+            _subs,
+        }
+    }
+}
+
+fn chip(text: String, bg: Hsla, fg: Hsla) -> impl IntoElement {
+    div()
+        .flex_none()
+        .px(px(6.))
+        .h(px(18.))
+        .flex()
+        .items_center()
+        .corner(px(5.))
+        .bg(bg)
+        .text_color(fg)
+        .text_size(px(11.5))
+        .child(text)
+}
+
+fn id_list(ids: &[i64]) -> String {
+    ids.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(", ")
+}
+
 impl ChatApp {
     fn board_chat(&self, card: &BoardCard) -> Option<&Chat> {
-        self.chats.iter().find(|c| Some(c.id) == card.chat && !c.archived)
+        card.chats
+            .iter()
+            .rev()
+            .find_map(|id| self.chats.iter().find(|c| c.id == *id && !c.archived))
+    }
+
+    /// Keeps the inputs showing the selected card, also after a lead edits it.
+    fn board_editors(&self, window: &mut Window, cx: &mut Context<Self>) -> Entity<Editors> {
+        let app = cx.entity();
+        let ed = window
+            .use_keyed_state("board-editors", cx, move |window, cx| Editors::new(app, window, cx));
+        if let Some(card) = self.cards.iter().find(|c| Some(c.id) == self.board_selected) {
+            let want = (card.id, card.labels.join(", "), id_list(&card.blocked_by));
+            if ed.read(cx).synced != want {
+                let (labels, blockers, note) = {
+                    let e = ed.read(cx);
+                    (e.labels.clone(), e.blockers.clone(), e.note.clone())
+                };
+                let switched = ed.read(cx).synced.0 != want.0;
+                labels.update(cx, |s, cx| s.set_value(want.1.clone(), window, cx));
+                blockers.update(cx, |s, cx| s.set_value(want.2.clone(), window, cx));
+                if switched {
+                    note.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+                }
+                ed.update(cx, |e, _| {
+                    if switched {
+                        e.expanded.clear();
+                    }
+                    e.synced = want;
+                });
+            }
+        }
+        ed
     }
 
     fn board_pill(&self, card: &BoardCard, now: i64, cx: &Context<Self>) -> Option<AnyElement> {
@@ -84,20 +196,27 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let lights = aether_ui::traffic_lights_gap(self.settings.sidebar_collapsed, window, cx);
-        self.board_view(None, Some((lights, aether_ui::window_controls_gap(window))), cx)
+        let top = (lights, aether_ui::window_controls_gap(window));
+        self.board_view(None, Some(top), Some(window), cx)
     }
 
-    pub(crate) fn render_board_tab(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        self.board_view(self.chat_project(self.active), None, cx)
+    pub(crate) fn render_board_tab(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.board_view(self.chat_project(self.active), None, Some(window), cx)
     }
 
     fn board_view(
         &mut self,
         project: Option<PathBuf>,
         window_top: Option<(gpui_kit::Stateful<gpui_kit::Div>, gpui_kit::Div)>,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let now = now_ms();
+        let editors = window.map(|window| self.board_editors(window, cx));
         let theme = cx.theme();
         let muted = theme.muted_foreground;
         let scope = project.as_ref().filter(|_| !self.board_all).map(|d| d.display().to_string());
@@ -237,7 +356,7 @@ impl ChatApp {
         let bulk = self.board_bulk_bar(all, cx);
         let empty = visible.is_empty();
         let columns = Col::ALL.map(|col| self.board_column(col, scope.as_deref(), empty, now, cx));
-        let detail = self.board_detail(now, cx);
+        let detail = self.board_detail(now, editors.as_ref(), cx);
         v_flex()
             .id("board-page")
             .flex_1()
@@ -406,6 +525,23 @@ impl ChatApp {
                 }),
             )
         });
+        let to_done = aether_ui::button("board-pick-done")
+            .small()
+            .h(px(28.))
+            .outline()
+            .icon(Lucide::CircleCheck)
+            .label("Move to Done")
+            .tooltip("Accept the selected cards; cards waiting on them are unblocked")
+            .on_click(cx.listener({
+                let picked = picked.clone();
+                move |this, _, _, cx| {
+                    for id in &picked {
+                        this.board_move(*id, Col::Done, None);
+                    }
+                    this.board_picks.clear();
+                    cx.notify();
+                }
+            }));
         let delete = aether_ui::button("board-pick-delete")
             .small()
             .h(px(28.))
@@ -449,6 +585,7 @@ impl ChatApp {
                 )
                 .children(select_all)
                 .child(div().flex_1())
+                .child(to_done)
                 .child(delete)
                 .child(clear)
                 .into_any_element(),
@@ -493,6 +630,45 @@ impl ChatApp {
                     .children(status)
                     .children(age.map(|a| div().flex_none().child(a)))
             });
+        let (tag_bg, danger) = (overlay_strong(cx), aether_ui::theme::danger_text(cx));
+        let marks = (!card.labels.is_empty()
+            || !card.blocked_by.is_empty()
+            || card.chats.len() > 1
+            || !card.notes.is_empty())
+        .then(|| {
+            let stat = |icon: Lucide, text: String| {
+                h_flex()
+                    .gap(px(3.))
+                    .items_center()
+                    .flex_none()
+                    .child(Icon::new(icon).size(px(11.)))
+                    .child(text)
+            };
+            h_flex()
+                .flex_wrap()
+                .gap(px(4.))
+                .items_center()
+                .text_size(px(11.5))
+                .text_color(muted)
+                .when(!card.blocked_by.is_empty(), |d| {
+                    d.child(
+                        h_flex()
+                            .gap(px(3.))
+                            .items_center()
+                            .flex_none()
+                            .text_color(danger)
+                            .child(Icon::new(Lucide::Ban).size(px(11.)))
+                            .child(format!("blocked {}", id_list(&card.blocked_by))),
+                    )
+                })
+                .children(card.labels.iter().map(|l| chip(l.clone(), tag_bg, muted)))
+                .when(card.chats.len() > 1, |d| {
+                    d.child(stat(Lucide::Bot, format!("{} agents", card.chats.len())))
+                })
+                .when(!card.notes.is_empty(), |d| {
+                    d.child(stat(Lucide::MessageSquare, card.notes.len().to_string()))
+                })
+        });
         let group = SharedString::from(format!("board-card-{id}"));
         let pick = div()
             .id(("board-card-pick-slot", id as u64))
@@ -558,6 +734,7 @@ impl ChatApp {
                         .child(preview(&card.body, 4)),
                 )
             })
+            .children(marks)
             .children(footer)
             .child(pick)
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
@@ -571,8 +748,18 @@ impl ChatApp {
             }))
     }
 
-    fn board_detail(&self, now: i64, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+    fn board_detail(
+        &self,
+        now: i64,
+        editors: Option<&Entity<Editors>>,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
         let card = self.cards.iter().find(|c| Some(c.id) == self.board_selected)?;
+        let inputs = editors.map(|e| {
+            let e = e.read(cx);
+            (e.labels.clone(), e.blockers.clone(), e.note.clone(), e.expanded.clone())
+        });
+        let editors = editors.cloned();
         let theme = cx.theme();
         let (muted, border) = (theme.muted_foreground, theme.border);
         let id = card.id;
@@ -619,18 +806,125 @@ impl ChatApp {
                 muted,
             )
         });
-        let agent = chat.map(|c| {
-            meta_row(
-                "Agent",
+        let (labels_in, blockers_in, note_in, expanded) = match inputs {
+            Some((l, b, n, x)) => (Some(l), Some(b), Some(n), x),
+            None => (None, None, None, HashSet::new()),
+        };
+        let (fg, tag_bg, lane) = (theme.foreground, overlay_strong(cx), overlay(cx));
+        let chips = (!card.labels.is_empty()).then(|| {
+            h_flex()
+                .flex_wrap()
+                .gap(px(4.))
+                .children(card.labels.iter().map(|l| chip(l.clone(), tag_bg, fg)))
+        });
+        let blockers: Vec<_> = card
+            .blocked_by
+            .iter()
+            .filter_map(|b| self.cards.iter().find(|c| c.id == *b))
+            .map(|b| {
+                let bid = b.id;
+                h_flex()
+                    .id(("board-blocker", bid as u64))
+                    .role(Role::Button)
+                    .tab_index(0)
+                    .gap(px(6.))
+                    .items_center()
+                    .min_h(px(22.))
+                    .text_size(px(12.5))
+                    .cursor_pointer()
+                    .hover(move |s| s.text_color(fg))
+                    .child(Icon::new(Lucide::Ban).size(px(12.)).text_color(muted))
+                    .child(div().min_w_0().truncate().child(format!("#{bid} {}", b.title)))
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.board_pick(bid, window, cx)),
+                    )
+            })
+            .collect();
+        let agents: Vec<_> = card
+            .chats
+            .iter()
+            .filter_map(|cid| self.chats.iter().find(|c| c.id == *cid && !c.archived))
+            .map(|c| {
+                let cid = c.id;
+                let status = card_status(
+                    c.status(now),
+                    c.messages.last().is_some_and(|m| m.failed),
+                    c.wait_label(),
+                );
+                let (bg, tint) = status_tint(status, cx);
+                let state = badge(status, c.turn_at, now).map(|t| pill(t, bg, tint));
                 h_flex()
                     .gap(px(6.))
                     .items_center()
+                    .min_h(px(26.))
+                    .text_size(px(12.5))
                     .child(provider_icon(c.provider).size(px(12.)).text_color(muted))
-                    .child(div().min_w_0().truncate().child(c.title.clone())),
-                muted,
-            )
-        });
-        let unlinked = card.chat.is_some() && chat.is_none();
+                    .child(div().flex_1().min_w_0().truncate().child(c.title.clone()))
+                    .children(state)
+                    .child(
+                        aether_ui::button(("board-agent-open", cid as u64))
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::MessageSquare)
+                            .accessibility_label("Open chat")
+                            .tooltip("Open chat")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.board_open_chat(cid, window, cx)
+                            })),
+                    )
+            })
+            .collect();
+        let notes: Vec<_> = card
+            .notes
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(ix, n)| {
+                let long = editors.is_some()
+                    && (n.text.lines().count() > 6 || n.text.chars().count() > 400);
+                let open = expanded.contains(&ix);
+                let who = if n.by == "user" { "You".to_string() } else { n.by.clone() };
+                let more = long.then(|| {
+                    let editors = editors.clone();
+                    aether_ui::button(("board-note-more", ix as u64))
+                        .ghost()
+                        .xsmall()
+                        .label(if open { "Show less" } else { "Show more" })
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            if let Some(ed) = &editors {
+                                ed.update(cx, |e, _| {
+                                    if !e.expanded.remove(&ix) {
+                                        e.expanded.insert(ix);
+                                    }
+                                });
+                            }
+                            cx.notify();
+                        }))
+                });
+                v_flex()
+                    .gap(px(3.))
+                    .p(px(8.))
+                    .corner(px(8.))
+                    .bg(lane)
+                    .child(
+                        h_flex()
+                            .gap(px(6.))
+                            .text_size(px(11.5))
+                            .text_color(muted)
+                            .child(div().font_weight(FontWeight::MEDIUM).child(who))
+                            .child(relative_time(n.at, now, &chrono::Local)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .line_height(px(17.))
+                            .when(long && !open, |d| d.line_clamp(6))
+                            .child(n.text.clone()),
+                    )
+                    .children(more)
+            })
+            .collect();
+        let unlinked = !card.chats.is_empty() && chat.is_none();
         let gone = unlinked
             .then(|| meta_row("Agent", div().text_color(muted).child("Chat deleted"), muted));
         let updated = meta_row(
@@ -638,7 +932,7 @@ impl ChatApp {
             div().child(relative_time(card.updated_at, now, &chrono::Local)),
             muted,
         );
-        let primary = match (card.chat, chat.map(|c| c.id)) {
+        let primary = match (card.chats.last().copied(), chat.map(|c| c.id)) {
             (None, _) => Some(
                 aether_ui::button("board-run")
                     .primary()
@@ -713,6 +1007,21 @@ impl ChatApp {
                         .child(field(&self.board_title).aria_label("Card title"))
                         .child(label("Description"))
                         .child(field_area(&self.board_body).aria_label("Card description"))
+                        .child(label("Labels"))
+                        .children(chips)
+                        .children(
+                            labels_in
+                                .map(|i| field(&i).small().aria_label("Labels, comma separated")),
+                        )
+                        .child(label("Blocked by"))
+                        .children(blockers)
+                        .children(blockers_in.map(|i| {
+                            field(&i).small().aria_label("Blocking card ids, comma separated")
+                        }))
+                        .when(!agents.is_empty(), |d| d.child(label("Agents")).children(agents))
+                        .child(label("Notes"))
+                        .children(note_in.map(|i| field(&i).small().aria_label("Add a note")))
+                        .children(notes)
                         .child(
                             v_flex()
                                 .mt(px(4.))
@@ -720,7 +1029,6 @@ impl ChatApp {
                                 .border_t_1()
                                 .border_color(border)
                                 .children(project)
-                                .children(agent)
                                 .children(gone)
                                 .child(updated),
                         ),

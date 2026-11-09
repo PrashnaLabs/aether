@@ -514,6 +514,7 @@ pub(crate) struct CardFilter {
     pub project: Option<String>,
     pub by_agent: Option<bool>,
     pub search: String,
+    pub label: Option<String>,
 }
 
 pub(crate) fn parse_card_filter(args: &Value) -> Result<CardFilter, String> {
@@ -547,6 +548,7 @@ pub(crate) fn parse_card_filter(args: &Value) -> Result<CardFilter, String> {
         project: text("project").map(str::to_string),
         by_agent,
         search: text("search").unwrap_or_default().to_string(),
+        label: text("label").map(str::to_lowercase),
     })
 }
 
@@ -568,6 +570,7 @@ impl ChatApp {
             .filter(|c| f.ids.as_ref().is_none_or(|ids| ids.contains(&c.id)))
             .filter(|c| f.col.is_none_or(|col| c.col == col))
             .filter(|c| shown(c, &f.search, f.by_agent))
+            .filter(|c| f.label.as_ref().is_none_or(|l| c.labels.contains(l)))
             .collect()
     }
 

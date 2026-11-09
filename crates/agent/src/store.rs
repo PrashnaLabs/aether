@@ -39,7 +39,8 @@ const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
     chat INTEGER,
     project TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL DEFAULT 0,
-    by_agent INTEGER NOT NULL DEFAULT 0
+    by_agent INTEGER NOT NULL DEFAULT 0,
+    meta TEXT NOT NULL DEFAULT ''
 )";
 
 // Added after the first release; existing files gain them with zero values.
@@ -94,6 +95,8 @@ pub struct SavedCard {
     pub updated_at: i64,
     /// Added by an agent's add_card or spawn_agent, not the user.
     pub by_agent: bool,
+    /// JSON for the fields the app owns (linked chats, labels, blockers, notes); empty when none.
+    pub meta: String,
 }
 
 /// Chats in a SQLite file. Saves queue up and are written in order.
@@ -138,6 +141,11 @@ impl Store {
                 .collect();
             if !card_cols.iter().any(|c| c == "by_agent") {
                 sqlx::query("ALTER TABLE cards ADD COLUMN by_agent INTEGER NOT NULL DEFAULT 0")
+                    .execute(&pool)
+                    .await?;
+            }
+            if !card_cols.iter().any(|c| c == "meta") {
+                sqlx::query("ALTER TABLE cards ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
                     .execute(&pool)
                     .await?;
             }
@@ -299,7 +307,7 @@ impl Store {
     /// Every card, ordered by column then position.
     pub fn load_cards(&self) -> sqlx::Result<Vec<SavedCard>> {
         let rows = self.rt.block_on(
-            sqlx::query("SELECT id, title, body, col, position, chat, project, updated_at, by_agent FROM cards ORDER BY col, position")
+            sqlx::query("SELECT id, title, body, col, position, chat, project, updated_at, by_agent, meta FROM cards ORDER BY col, position")
                 .fetch_all(&self.pool),
         )?;
         rows.iter()
@@ -314,6 +322,7 @@ impl Store {
                     project: row.try_get("project")?,
                     updated_at: row.try_get("updated_at")?,
                     by_agent: row.try_get("by_agent")?,
+                    meta: row.try_get("meta")?,
                 })
             })
             .collect()
@@ -412,10 +421,11 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
 
 async fn save_card(pool: &SqlitePool, card: &SavedCard) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO cards (id, title, body, col, position, chat, project, updated_at, by_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO cards (id, title, body, col, position, chat, project, updated_at, by_agent, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
          col = excluded.col, position = excluded.position, chat = excluded.chat,
-         project = excluded.project, updated_at = excluded.updated_at, by_agent = excluded.by_agent",
+         project = excluded.project, updated_at = excluded.updated_at, by_agent = excluded.by_agent,
+         meta = excluded.meta",
     )
     .bind(card.id)
     .bind(&card.title)
@@ -426,6 +436,7 @@ async fn save_card(pool: &SqlitePool, card: &SavedCard) -> sqlx::Result<()> {
     .bind(&card.project)
     .bind(card.updated_at)
     .bind(card.by_agent)
+    .bind(&card.meta)
     .execute(pool)
     .await?;
     Ok(())

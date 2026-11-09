@@ -384,6 +384,7 @@ fn card(id: i64, col: &str, position: f64) -> SavedCard {
         project: "/code/p".into(),
         updated_at: 99,
         by_agent: false,
+        meta: String::new(),
     }
 }
 
@@ -394,7 +395,12 @@ fn cards_round_trip() {
     let rt = Runtime::new().unwrap();
     let store = Store::open(&path, rt.handle().clone()).unwrap();
     let mut a = card(1, "todo", 2.0);
-    let b = SavedCard { chat: None, by_agent: true, ..card(2, "doing", 0.5) };
+    let b = SavedCard {
+        chat: None,
+        by_agent: true,
+        meta: r#"{"labels":["ui"]}"#.into(),
+        ..card(2, "doing", 0.5)
+    };
     store.save_card(a.clone());
     store.save_card(b.clone());
     a.title = "Renamed".into();
@@ -438,4 +444,33 @@ fn old_db_gains_cards_table() {
     let cards = store.load_cards();
     let _ = std::fs::remove_file(&path);
     assert_eq!(cards.unwrap(), vec![]);
+}
+
+#[test]
+fn old_card_tables_gain_meta() {
+    let path =
+        std::env::temp_dir().join(format!("aether-store-cardmeta-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    rt.block_on(async {
+        let options = SqliteConnectOptions::new().filename(&path).create_if_missing(true);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE cards (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+             col TEXT NOT NULL DEFAULT 'todo', position REAL NOT NULL DEFAULT 0, chat INTEGER,
+             project TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0,
+             by_agent INTEGER NOT NULL DEFAULT 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO cards (id, title, chat) VALUES (1, 'Old', 7)")
+            .execute(&pool)
+            .await
+            .unwrap();
+    });
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let cards = store.load_cards().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!((cards[0].chat, cards[0].meta.as_str()), (Some(7), ""));
 }

@@ -46,7 +46,7 @@ impl Tools {
                 is_lead
                     || matches!(
                         tool.name(),
-                        "list_cards" | "add_card" | "move_card" | "update_card"
+                        "list_cards" | "read_card" | "add_card" | "move_card" | "update_card"
                     )
             }));
         }

@@ -24,11 +24,15 @@ but their cards still update automatically.
 
 | Tool | Arguments | Reply |
 | --- | --- | --- |
-| `list_cards` | `filter?` (same fields as `delete_cards`: `ids`, `col`, `project`, `added_by`, `search`), `bodies?` (show descriptions, indented) | One line per card: `#<id> [<column>] <title> (agent <chat id>)`, plus `[project <folder>]` for other projects. Without `col` or `ids`, Done cards are left out |
-| `add_card` | `title`, `body?`, `col?` (`backlog`, `todo`, `doing`, `review`; default `todo`) | `Created #<id> in todo: <title>` |
+| `list_cards` | `filter?` (same fields as `delete_cards`: `ids`, `col`, `project`, `added_by`, `search`, `label`), `bodies?` (show descriptions, indented) | One line per card: `#<id> [<column>] <title> (agent <chat id>) {labels} blocked by #<id> · <n> note(s)`, plus `[project <folder>]` for other projects. Without `col` or `ids`, Done cards are left out |
+| `read_card` | `id` | JSON: description, labels, blockers, linked chats with their state, and every note, including linked agents' results |
+| `add_card` | `title`, `body?`, `col?` (`backlog`, `todo`, `doing`, `review`; default `todo`), `labels?`, `blocked_by?` | `Created #<id> in todo: <title>` |
 | `move_card` | `id`, `col` | `Moved #<id> todo -> review: <title>` |
-| `update_card` | `id`, any of `title?`, `body?` (replaces; empty clears), `append?` (adds a paragraph), `col?`, `before?` (card id to sit above), `chat?` (chat id to link) | `Updated #<id> todo (title, description): <title>` |
-| `spawn_agent` | usual arguments plus optional `card` | Reply includes `card` |
+| `update_card` | `id`, any of `title?`, `body?` (replaces; empty clears), `append?` (adds a paragraph), `note?` (dated note signed by the caller), `col?`, `before?` (card id to sit above), `chat?` (also link this chat), `labels?` (replaces), `blocked_by?` (replaces; `[]` clears) | `Updated #<id> todo (title, description): <title>` |
+| `spawn_agent` | usual arguments plus optional `card` | Reply includes `card`; `{"status": "queued", "position": n}` when every agent slot is busy |
+
+Unknown arguments fail with `unknown argument "<name>"; expected one of: …`
+instead of being ignored.
 
 Replies are plain text to keep tokens low. With Pi the tools appear as
 `aether_list_cards` and so on.
@@ -37,11 +41,19 @@ Replies are plain text to keep tokens low. With Pi the tools appear as
 
 - `spawn_agent` without `card` adds a card for the child in Doing, titled after
   the child, with the task as its description.
-- `spawn_agent` with `card: <id>` links that card instead and moves it to Doing.
-  An unknown id fails the spawn with `card #<id> not found`.
+- `spawn_agent` with `card: <id>` links that card too and moves it to Doing.
+  A card can track several chats. An unknown id fails the spawn with
+  `card #<id> not found`, and a card with open blockers fails with
+  `card #<id> is blocked by #<ids>`.
+- When every agent slot is busy, `spawn_agent` queues the spawn and starts it
+  when a child finishes; the lead hears the new child's id as its next turn.
+- When a linked agent finishes, its final reply is filed on the card as a note
+  signed `agent <chat id>` (up to 20,000 characters).
+- When a card is done or deleted, it leaves every other card's `blocked_by`.
 - When a linked chat starts a turn, its card moves from Backlog or Todo to
   Doing.
-- When the turn finishes cleanly, the card moves from Doing to Review.
+- When the turn finishes cleanly, the card moves from Doing to Review. With
+  several linked chats, it waits until the last one finishes.
 - A failed or stopped turn leaves the card in Doing; failures show a red pill.
 - Done is human-only. Leads get `only a human can move a card to done`; drag
   the card yourself after review.
@@ -69,7 +81,9 @@ Replies are plain text to keep tokens low. With Pi the tools appear as
 
 - `move_card` and `update_card` only reach cards in the lead's own project;
   `list_cards` and `delete_cards` take `project: "all"` for the rest.
-- Card ids are millisecond timestamps, so ids in replies are long.
+- Card ids are short counters (`#66`). Cards made before that kept their
+  millisecond-timestamp ids.
+- Queued spawns live in memory; quitting Aether drops them.
 - A lead running in a worktree records the worktree folder on the cards it
   creates, so they may be missing from **This project**; **All projects** shows
   them.

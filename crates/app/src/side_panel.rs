@@ -749,7 +749,7 @@ impl ChatApp {
             Surface::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
-            Surface::Board => self.render_board_tab(cx),
+            Surface::Board => self.render_board_tab(window, cx),
             Surface::Files | Surface::Review => self.render_explorer_page(window, cx),
             Surface::Terminal => {
                 self.drawer_for(self.active, window, cx);
@@ -1113,7 +1113,7 @@ impl ChatApp {
             SideTab::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
-            SideTab::Board => self.render_board_tab(cx),
+            SideTab::Board => self.render_board_tab(window, cx),
         };
         let bar = self.side_tab_bar(window, cx).into_any_element();
         let controls = self.hosts_controls(window);

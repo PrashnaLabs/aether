@@ -591,6 +591,9 @@ impl ChatApp {
             if self.chats[ix].run == run {
                 self.deliver_to_lead(ix, reply_ix, failed, window, cx);
             }
+            if !self.spawn_queue.is_empty() {
+                self.drain_spawn_queue(window, cx);
+            }
         }
         let blocked = self.worktree_blocks_send(ix).is_some();
         let follow = ix != self.active || !self.scroller.read(cx).is_scrolled_up();

@@ -737,29 +737,51 @@ fn delivery_says_who_stopped_the_child(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn spawn_refused_at_running_cap(cx: &mut TestAppContext) {
+fn spawn_queues_at_running_cap_and_starts_when_a_slot_frees(cx: &mut TestAppContext) {
+    // the drained spawn starts a real CLI run whose worker thread sends updates
+    cx.background_executor.allow_parking();
     let window = lead_app(cx);
     window
         .update(cx, |app, window, cx| {
-            for _ in 0..8 {
-                let id = with_child(app, 10);
-                let ix = child_ix(app, id);
-                app.chats[ix].cancel = Some(aether_agent::Cancel::inert());
-            }
+            let kids: Vec<i64> = (0..8)
+                .map(|_| {
+                    let id = with_child(app, 10);
+                    let ix = child_ix(app, id);
+                    app.chats[ix].cancel = Some(aether_agent::Cancel::inert());
+                    id
+                })
+                .collect();
             let n = app.chats.len();
-            let (reply, answer) = std::sync::mpsc::channel();
-            let call = OrchCall {
-                lead: "10".into(),
-                tool: "spawn_agent".into(),
-                args: spawn_args("codex", "gpt-5"),
-                reply,
-            };
-            app.orchestrate(call, window, cx);
+            let mut args = spawn_args("codex", "gpt-5");
+            args["nonce"] = "q-1".into();
+            let first = app.spawn_agent(1, &args, window, cx).unwrap();
             assert_eq!(
-                answer.try_recv().unwrap(),
-                Err("this lead already has 8 running agents; wait for one to finish or stop one with the stop_agent tool".into())
+                (first["status"].as_str(), first["position"].as_u64()),
+                (Some("queued"), Some(1))
             );
-            assert_eq!(app.chats.len(), n);
+            let again = app.spawn_agent(1, &args, window, cx).unwrap();
+            assert_eq!(again["position"], 1, "a retried nonce isn't queued twice");
+            let second = app.spawn_agent(1, &spawn_args("codex", "gpt-5"), window, cx).unwrap();
+            assert_eq!(second["position"], 2);
+            assert_eq!((app.chats.len(), app.spawn_queue.len()), (n, 2));
+            app.drain_spawn_queue(window, cx);
+            assert_eq!(app.spawn_queue.len(), 2, "still full: nothing starts");
+            let freed = child_ix(app, kids[0]);
+            app.chats[freed].cancel = None;
+            app.drain_spawn_queue(window, cx);
+            assert_eq!((app.chats.len(), app.spawn_queue.len()), (n + 1, 1));
+            let lead = &app.chats[1];
+            let told = lead.queue.iter().map(|q| q.text.as_str()).chain(
+                lead.messages
+                    .iter()
+                    .filter(|m| m.role == aether_core::Role::User)
+                    .map(|m| m.text.as_str()),
+            );
+            let told: Vec<&str> = told.collect();
+            assert!(
+                told.iter().any(|t| t.contains("Queued spawn \"Fix tests\" started")),
+                "{told:?}"
+            );
         })
         .unwrap();
 }
@@ -1336,8 +1358,8 @@ fn starting_worktree_children_count_toward_cap(cx: &mut TestAppContext) {
                 let ix = child_ix(app, id);
                 app.chats[ix].worktree_job = creating();
             }
-            let err = app.spawn_agent(1, &spawn_args("codex", "gpt-5"), window, cx).unwrap_err();
-            assert!(err.starts_with("this lead already has 8 running agents"), "{err}");
+            let queued = app.spawn_agent(1, &spawn_args("codex", "gpt-5"), window, cx).unwrap();
+            assert_eq!(queued["status"], "queued");
         })
         .unwrap();
 }
@@ -1771,7 +1793,97 @@ fn deleting_a_lead_unlinks_its_children_cards_and_handoffs(cx: &mut TestAppConte
             assert_eq!((kid.parent, kid.lead_seen), (None, None));
             assert_eq!(app.chats[0].handoff_from, None);
             let card = app.cards.iter().find(|c| c.id == card).unwrap();
-            assert_eq!((card.chat, card.col), (None, Col::Doing));
+            assert_eq!((card.chats.as_slice(), card.col), (&[][..], Col::Doing));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn cards_take_labels_blockers_notes_and_read_back_in_full(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let mut call = |tool: &str, args: Value| {
+                let (reply, answer) = std::sync::mpsc::channel();
+                app.orchestrate(
+                    OrchCall { lead: "10".into(), tool: tool.into(), args, reply },
+                    window,
+                    cx,
+                );
+                answer.try_recv().unwrap()
+            };
+            let text = |v: Result<Value, String>| v.unwrap().as_str().unwrap().to_string();
+            assert_eq!(text(call("add_card", json!({"title": "Design"}))), "Created #1 in todo: Design");
+            assert_eq!(
+                call("add_card", json!({"title": "Build", "blocked_by": [99]})),
+                Err("blocker card #99 not found".into())
+            );
+            assert_eq!(
+                text(call("add_card", json!({"title": "Build", "labels": ["UI"], "blocked_by": [1]}))),
+                "Created #2 in todo: Build"
+            );
+            assert_eq!(
+                call("spawn_agent", json!({"provider": "codex", "model": "gpt-5", "title": "b", "task": "t", "card": 2})),
+                Err("card #2 is blocked by #1; finish those first or clear blocked_by with update_card".into())
+            );
+            assert_eq!(
+                text(call("list_cards", json!({"filter": {"label": "ui"}}))),
+                "#2 [todo] Build {ui} blocked by #1"
+            );
+            assert_eq!(
+                text(call("update_card", json!({"id": 2, "note": "waiting on design"}))),
+                "Updated #2 todo (note): Build"
+            );
+            assert_eq!(
+                call("update_card", json!({"id": 2, "notes": "x"})),
+                Err(r#"unknown argument "notes"; expected one of: append, before, blocked_by, body, chat, col, id, labels, note, title"#.into())
+            );
+            let card = call("read_card", json!({"id": "#2"})).unwrap();
+            assert_eq!(card["labels"], json!(["ui"]));
+            assert_eq!(card["blocked_by"], json!([{"id": 1, "title": "Design", "col": "todo"}]));
+            assert_eq!(card["notes"][0]["by"], "lead 10");
+            assert_eq!(card["notes"][0]["text"], "waiting on design");
+        })
+        .unwrap();
+    window
+        .update(cx, |app, _, _| {
+            app.board_move(1, Col::Done, None);
+            let build = app.cards.iter().find(|c| c.id == 2).unwrap();
+            assert!(build.blocked_by.is_empty(), "a done blocker unblocks its dependents");
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn finished_agents_file_their_reply_on_linked_cards(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let (a, b) = (with_child(app, 10), with_child(app, 10));
+            let card = app.board_add(
+                "Pair".into(),
+                String::new(),
+                Col::Todo,
+                "/tmp/proj".into(),
+                Some(a),
+                false,
+            );
+            app.board_link(card, b);
+            app.board_on_turn(b, crate::board::model::Turn::Started);
+            let ix = child_ix(app, a);
+            let mut reply = aether_core::Message::assistant();
+            reply.text = "done: parser fixed".into();
+            app.chats[ix].messages.push(reply);
+            let b_ix = child_ix(app, b);
+            app.chats[b_ix].cancel = Some(aether_agent::Cancel::inert());
+            app.board_on_turn(a, crate::board::model::Turn::Finished { failed: false });
+            let card = app.cards.iter().find(|c| c.id == card).unwrap();
+            assert_eq!(card.col, Col::Doing, "stays in Doing while another linked agent runs");
+            assert_eq!(card.notes.len(), 1);
+            assert_eq!(
+                (card.notes[0].by.as_str(), card.notes[0].text.as_str()),
+                (&*format!("agent {a}"), "done: parser fixed")
+            );
         })
         .unwrap();
 }

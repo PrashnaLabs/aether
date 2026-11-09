@@ -489,6 +489,7 @@ impl ChatApp {
             chat_id_highwater: 0,
             stopped_by_lead: HashSet::new(),
             spawn_nonces: HashMap::new(),
+            spawn_queue: Vec::new(),
             session_views: HashMap::new(),
             session_subscriptions: HashMap::new(),
             session_windows: HashMap::new(),
