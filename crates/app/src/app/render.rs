@@ -131,9 +131,11 @@ impl Render for ChatApp {
         let drawer = is_agent.then(|| self.terminal_drawer(window, cx)).flatten();
         let terminal_maximized = is_agent && self.is_terminal_drawer_maximized(cx);
         if let Some(drawer) = self.terminals.get(&self.chats[self.active].id) {
+            let hideable = self.settings.chat_layout == aether_core::ChatLayout::Tabbed;
             drawer.view.update(cx, |t, cx| {
-                if t.window_top != terminal_maximized {
+                if t.window_top != terminal_maximized || t.hideable != hideable {
                     t.window_top = terminal_maximized;
+                    t.hideable = hideable;
                     cx.notify();
                 }
             });

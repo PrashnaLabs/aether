@@ -261,13 +261,15 @@ impl TerminalWorkspace {
                 })),
         );
 
-        bar.action(
-            icon_chip("terminal-hide", false, cx)
-                .icon(IconName::Close)
-                .accessibility_label("Hide terminal")
-                .tooltip_with_action("Hide terminal", &ToggleTerminal, None)
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(TerminalEvent::Hide))),
-        )
+        bar.when(self.hideable, |bar| {
+            bar.action(
+                icon_chip("terminal-hide", false, cx)
+                    .icon(IconName::Close)
+                    .accessibility_label("Hide terminal")
+                    .tooltip_with_action("Hide terminal", &ToggleTerminal, None)
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(TerminalEvent::Hide))),
+            )
+        })
         .when(self.window_top, |bar| bar.action(aether_ui::window_controls_gap(window)))
     }
 }

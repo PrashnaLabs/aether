@@ -59,6 +59,8 @@ pub struct TerminalWorkspace {
     pub full_page: bool,
     /// Header sits at the window's top edge, under the floating window controls.
     pub window_top: bool,
+    /// Shows the hide (X) button.
+    pub hideable: bool,
     pub watched: Option<bool>,
     pub(crate) option_as_meta: bool,
     pub(crate) font_family: SharedString,
@@ -103,6 +105,7 @@ impl TerminalWorkspace {
             shown: false,
             full_page: false,
             window_top: false,
+            hideable: false,
             watched: None,
             option_as_meta: false,
             font_family: "".into(),
