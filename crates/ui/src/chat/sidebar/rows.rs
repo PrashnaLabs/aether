@@ -10,6 +10,7 @@ use gpui_kit::{
 
 use super::chat_row::render_chat;
 use super::chrome::{nest, reveal_on_hover, row_style, tabular, tooltip};
+use super::crew::{CrewMember, CrewSummary, Tier, order, preview, starts_collapsed};
 use super::menu::track_menu;
 use super::project_row::ProjectRow;
 use super::state::{SidebarState, navigate};
@@ -79,11 +80,16 @@ pub(super) enum ChatRow {
         nested: bool,
         rename_editor: Option<Entity<InputState>>,
         style: SidebarStyle,
+        crew: Option<CrewSummary>,
+        open: Option<bool>,
     },
-    CrewToggle {
+    CrewMore {
         lead: i64,
-        hidden: usize,
-        expanded: bool,
+        hidden: CrewSummary,
+        all: bool,
+        total: usize,
+        #[allow(dead_code)]
+        depth: u8,
         nested: bool,
     },
     SectionButton {
@@ -105,7 +111,7 @@ impl ChatRow {
             Self::Project { header, .. } => format!("project:{}", header.path).into(),
             Self::Worktree { header, .. } => format!("worktree:{}", header.path).into(),
             Self::Chat { chat, .. } => chat_key(chat.id),
-            Self::CrewToggle { lead, .. } => format!("crew-toggle:{lead}").into(),
+            Self::CrewMore { lead, .. } => format!("crew-more:{lead}").into(),
             Self::SectionButton { label, .. } => format!("section-btn:{label}").into(),
         }
     }
@@ -114,6 +120,7 @@ impl ChatRow {
         match self {
             Self::Header { collapse, .. } => collapse.is_some(),
             Self::Chat { rename_editor, .. } => rename_editor.is_none(),
+            Self::CrewMore { .. } => false,
             _ => true,
         }
     }
@@ -375,12 +382,64 @@ impl ChatRow {
                     cx,
                 )
             }
-            Self::Chat { chat, nested, rename_editor, style } => {
+            Self::Chat { chat, nested, rename_editor, style, crew, open } => {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
                     && window.last_input_was_keyboard();
                 let show = chat.active || keyboard || menu_open;
                 let child = chat.child();
+                let lead = chat.id;
+                let toggle = open.map(|_| {
+                    let state = state.clone();
+                    move |next: bool, window: &mut Window, cx: &mut App| {
+                        state.update(cx, |s, cx| {
+                            s.crew_open.insert(lead, next);
+                            cx.notify();
+                        });
+                        window.refresh();
+                    }
+                });
+                let chevron = open.zip(toggle.clone()).map(|(open, toggle)| {
+                    div()
+                        .id(("crew-chevron", chat.ix))
+                        .debug_selector(move || format!("crew-chevron-{lead}"))
+                        .flex_none()
+                        .role(Role::Button)
+                        .aria_label(format!(
+                            "{} crew, {}",
+                            if open { "Collapse" } else { "Expand" },
+                            crew.unwrap_or_default().words(Tier::Wide)
+                        ))
+                        .aria_expanded(open)
+                        .cursor_pointer()
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            toggle(!open, window, cx)
+                        })
+                        .child(
+                            Icon::new(if open {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size(rems(0.75))
+                            .text_color(cx.theme().muted_foreground),
+                        )
+                        .into_any_element()
+                });
+                let nav = move |ev: &KeyDownEvent, window: &mut Window, cx: &mut App| {
+                    let next = match ev.keystroke.key.as_str() {
+                        "left" => false,
+                        "right" => true,
+                        _ => return nav(ev, window, cx),
+                    };
+                    if let Some(toggle) = &toggle
+                        && !ev.keystroke.modifiers.modified()
+                    {
+                        cx.stop_propagation();
+                        toggle(next, window, cx);
+                    }
+                };
                 let row = render_chat(
                     chat,
                     nested,
@@ -391,69 +450,44 @@ impl ChatRow {
                     key,
                     rename_editor,
                     style,
+                    chevron,
                     cx,
                 );
                 let row = nest(row, nested, cx);
                 if child { nest(row, true, cx) } else { row }
             }
-            Self::CrewToggle { lead, hidden, expanded, nested } => {
-                let label =
-                    if expanded { "Show less".to_string() } else { format!("+{hidden} more") };
-                let toggle = {
-                    let state = state.clone();
-                    move |expanded: bool, window: &mut Window, cx: &mut App| {
-                        state.update(cx, |s, cx| {
-                            if expanded {
-                                s.collapsed_crews.remove(&lead);
+            Self::CrewMore { lead, hidden, all, total, nested, .. } => {
+                let state = state.clone();
+                let row = h_flex()
+                    .w_full()
+                    .px_2()
+                    .py_1()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .when(!all, |row| row.child(format!("+{} more", hidden.total())))
+                    .child(
+                        div()
+                            .id("crew-more")
+                            .debug_selector(move || format!("crew-more-{lead}"))
+                            .role(Role::Button)
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(cx.theme().sidebar_foreground))
+                            .child(if all {
+                                "Show fewer".to_string()
                             } else {
-                                s.collapsed_crews.insert(lead);
-                            }
-                            cx.notify();
-                        });
-                        window.refresh();
-                    }
-                };
-                let click = toggle.clone();
-                let row = row_style(
-                    h_flex()
-                        .id("crew-toggle")
-                        .debug_selector(move || format!("crew-toggle-{lead}"))
-                        .role(Role::Button)
-                        .aria_label(if expanded {
-                            "Show fewer spawned agents".to_string()
-                        } else {
-                            format!("Show {hidden} more spawned agents")
-                        })
-                        .aria_expanded(expanded)
-                        .when_some(focus, |el, focus| el.track_focus(&focus)),
-                    false,
-                    cx,
-                )
-                .w_full()
-                .px_2()
-                .py_1p5()
-                .gap_1()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(
-                    Icon::new(if expanded { IconName::ChevronUp } else { IconName::ChevronDown })
-                        .xsmall(),
-                )
-                .child(label)
-                .on_click(move |_, window, cx| click(!expanded, window, cx))
-                .on_key_down(move |event, window, cx| {
-                    if event.keystroke.modifiers.modified() {
-                        return;
-                    }
-                    let next = match event.keystroke.key.as_str() {
-                        "enter" | "space" => !expanded,
-                        "left" => false,
-                        "right" => true,
-                        _ => return nav(event, window, cx),
-                    };
-                    cx.stop_propagation();
-                    toggle(next, window, cx);
-                });
+                                format!("Show all {total}")
+                            })
+                            .on_click(move |_, window, cx| {
+                                state.update(cx, |s, cx| {
+                                    if !s.crew_all.remove(&lead) {
+                                        s.crew_all.insert(lead);
+                                    }
+                                    cx.notify();
+                                });
+                                window.refresh();
+                            }),
+                    );
                 nest(nest(row.into_any_element(), nested, cx), true, cx)
             }
             Self::SectionButton { icon, label, aria, count, on_click } => {
@@ -584,77 +618,100 @@ pub(super) fn chat_key(id: i64) -> SharedString {
     format!("chat:{id}").into()
 }
 
-/// Keep ongoing work and the selected/renamed chat visible, then fill the three
-/// preview slots with the newest children. Running crews may exceed three rows.
-fn collapsed_crew(children: &[ChatItem], rename_ix: Option<usize>) -> Vec<bool> {
-    let mut visible: Vec<bool> = children
-        .iter()
-        .map(|chat| {
-            chat.status.is_busy()
-                || matches!(
-                    chat.status,
-                    super::ChatStatus::Quiet { .. } | super::ChatStatus::Background(_)
-                )
-                || chat.active
-                || rename_ix == Some(chat.ix)
-        })
-        .collect();
-    let mut slots = 3usize.saturating_sub(visible.iter().filter(|&&show| show).count());
-    for show in visible.iter_mut().rev() {
-        if slots == 0 {
-            break;
-        }
-        if !*show {
-            *show = true;
-            slots -= 1;
+fn families(chats: Vec<ChatItem>) -> Vec<(ChatItem, Vec<ChatItem>)> {
+    let mut out: Vec<(ChatItem, Vec<ChatItem>)> = Vec::new();
+    for chat in chats {
+        match out.last_mut() {
+            Some((head, rest)) if chat.depth > head.depth => rest.push(chat),
+            _ => out.push((chat, Vec::new())),
         }
     }
-    visible
+    out
+}
+
+fn summarize(chats: &[ChatItem]) -> CrewSummary {
+    let mut summary = CrewSummary::default();
+    for chat in chats {
+        summary.add(chat.status);
+    }
+    summary
 }
 
 impl ChatSidebar {
+    fn crew_is_open(&self, lead: i64, children: usize) -> bool {
+        self.crew_open.get(&lead).copied().unwrap_or_else(|| !starts_collapsed(children))
+    }
+
+    fn chat_row(
+        &self,
+        mut chat: ChatItem,
+        nested: bool,
+        crew: Option<CrewSummary>,
+        open: Option<bool>,
+    ) -> ChatRow {
+        chat.now = self.now;
+        let rename_editor =
+            self.rename_ix.filter(|ix| *ix == chat.ix).and(self.rename_input.clone());
+        ChatRow::Chat { chat, nested, rename_editor, style: self.style, crew, open }
+    }
+
+    fn crew_rows(&self, chats: Vec<ChatItem>, nested: bool) -> Vec<ChatRow> {
+        let mut out = Vec::new();
+        for (head, rest) in families(chats) {
+            self.family(head, rest, nested, &mut out);
+        }
+        out
+    }
+
+    fn family(&self, head: ChatItem, rest: Vec<ChatItem>, nested: bool, out: &mut Vec<ChatRow>) {
+        if self.style == SidebarStyle::Focus || !head.lead || rest.is_empty() {
+            out.push(self.chat_row(head, nested, None, None));
+            out.extend(self.crew_rows(rest, nested));
+            return;
+        }
+        let lead = head.id;
+        let depth = head.depth.saturating_add(1).min(2);
+        let summary = summarize(&rest);
+        let members = families(rest);
+        let open = self.crew_is_open(lead, members.len());
+        let all = open && self.crew_all.contains(&lead);
+        let mut crew: Vec<CrewMember> = members
+            .iter()
+            .enumerate()
+            .map(|(ix, (chat, rest))| CrewMember {
+                ix,
+                status: chat.status,
+                activity: chat.id,
+                keep: std::iter::once(chat)
+                    .chain(rest)
+                    .any(|c| c.active || self.rename_ix == Some(c.ix)),
+                summary: (chat.lead && !rest.is_empty()).then(|| summarize(rest)),
+            })
+            .collect();
+        order(&mut crew);
+        let shown = preview(&crew, open, all);
+        out.push(self.chat_row(head, nested, Some(summary), Some(open)));
+        let mut members: Vec<_> = members.into_iter().map(Some).collect();
+        for (member, _) in crew.iter().zip(&shown.visible).filter(|(_, v)| **v) {
+            if let Some((chat, rest)) = members[member.ix].take() {
+                self.family(chat, rest, nested, out);
+            }
+        }
+        if open && (all || shown.hidden.total() > 0) {
+            out.push(ChatRow::CrewMore {
+                lead,
+                hidden: shown.hidden,
+                all,
+                total: crew.len(),
+                depth,
+                nested,
+            });
+        }
+    }
+
     /// Body rows in display order.
     pub(super) fn rows(&mut self) -> Vec<ChatRow> {
-        let rename = self.rename_ix.zip(self.rename_input.clone());
         let now = self.now;
-        let style = self.style;
-        let row = |mut chat: ChatItem, nested: bool| {
-            chat.now = now;
-            let rename_editor =
-                rename.clone().filter(|(ix, _)| *ix == chat.ix).map(|(_, input)| input);
-            ChatRow::Chat { chat, nested, rename_editor, style }
-        };
-        let collapsed_crews = &self.collapsed_crews;
-        let rename_ix = self.rename_ix;
-        let crew_rows = |chats: Vec<ChatItem>, nested: bool| {
-            let mut out = Vec::new();
-            let mut chats = chats.into_iter().peekable();
-            while let Some(chat) = chats.next() {
-                let lead = chat.id;
-                let crew = style != SidebarStyle::Focus && chat.lead;
-                out.push(row(chat, nested));
-                if !crew {
-                    continue;
-                }
-                let mut children = Vec::new();
-                while chats.peek().is_some_and(|chat| chat.child()) {
-                    children.push(chats.next().unwrap());
-                }
-                let visible = collapsed_crew(&children, rename_ix);
-                let hidden = visible.iter().filter(|&&show| !show).count();
-                let expanded = !collapsed_crews.contains(&lead);
-                out.extend(
-                    children
-                        .into_iter()
-                        .zip(visible)
-                        .filter_map(|(chat, show)| (expanded || show).then(|| row(chat, nested))),
-                );
-                if hidden > 0 {
-                    out.push(ChatRow::CrewToggle { lead, hidden, expanded, nested });
-                }
-            }
-            out
-        };
         let header = |title: &str| ChatRow::Header {
             tools: None,
             title: SharedString::from(title.to_string()),
@@ -704,10 +761,8 @@ impl ChatSidebar {
                 on_add: None,
                 collapse: self.pinned_collapse.take(),
             });
-            rows.extend(crew_rows(
-                std::mem::take(&mut self.pinned).into_iter().filter(|_| !collapsed).collect(),
-                false,
-            ));
+            let pinned = std::mem::take(&mut self.pinned).into_iter().filter(|_| !collapsed);
+            rows.extend(self.crew_rows(pinned.collect(), false));
         }
         let projects: Vec<ProjectItem> = std::mem::take(&mut self.projects)
             .into_iter()
@@ -758,7 +813,7 @@ impl ChatSidebar {
                 now,
             });
             id += 1;
-            rows.extend(crew_rows(chats, true));
+            rows.extend(self.crew_rows(chats, true));
             for (worktree, chats) in held {
                 rows.push(ChatRow::Worktree {
                     id,
@@ -768,7 +823,7 @@ impl ChatSidebar {
                     now,
                 });
                 id += 1;
-                rows.extend(crew_rows(chats, true));
+                rows.extend(self.crew_rows(chats, true));
             }
         }
         rows.extend(
@@ -779,10 +834,11 @@ impl ChatSidebar {
         );
         if !self.chats.is_empty() {
             rows.push(header("Chats"));
-            rows.extend(crew_rows(std::mem::take(&mut self.chats), false));
+            let chats = std::mem::take(&mut self.chats);
+            rows.extend(self.crew_rows(chats, false));
         }
         let mut tools = self.section_tools.take();
-        for (section_title, chats) in self.custom_sections.drain(..) {
+        for (section_title, chats) in std::mem::take(&mut self.custom_sections) {
             if !chats.is_empty() {
                 rows.push(ChatRow::Header {
                     title: section_title,
@@ -790,7 +846,7 @@ impl ChatSidebar {
                     collapse: None,
                     tools: tools.take(),
                 });
-                rows.extend(crew_rows(chats, false));
+                rows.extend(self.crew_rows(chats, false));
             }
         }
         if tools.is_some() {

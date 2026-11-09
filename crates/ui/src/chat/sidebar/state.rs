@@ -45,7 +45,8 @@ pub(super) struct SidebarState {
     keys: Vec<SharedString>,
     pub(super) focus: HashMap<SharedString, FocusHandle>,
     pub(super) open_menu: Option<SharedString>,
-    pub(super) collapsed_crews: HashSet<i64>,
+    pub(super) crew_open: HashMap<i64, bool>,
+    pub(super) crew_all: HashSet<i64>,
     /// Row last scrolled into view for being selected or renamed.
     revealed: Option<SharedString>,
 }
@@ -58,7 +59,8 @@ impl SidebarState {
             keys: Vec::new(),
             focus: HashMap::new(),
             open_menu: None,
-            collapsed_crews: HashSet::new(),
+            crew_open: HashMap::new(),
+            crew_all: HashSet::new(),
             revealed: None,
         }
     }

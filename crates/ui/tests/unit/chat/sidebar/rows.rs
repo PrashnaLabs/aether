@@ -119,82 +119,139 @@ fn crew_sidebar(statuses: &[ChatStatus], selected: Option<usize>) -> ChatSidebar
     sidebar
 }
 
-#[test]
-fn minimal_crew_preview_shows_three_recent_children_and_remaining_count() {
-    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 7], None);
-    sidebar.collapsed_crews.insert(10);
-    let rows = sidebar.rows();
-    assert_eq!(
-        rows.iter().map(ChatRow::key).collect::<Vec<_>>(),
-        ["caption:Today", "chat:10", "chat:104", "chat:105", "chat:106", "crew-toggle:10"]
-            .map(SharedString::from)
-    );
-    assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { hidden: 4, expanded: false, .. })));
-    assert!(rows.last().unwrap().focusable());
-    assert!(
-        !crew_sidebar(&[ChatStatus::Idle; 3], None)
-            .rows()
-            .iter()
-            .any(|r| matches!(r, ChatRow::CrewToggle { .. }))
-    );
+fn chat_ids(rows: &[ChatRow]) -> Vec<i64> {
+    rows.iter()
+        .filter_map(|r| match r {
+            ChatRow::Chat { chat, .. } => Some(chat.id),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
-fn minimal_crew_never_hides_running_or_waiting_children() {
+fn fifteen_child_crew_starts_as_one_row() {
+    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 15], None);
+    assert_eq!(keys(&mut sidebar), ["caption:Today", "chat:10"]);
+}
+
+#[test]
+fn six_children_collapse_but_five_expand() {
+    let mut six = crew_sidebar(&[ChatStatus::Done; 6], None);
+    assert_eq!(keys(&mut six), ["caption:Today", "chat:10"]);
+    let mut five = crew_sidebar(&[ChatStatus::Done; 5], None);
+    assert_eq!(
+        keys(&mut five),
+        ["caption:Today", "chat:10", "chat:104", "chat:103", "chat:102", "chat:101", "chat:100"]
+    );
+}
+
+fn mixed_crew() -> Vec<ChatStatus> {
+    let mut statuses = vec![
+        ChatStatus::Waiting,
+        ChatStatus::Failed,
+        ChatStatus::Working { since_ms: 0 },
+        ChatStatus::Working { since_ms: 0 },
+    ];
+    statuses.extend([ChatStatus::Done; 11]);
+    statuses
+}
+
+#[test]
+fn expanded_crew_lists_attention_then_five_then_more_line() {
+    for style in [SidebarStyle::Minimal, SidebarStyle::Default] {
+        let mut sidebar = if style == SidebarStyle::Default {
+            default_crew_sidebar(&mixed_crew(), None)
+        } else {
+            crew_sidebar(&mixed_crew(), None)
+        };
+        sidebar.crew_open.insert(10, true);
+        let rows = sidebar.rows();
+        assert_eq!(chat_ids(&rows), [10, 100, 101, 103, 102, 114, 113, 112]);
+        assert_eq!(rows.last().unwrap().key().as_ref(), "crew-more:10");
+        let ChatRow::CrewMore { hidden, all, total, depth, .. } = rows.last().unwrap() else {
+            panic!("expected crew-more row");
+        };
+        assert_eq!((hidden.done, hidden.total(), *all, *total, *depth), (8, 8, false, 15, 1));
+        assert!(!rows.last().unwrap().focusable());
+    }
+}
+
+#[test]
+fn show_all_lists_every_child() {
+    let mut sidebar = crew_sidebar(&mixed_crew(), None);
+    sidebar.crew_open.insert(10, true);
+    sidebar.crew_all.insert(10);
+    let rows = sidebar.rows();
+    assert_eq!(chat_ids(&rows).len(), 16);
+    assert!(matches!(rows.last(), Some(ChatRow::CrewMore { all: true, total: 15, .. })));
+}
+
+#[test]
+fn collapsing_hides_busy_children() {
     let mut sidebar = crew_sidebar(
-        &[
-            ChatStatus::Starting,
-            ChatStatus::Working { since_ms: 0 },
-            ChatStatus::Waiting,
-            ChatStatus::Retrying,
-            ChatStatus::Quiet { since_ms: 0 },
-            ChatStatus::Background(1),
-            ChatStatus::Done,
-            ChatStatus::Failed,
-        ],
+        &[ChatStatus::Working { since_ms: 0 }, ChatStatus::Waiting, ChatStatus::Failed],
         None,
     );
-    sidebar.collapsed_crews.insert(10);
-    let rows = sidebar.rows();
-    let ids: Vec<_> = rows
-        .iter()
-        .filter_map(|r| match r {
-            ChatRow::Chat { chat, .. } => Some(chat.id),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(ids, [10, 100, 101, 102, 103, 104, 105]);
-    assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { hidden: 2, .. })));
+    sidebar.crew_open.insert(10, false);
+    assert_eq!(keys(&mut sidebar), ["caption:Today", "chat:10"]);
 }
 
 #[test]
-fn minimal_crew_keeps_selected_and_renamed_children_visible() {
-    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 7], Some(0));
-    sidebar.rename_ix = Some(2);
-    sidebar.collapsed_crews.insert(10);
-    let rows = sidebar.rows();
-    let ids: Vec<_> = rows
-        .iter()
-        .filter_map(|r| match r {
-            ChatRow::Chat { chat, .. } => Some(chat.id),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(ids, [10, 100, 101, 106]);
+fn selected_child_stays_visible_when_collapsed() {
+    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 15], Some(3));
+    sidebar.rename_ix = Some(6);
+    assert_eq!(keys(&mut sidebar), ["caption:Today", "chat:10", "chat:105", "chat:103"]);
 }
 
 #[test]
-fn minimal_crews_start_expanded_and_can_collapse_independently() {
-    let mut sidebar = crew_sidebar(&[ChatStatus::Done; 7], None);
-    sidebar.collapsed_crews.insert(999);
+fn lead_row_carries_transitive_summary() {
+    let mut sidebar = ChatSidebar::new("Aether")
+        .style(SidebarStyle::Minimal)
+        .lead_agents(vec![10, 100])
+        .child_agents(vec![(100, 1), (200, 2)]);
+    for (ix, (id, status)) in [
+        (10, ChatStatus::Idle),
+        (100, ChatStatus::Idle),
+        (200, ChatStatus::Working { since_ms: 0 }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sidebar = sidebar.chat_in_section(
+            "Today",
+            ix,
+            id,
+            "t",
+            false,
+            status,
+            false,
+            None,
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            None,
+            None,
+        );
+    }
     let rows = sidebar.rows();
-    assert_eq!(rows.iter().filter(|r| matches!(r, ChatRow::Chat { .. })).count(), 8);
-    assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { expanded: true, hidden: 4, .. })));
-    let mut collapsed = crew_sidebar(&[ChatStatus::Done; 7], None);
-    collapsed.collapsed_crews.insert(10);
-    assert_eq!(collapsed.rows().iter().filter(|r| matches!(r, ChatRow::Chat { .. })).count(), 4);
-    let mut focus = crew_sidebar(&[ChatStatus::Done; 7], None).style(SidebarStyle::Focus);
-    assert_eq!(focus.rows().iter().filter(|r| matches!(r, ChatRow::Chat { .. })).count(), 8);
+    assert_eq!(chat_ids(&rows), [10, 100, 200]);
+    let crew = |id: i64| {
+        rows.iter()
+            .find_map(|r| match r {
+                ChatRow::Chat { chat, crew, open, .. } if chat.id == id => Some((*crew, *open)),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (lead, open) = crew(10);
+    assert_eq!(open, Some(true));
+    assert_eq!(lead.unwrap().working, 1);
+    assert_eq!(lead.unwrap().total(), 2);
+    assert_eq!(crew(100).0.unwrap().working, 1);
+    assert_eq!(crew(200), (None, None));
 }
 
 fn default_crew_sidebar(statuses: &[ChatStatus], selected: Option<usize>) -> ChatSidebar {
@@ -217,83 +274,6 @@ fn default_crew_sidebar(statuses: &[ChatStatus], selected: Option<usize>) -> Cha
     );
     sidebar.projects[0].chats = chats;
     sidebar
-}
-
-#[test]
-fn default_project_crews_use_the_same_preview_and_expand_inside_the_project() {
-    for expanded in [false, true] {
-        let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 7], None);
-        if !expanded {
-            sidebar.collapsed_crews.insert(10);
-        }
-        let rows = sidebar.rows();
-        let chats: Vec<_> = rows
-            .iter()
-            .filter_map(|r| match r {
-                ChatRow::Chat { chat, nested, .. } => {
-                    assert!(*nested);
-                    Some(chat.id)
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            chats,
-            if expanded {
-                vec![10, 100, 101, 102, 103, 104, 105, 106]
-            } else {
-                vec![10, 104, 105, 106]
-            }
-        );
-        assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { hidden: 4, nested: true, .. })));
-    }
-}
-
-#[test]
-fn default_worktree_crews_keep_running_agents_and_respect_project_collapse() {
-    let mut sidebar = default_crew_sidebar(
-        &[
-            ChatStatus::Working { since_ms: 0 },
-            ChatStatus::Starting,
-            ChatStatus::Waiting,
-            ChatStatus::Retrying,
-            ChatStatus::Done,
-            ChatStatus::Done,
-        ],
-        None,
-    );
-    sidebar.collapsed_crews.insert(10);
-    let chats = std::mem::take(&mut sidebar.projects[0].chats);
-    let header = ProjectHeader {
-        name: "crew".into(),
-        path: "/w/crew".into(),
-        ..sidebar.projects[0].header.clone()
-    };
-    sidebar = sidebar.worktree(0, header, |_, _, _| {}, |_, _, _| {});
-    sidebar.projects[0].worktrees[0].chats = chats;
-    let rows = sidebar.rows();
-    let ids: Vec<_> = rows
-        .iter()
-        .filter_map(|r| match r {
-            ChatRow::Chat { chat, .. } => Some(chat.id),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(ids, [10, 100, 101, 102, 103]);
-    assert!(matches!(rows.last(), Some(ChatRow::CrewToggle { hidden: 2, nested: true, .. })));
-
-    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 7], Some(0));
-    sidebar.projects[0].header.collapsed = true;
-    let rows = sidebar.rows();
-    let ids: Vec<_> = rows
-        .iter()
-        .filter_map(|r| match r {
-            ChatRow::Chat { chat, .. } => Some(chat.id),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(ids, [100]);
-    assert!(!rows.iter().any(|r| matches!(r, ChatRow::CrewToggle { .. })));
 }
 
 struct CrewPreview {
@@ -325,30 +305,32 @@ fn crew_toggle_supports_click_and_keyboard_and_retains_state(cx: &mut gpui_kit::
         let window = cx.add_window(|_, _| CrewPreview { state: None, style });
         let preview = window.root(cx).unwrap();
         let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+        let state = |visual: &mut gpui_kit::VisualTestContext| {
+            visual.update(|window, cx| {
+                let _ = window.draw(cx);
+                preview.read(cx).state.as_ref().unwrap().clone()
+            })
+        };
+        let open = |visual: &mut gpui_kit::VisualTestContext| {
+            let state = state(visual);
+            visual.update(|_, cx| state.read(cx).crew_open.get(&10).copied())
+        };
+        state(&mut visual);
+        assert!(visual.debug_bounds("crew-more-10").is_none());
+        let chevron = visual.debug_bounds("crew-chevron-10").expect("lead chevron");
+        visual.simulate_click(chevron.center(), gpui_kit::Modifiers::default());
+        assert_eq!(open(&mut visual), Some(true));
+        let more = visual.debug_bounds("crew-more-10").expect("show all target");
+        visual.simulate_click(more.center(), gpui_kit::Modifiers::default());
+        let s = state(&mut visual);
         visual.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        let toggle = visual.debug_bounds("crew-toggle-10").expect("crew expansion row");
-        visual.simulate_click(toggle.center(), gpui_kit::Modifiers::default());
-        visual.update(|window, cx| {
-            let _ = window.draw(cx);
-            let state = preview.read(cx).state.as_ref().unwrap().clone();
-            assert!(state.read(cx).collapsed_crews.contains(&10));
-            let focus = state.read(cx).focus[&SharedString::from("crew-toggle:10")].clone();
-            focus.focus(window, cx);
+            assert!(s.read(cx).crew_all.contains(&10));
+            s.read(cx).focus[&SharedString::from("chat:10")].clone().focus(window, cx);
         });
         visual.simulate_keystrokes("left");
-        visual.update(|window, cx| {
-            let _ = window.draw(cx);
-            let state = preview.read(cx).state.as_ref().unwrap().clone();
-            assert!(state.read(cx).collapsed_crews.contains(&10));
-        });
+        assert_eq!(open(&mut visual), Some(false));
         visual.simulate_keystrokes("right");
-        visual.update(|window, cx| {
-            let _ = window.draw(cx);
-            let state = preview.read(cx).state.as_ref().unwrap().clone();
-            assert!(!state.read(cx).collapsed_crews.contains(&10));
-        });
+        assert_eq!(open(&mut visual), Some(true));
     }
 }
 

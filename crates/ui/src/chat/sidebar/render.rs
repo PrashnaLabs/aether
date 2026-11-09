@@ -135,7 +135,8 @@ impl RenderOnce for ChatSidebar {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state =
             window.use_keyed_state("chat-sidebar", cx, |window, _| SidebarState::new(window));
-        self.collapsed_crews = state.read(cx).collapsed_crews.clone();
+        self.crew_open = state.read(cx).crew_open.clone();
+        self.crew_all = state.read(cx).crew_all.clone();
         let rows = self.rows();
         let keys: Vec<SharedString> = rows.iter().map(ChatRow::key).collect();
         let focusable: Vec<bool> = rows.iter().map(ChatRow::focusable).collect();

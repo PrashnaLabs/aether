@@ -249,6 +249,7 @@ pub(super) fn render_chat(
     group: SharedString,
     rename: Option<Entity<InputState>>,
     style: SidebarStyle,
+    chevron: Option<AnyElement>,
     cx: &App,
 ) -> AnyElement {
     let muted = cx.theme().muted_foreground;
@@ -316,6 +317,7 @@ pub(super) fn render_chat(
                     .min_w_0()
                     .gap_1()
                     .items_center()
+                    .children(chevron)
                     .child(
                         div()
                             .id(("chat-lead", ix))

@@ -18,7 +18,6 @@ use aether_core::{Provider, SidebarStyle};
 
 mod chat_row;
 mod chrome;
-#[allow(dead_code)]
 mod crew;
 mod menu;
 mod project_row;
@@ -498,7 +497,8 @@ pub struct ChatSidebar {
     now: i64,
     watched: Vec<i64>,
     children: std::collections::HashMap<i64, u8>,
-    collapsed_crews: std::collections::HashSet<i64>,
+    crew_open: std::collections::HashMap<i64, bool>,
+    crew_all: std::collections::HashSet<i64>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
@@ -541,7 +541,8 @@ impl ChatSidebar {
             now: 0,
             watched: Vec::new(),
             children: std::collections::HashMap::new(),
-            collapsed_crews: std::collections::HashSet::new(),
+            crew_open: std::collections::HashMap::new(),
+            crew_all: std::collections::HashSet::new(),
             leads: Vec::new(),
             on_watch: None,
             handoff: None,
