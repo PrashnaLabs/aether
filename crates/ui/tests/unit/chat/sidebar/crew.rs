@@ -81,3 +81,13 @@ fn crews_over_five_start_collapsed() {
     assert!(!starts_collapsed(5));
     assert!(starts_collapsed(6));
 }
+
+#[test]
+fn preview_expanded_cap_picks_by_priority_then_newest() {
+    let mut v = vec![m(0, ChatStatus::Waiting, 0)];
+    v.extend((1..=3).map(|i| m(i, working(), i as i64)));
+    v.extend((4..=10).map(|i| m(i, ChatStatus::Done, i as i64)));
+    let p = preview(&v, true, false);
+    let shown: Vec<_> = (0..v.len()).filter(|&i| p.visible[i]).collect();
+    assert_eq!(shown, [0, 1, 2, 3, 9, 10]);
+}
