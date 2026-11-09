@@ -95,6 +95,29 @@ fn matches(query: &str, terms: &[SharedString]) -> bool {
 
 type Row = (Item, Option<PaletteCommand>);
 
+fn session_pane_actions(
+    host: WindowId,
+) -> Vec<(&'static str, crate::session_workspace::PaneAction)> {
+    use crate::session_workspace::PaneAction as A;
+    let window_move = if host == 0 {
+        ("Open in new window", A::Detach)
+    } else {
+        ("Move back to main window", A::Return)
+    };
+    vec![
+        ("Split session right", A::SplitRight),
+        ("Split session left", A::SplitLeft),
+        ("Split session down", A::SplitDown),
+        ("Split session up", A::SplitUp),
+        ("Float session pane", A::Float),
+        ("Dock session pane", A::Dock),
+        window_move,
+        ("Maximize / restore session pane", A::Maximize),
+        ("Make session the main pane", A::Promote),
+        ("Hide session pane", A::Close),
+    ]
+}
+
 impl ChatApp {
     pub(crate) fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette_open {
@@ -205,25 +228,15 @@ impl ChatApp {
 
         groups.push((
             "Session panes",
-            [
-                ("Split session right", crate::session_workspace::PaneAction::SplitRight),
-                ("Split session down", crate::session_workspace::PaneAction::SplitDown),
-                ("Float session pane", crate::session_workspace::PaneAction::Float),
-                ("Dock session pane", crate::session_workspace::PaneAction::Dock),
-                ("Move session to desktop window", crate::session_workspace::PaneAction::Detach),
-                ("Return session to main window", crate::session_workspace::PaneAction::Return),
-                ("Maximize / restore session pane", crate::session_workspace::PaneAction::Maximize),
-                ("Make session the main pane", crate::session_workspace::PaneAction::Promote),
-                ("Hide session pane", crate::session_workspace::PaneAction::Close),
-            ]
-            .into_iter()
-            .map(|(label, action)| {
-                (
-                    item(label).icon(IconName::PanelRight),
-                    Some(PaletteCommand::SessionLayout(action)),
-                )
-            })
-            .collect(),
+            session_pane_actions(host)
+                .into_iter()
+                .map(|(label, action)| {
+                    (
+                        item(label).icon(IconName::PanelRight),
+                        Some(PaletteCommand::SessionLayout(action)),
+                    )
+                })
+                .collect(),
         ));
         groups.push((
             "Layout",

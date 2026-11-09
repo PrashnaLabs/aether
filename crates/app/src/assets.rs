@@ -57,6 +57,7 @@ gpui_kit::assets::icon_assets!(
         CircleQuestionMark,
         PanelRight,
         PanelBottom,
+        PanelTop,
         PanelRightOpen,
         PanelRightClose,
         PictureInPicture2,

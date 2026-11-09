@@ -13,7 +13,7 @@ use super::{
     Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir,
 };
 use crate::board::model::{Col, card_lines, lead_move, lead_update};
-use crate::session_workspace::SplitAxis;
+use crate::session_workspace::DockSide;
 
 pub(crate) fn lead_capable(provider: Provider) -> bool {
     provider == Provider::OpenRouter || CLIS.contains(&provider)
@@ -766,11 +766,10 @@ impl ChatApp {
         if let Some(layout) = layout.filter(|_| model.pane_for(chat_id).is_none()) {
             let focused = layout.focused;
             let other = layout.panes().into_iter().find(|p| Some(*p) != focused);
-            let viewport = window.viewport_size();
-            let size = focused
-                .and_then(|p| self.workspace.bounds.get(&p).copied())
-                .unwrap_or([f32::from(viewport.width), f32::from(viewport.height) - 120.]);
-            if focused.is_some_and(|p| model.can_split(p, SplitAxis::Horizontal, size).is_ok()) {
+            let surface = self.workspace.surface_sizes.get(&0).copied();
+            let gap = self.settings.tile_gap.clamp(0., 24.);
+            if focused.is_some_and(|p| model.can_split_in(p, DockSide::Right, surface, gap).is_ok())
+            {
                 model.open(chat_id, 0);
             } else if let Some(pane) = other {
                 model.panes.insert(pane, chat_id);

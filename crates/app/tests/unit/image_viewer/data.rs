@@ -150,7 +150,12 @@ fn image_viewer_routes_local_images_and_escape_restores_focus_without_stopping(
     });
     let pane = visual.update(|window, cx| {
         app.update(cx, |app, cx| {
-            let pane = app.workspace.model.pane_for(app.chats[app.active].id).unwrap();
+            let id = app.chats[app.active].id;
+            let pane = app.workspace.model.pane_for(id).unwrap();
+            let mut other = crate::app::chat_with("other", &[]);
+            other.id = id + 1;
+            app.chats.push(other);
+            app.workspace.model.open(id + 1, 0);
             app.detach_session(pane, window, cx);
             pane
         })

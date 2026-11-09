@@ -437,6 +437,10 @@ fn detach_return_and_reuse_preserve_draft_across_windows(cx: &mut TestAppContext
                 });
                 let id = app.chats[app.active].id;
                 let pane = app.workspace.model.pane_for(id).unwrap();
+                let mut other = crate::app::chat_with("other", &[]);
+                other.id = id + 1;
+                app.chats.push(other);
+                app.workspace.model.open(id + 1, 0);
                 app.detach_session(pane, window, cx);
                 (id, pane)
             })

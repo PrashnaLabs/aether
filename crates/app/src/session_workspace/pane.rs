@@ -155,11 +155,10 @@ impl ChatApp {
                         })),
                 )
             });
-        let size = self.workspace.bounds.get(&pane).copied().unwrap_or([0., 0.]);
-        let can_split_right =
-            self.workspace.model.can_split(pane, SplitAxis::Horizontal, size).is_ok();
-        let can_split_down =
-            self.workspace.model.can_split(pane, SplitAxis::Vertical, size).is_ok();
+        let surface = self.workspace.surface_sizes.get(&host).copied();
+        let gap = self.settings.tile_gap.clamp(0., 24.);
+        let split_sides = [DockSide::Right, DockSide::Left, DockSide::Bottom, DockSide::Top]
+            .map(|side| (side, self.workspace.model.can_split_in(pane, side, surface, gap).err()));
         let context_app = app.clone();
         let chat_id = self.chats[self.active].id;
         let menu_session = view.clone();
@@ -237,20 +236,18 @@ impl ChatApp {
                 window,
                 cx,
                 move |mut menu, _, _| {
-                    for (label, icon, action, enabled) in [
-                        ("Right", Lucide::PanelRight, PaneAction::SplitRight, can_split_right),
-                        ("Down", Lucide::PanelBottom, PaneAction::SplitDown, can_split_down),
+                    for (label, icon, (side, reason)) in [
+                        ("Right", Lucide::PanelRight, split_sides[0]),
+                        ("Left", Lucide::PanelLeft, split_sides[1]),
+                        ("Down", Lucide::PanelBottom, split_sides[2]),
+                        ("Up", Lucide::PanelTop, split_sides[3]),
                     ] {
                         let app = split.clone();
-                        menu = menu.item(
-                            PopupMenuItem::new(label).icon(icon).disabled(!enabled).on_click(
-                                move |_, window, cx| {
-                                    app.update(cx, |app, cx| {
-                                        app.run_session_pane_action(pane, action, window, cx)
-                                    });
-                                },
-                            ),
-                        );
+                        menu = menu.item(split_menu_item(label, reason).icon(icon).on_click(
+                            move |_, window, cx| {
+                                app.update(cx, |app, cx| app.split_session(pane, side, window, cx));
+                            },
+                        ));
                     }
                     menu
                 },
@@ -301,13 +298,7 @@ impl ChatApp {
         let pane_header = show_pane_header.then(|| {
             let mut header = if host == 0 && !is_tabbed {
                 let layout = &self.workspace.model.windows[&host];
-                let leading = layout
-                    .maximized
-                    .or(layout.shown)
-                    .or_else(|| {
-                        layout.root.as_ref().and_then(|root| root.leaves().first().copied())
-                    })
-                    .or_else(|| layout.panes().first().copied());
+                let leading = super::render::leading_pane(layout);
                 let inset = leading == Some(pane) && self.settings.sidebar_collapsed;
                 let beside_rail = inset
                     && cfg!(target_os = "macos")
@@ -611,11 +602,10 @@ impl ChatApp {
             .map(|chat| (chat.id, chat.title.clone()))
             .collect();
         let menu_app = app.clone();
-        let size = self.workspace.bounds.get(&pane).copied().unwrap_or([0., 0.]);
-        let can_split_right =
-            self.workspace.model.can_split(pane, SplitAxis::Horizontal, size).is_ok();
-        let can_split_down =
-            self.workspace.model.can_split(pane, SplitAxis::Vertical, size).is_ok();
+        let surface = self.workspace.surface_sizes.get(&host).copied();
+        let gap = self.settings.tile_gap.clamp(0., 24.);
+        let split_sides = [DockSide::Right, DockSide::Left, DockSide::Bottom, DockSide::Top]
+            .map(|side| (side, self.workspace.model.can_split_in(pane, side, surface, gap).err()));
         let can_close =
             self.workspace.model.windows.get(&host).is_some_and(|layout| layout.panes().len() > 1);
         let maximized = self
@@ -634,9 +624,18 @@ impl ChatApp {
                 });
             }
             let max = menu_app.clone();
+            for (label, (side, reason)) in [
+                ("Split session right", split_sides[0]),
+                ("Split session left", split_sides[1]),
+                ("Split session down", split_sides[2]),
+                ("Split session up", split_sides[3]),
+            ] {
+                let app = menu_app.clone();
+                menu = menu.item(split_menu_item(label, reason).on_click(move |_, window, cx| {
+                    app.update(cx, |app, cx| app.split_session(pane, side, window, cx));
+                }));
+            }
             for (label, action, enabled) in [
-                ("Split session right", PaneAction::SplitRight, can_split_right),
-                ("Split session down", PaneAction::SplitDown, can_split_down),
                 (
                     if floating.is_some() { "Dock session" } else { "Float session" },
                     if floating.is_some() { PaneAction::Dock } else { PaneAction::Float },
@@ -1005,4 +1004,14 @@ impl ChatApp {
                 .into_any_element(),
         )
     }
+}
+
+fn split_menu_item(label: &'static str, blocked: Option<&'static str>) -> PopupMenuItem {
+    let Some(reason) = blocked else { return PopupMenuItem::new(label) };
+    PopupMenuItem::element(move |_, _| {
+        div().id(label).child(label).tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(reason).build(window, cx)
+        })
+    })
+    .disabled(true)
 }

@@ -245,3 +245,55 @@ fn monocle_focus_steps_through_tabs_without_floats() {
     assert_eq!(m.directional(0, Direction::Down, &none, true), None);
     assert_eq!(m.directional(0, Direction::Up, &none, true), Some(a));
 }
+
+#[test]
+fn split_in_unmeasured_surface_is_not_disabled() {
+    let m = {
+        let mut m = WorkspaceModel::default();
+        m.open(11, 0);
+        m
+    };
+    let a = m.pane_for(11).unwrap();
+    assert_eq!(m.can_split_in(a, DockSide::Right, None, 8.), Ok(()));
+    assert_eq!(m.can_split_in(a, DockSide::Right, Some([0., 0.]), 8.), Ok(()));
+    assert_eq!(m.can_split_in(a, DockSide::Right, Some([f32::NAN, 600.]), 8.), Ok(()));
+}
+
+#[test]
+fn split_in_checks_whole_tree_minimum_and_gap() {
+    let mut m = WorkspaceModel::default();
+    let a = m.open(11, 0);
+    assert_eq!(m.can_split_in(a, DockSide::Right, Some([644., 240.]), 0.), Ok(()));
+    assert!(m.can_split_in(a, DockSide::Right, Some([644., 240.]), 8.).is_err());
+    assert_eq!(m.can_split_in(a, DockSide::Right, Some([652., 240.]), 8.), Ok(()));
+    assert_eq!(m.can_split_in(a, DockSide::Bottom, Some([320., 484.]), 0.), Ok(()));
+    assert!(m.can_split_in(a, DockSide::Bottom, Some([320., 483.]), 0.).is_err());
+    let b = m.split_in(a, 22, DockSide::Right, Some([1000., 600.]), 0.).unwrap();
+    assert!(m.can_split_in(b, DockSide::Right, Some([800., 700.]), 0.).is_err());
+    assert_eq!(m.can_split_in(b, DockSide::Right, Some([968., 700.]), 0.), Ok(()));
+}
+
+#[test]
+fn failed_split_in_leaves_model_untouched() {
+    let mut m = WorkspaceModel::default();
+    let a = m.open(11, 0);
+    assert!(m.split_in(a, 22, DockSide::Left, Some([100., 100.]), 0.).is_err());
+    assert_eq!(m.panes.len(), 1);
+    assert_eq!(m.windows[&0].root.as_ref().unwrap().leaves(), vec![a]);
+    assert!(m.split_in(a, 11, DockSide::Left, None, 0.).is_err());
+    assert_eq!(m.panes.len(), 1);
+}
+
+#[test]
+fn split_in_left_and_up_place_new_pane_first() {
+    let mut m = WorkspaceModel::default();
+    let a = m.open(11, 0);
+    let b = m.split_in(a, 22, DockSide::Left, None, 0.).unwrap();
+    assert_eq!(m.windows[&0].root.as_ref().unwrap().leaves(), vec![b, a]);
+    let c = m.split_in(a, 33, DockSide::Top, None, 0.).unwrap();
+    assert_eq!(m.windows[&0].root.as_ref().unwrap().leaves(), vec![b, c, a]);
+    let Some(DockNode::Split { second, .. }) = &m.windows[&0].root else { panic!() };
+    let DockNode::Split { axis, .. } = &**second else { panic!() };
+    assert_eq!(*axis, SplitAxis::Vertical);
+    assert_eq!(m.windows[&0].focused, Some(c));
+}
