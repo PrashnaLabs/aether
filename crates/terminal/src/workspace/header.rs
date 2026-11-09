@@ -17,7 +17,11 @@ use crate::{
 use super::{RenameTarget, TerminalWorkspace, WORKSPACE_HEADER_HEIGHT};
 
 impl TerminalWorkspace {
-    pub(super) fn render_header(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+    pub(super) fn render_header(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let workspace_view = cx.entity();
         let active_group_id = self.model.active_group_id();
@@ -264,5 +268,6 @@ impl TerminalWorkspace {
                 .tooltip_with_action("Hide terminal", &ToggleTerminal, None)
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(TerminalEvent::Hide))),
         )
+        .when(self.window_top, |bar| bar.action(aether_ui::window_controls_gap(window)))
     }
 }

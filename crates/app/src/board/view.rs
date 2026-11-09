@@ -78,15 +78,24 @@ impl ChatApp {
         badge(status, since, now).map(|text| pill(text, bg, fg).into_any_element())
     }
 
-    pub(crate) fn render_board(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        self.board_view(None, cx)
+    pub(crate) fn render_board(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.board_view(None, Some(aether_ui::window_controls_gap(window)), cx)
     }
 
     pub(crate) fn render_board_tab(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        self.board_view(self.chat_project(self.active), cx)
+        self.board_view(self.chat_project(self.active), None, cx)
     }
 
-    fn board_view(&mut self, project: Option<PathBuf>, cx: &mut Context<Self>) -> AnyElement {
+    fn board_view(
+        &mut self,
+        project: Option<PathBuf>,
+        controls_gap: Option<gpui_kit::Div>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let now = now_ms();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -219,7 +228,8 @@ impl ChatApp {
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.board_new_card(Col::Todo, window, cx)
                     })),
-            );
+            )
+            .children(controls_gap);
         let all: Vec<i64> = visible.iter().map(|c| c.id).collect();
         let bulk = self.board_bulk_bar(all, cx);
         let empty = visible.is_empty();

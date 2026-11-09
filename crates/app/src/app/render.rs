@@ -130,20 +130,56 @@ impl Render for ChatApp {
         let is_agent = self.is_agent_chat(&self.chats[self.active]);
         let drawer = is_agent.then(|| self.terminal_drawer(window, cx)).flatten();
         let terminal_maximized = is_agent && self.is_terminal_drawer_maximized(cx);
+        if let Some(drawer) = self.terminals.get(&self.chats[self.active].id) {
+            drawer.view.update(cx, |t, cx| {
+                if t.window_top != terminal_maximized {
+                    t.window_top = terminal_maximized;
+                    cx.notify();
+                }
+            });
+        }
         let fullscreen = self.fullscreen_terminal(window, cx);
         let chromeless = fullscreen.is_some();
         let sidebar_layout =
             crate::side_panel::chat_body_in_sidebar(self.settings.chat_layout, self.side_open());
         let (agent, body) =
             if full || sidebar_layout { (Some(body), None) } else { (None, Some(body)) };
+        let hoisted = full.then(|| self.hoisted_session_tabs(cx)).flatten();
+        let desktop = cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows"))
+            && !chromeless
+            && !window.is_fullscreen();
+        self.tab_bar_controls = desktop
+            && is_agent
+            && !terminal_maximized
+            && hoisted.is_none()
+            && self.side_open()
+            && !(self.settings.chat_layout == aether_core::ChatLayout::Sidebar
+                && self.settings.right_panel_collapsed);
         let side =
             (is_agent && !terminal_maximized).then(|| self.side_panel(agent, window, cx)).flatten();
-        let side = match (side, full.then(|| self.hoisted_session_tabs(cx)).flatten()) {
-            (Some(side), Some(tabs)) => Some(
-                v_flex().flex_1().min_w_0().h_full().child(tabs).child(side).into_any_element(),
-            ),
+        let mut hosted = self.tab_bar_controls;
+        let side = match (side, hoisted) {
+            (Some(side), Some(tabs)) => {
+                let tabs = if desktop {
+                    hosted = true;
+                    self.window_bar(tabs, 32., true, false, cx)
+                } else {
+                    tabs
+                };
+                Some(
+                    v_flex().flex_1().min_w_0().h_full().child(tabs).child(side).into_any_element(),
+                )
+            }
             (side, _) => side,
         };
+        let header = header.map(|header| {
+            if desktop && side.is_none() && body.is_some() && !terminal_maximized {
+                hosted = true;
+                self.window_bar(header, 40., true, false, cx)
+            } else {
+                header
+            }
+        });
         let palette = self.palette_open.then(|| self.render_palette(0, cx));
         let quick_open = (is_agent || self.page == Page::Notes)
             .then(|| self.render_quick_open_overlay(window, cx))
@@ -278,11 +314,9 @@ impl Render for ChatApp {
                             .min_w_0()
                             .min_h_0()
                             .when(
-                                cfg!(any(
-                                    target_os = "macos",
-                                    target_os = "linux",
-                                    target_os = "windows"
-                                )) && self.settings.sidebar_collapsed
+                                cfg!(target_os = "macos")
+                                    && self.settings.sidebar_collapsed
+                                    && !hosted
                                     && !chromeless
                                     && !window.is_fullscreen(),
                                 |main| {
@@ -344,6 +378,17 @@ impl Render for ChatApp {
                             }),
                     ),
             )
+            .when(desktop && !hosted, |root| {
+                root.child(
+                    div().absolute().top_0().right_0().child(
+                        gpui_kit::component::TitleBar::new()
+                            .h(gpui_kit::px(36.))
+                            .pl_0()
+                            .bg(gpui_kit::transparent_black())
+                            .border_0(),
+                    ),
+                )
+            })
             .child(self.render_global_status_bar(&view_handle, window, cx))
             .children(self.render_watch(window, cx))
             .children(palette)

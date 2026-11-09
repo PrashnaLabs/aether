@@ -639,7 +639,32 @@ impl ChatApp {
             bar = bar.action(controls);
         }
 
-        bar
+        bar.border_bottom(!self.hosts_controls(window) || self.btw_open)
+    }
+
+    /// Wraps the window's top-right bar so it drags the window and ends in the window controls.
+    pub(crate) fn window_bar(
+        &self,
+        bar: AnyElement,
+        height: f32,
+        leftmost: bool,
+        border: bool,
+        cx: &App,
+    ) -> AnyElement {
+        let inset = cfg!(target_os = "macos") && leftmost && self.settings.sidebar_collapsed;
+        gpui_kit::component::TitleBar::new()
+            .h(px(height))
+            .pl(px(if inset { 80. } else { 0. }))
+            .bg(gpui_kit::transparent_black())
+            .border_0()
+            .when(border, |bar| bar.border_b_1().border_color(cx.theme().sidebar_border))
+            .child(bar)
+            .into_any_element()
+    }
+
+    /// The main window's controls ride this window's bars rather than a title bar row.
+    fn hosts_controls(&self, window: &Window) -> bool {
+        self.tab_bar_controls && self.host_of(window) == 0
     }
 
     fn side_terminal_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -720,7 +745,7 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match surface {
-            Surface::Btw => self.render_btw_panel(cx),
+            Surface::Btw => self.render_btw_panel(false, cx),
             Surface::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
@@ -863,10 +888,22 @@ impl ChatApp {
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_right_panel(cx))),
             );
         }
+        if self.hosts_controls(window) {
+            return self.window_bar(
+                bar.border_bottom(false).into_any_element(),
+                38.,
+                false,
+                true,
+                cx,
+            );
+        }
         bar.into_any_element()
     }
 
-    fn right_panel_rail(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn right_panel_rail(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let under_controls = self.host_of(window) == 0
+            && cfg!(any(target_os = "linux", target_os = "windows"))
+            && !window.is_fullscreen();
         let mut rail = v_flex()
             .id("right-panel-rail")
             .w(px(32.))
@@ -874,6 +911,7 @@ impl ChatApp {
             .flex_none()
             .items_center()
             .py_1()
+            .when(under_controls, |rail| rail.pt(px(40.)))
             .gap_1()
             .border_l_1()
             .border_color(cx.theme().sidebar_border);
@@ -957,7 +995,7 @@ impl ChatApp {
         let center = center.into_any_element();
         let panel = if collapsed {
             self.browser.update(cx, |browser, _| browser.set_shown(false));
-            self.right_panel_rail(cx)
+            self.right_panel_rail(window, cx)
         } else {
             let active = surface.unwrap_or(Surface::Terminal);
             let content = self.right_panel_surface_content(active, window, cx);
@@ -1076,7 +1114,13 @@ impl ChatApp {
             }
             SideTab::Board => self.render_board_tab(cx),
         };
-        let bar = self.side_tab_bar(window, cx);
+        let bar = self.side_tab_bar(window, cx).into_any_element();
+        let controls = self.hosts_controls(window);
+        let bar = if controls && !self.btw_open {
+            self.window_bar(bar, 38., true, true, cx)
+        } else {
+            bar
+        };
         let workspace = v_flex()
             .id("chat-tabs")
             .flex_1()
@@ -1122,7 +1166,7 @@ impl ChatApp {
                         cx.new(|_| RightPanelResize)
                     }),
                 )
-                .child(self.render_btw_panel(cx))
+                .child(self.render_btw_panel(controls, cx))
                 .into_any_element();
             Some(
                 h_flex()

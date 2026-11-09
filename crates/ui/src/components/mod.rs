@@ -31,7 +31,7 @@ pub use file_icon::{file_icon, file_icon_color};
 pub use glow_card::GlowCard;
 pub use provider_icon::{provider_icon, provider_icon_path};
 pub use segmented::Segmented;
-pub use tabs::{InlineRename, Tab, TabBar};
+pub use tabs::{InlineRename, Tab, TabBar, window_controls_gap};
 pub use workspace_select::{
     WorkspaceSelect, WorkspaceSelectEvent, WorkspaceSelectState, WorkspaceSelection, WorktreeRow,
 };

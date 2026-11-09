@@ -57,6 +57,8 @@ pub struct TerminalWorkspace {
     pub open: bool,
     pub shown: bool,
     pub full_page: bool,
+    /// Header sits at the window's top edge, under the floating window controls.
+    pub window_top: bool,
     pub watched: Option<bool>,
     pub(crate) option_as_meta: bool,
     pub(crate) font_family: SharedString,
@@ -100,6 +102,7 @@ impl TerminalWorkspace {
             open: false,
             shown: false,
             full_page: false,
+            window_top: false,
             watched: None,
             option_as_meta: false,
             font_family: "".into(),
@@ -636,7 +639,7 @@ impl TerminalWorkspace {
 }
 
 impl Render for TerminalWorkspace {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.shown = true;
         let palette = self.palette();
 
@@ -687,7 +690,7 @@ impl Render for TerminalWorkspace {
             }))
             .capture_any_mouse_up(cx.listener(|this, _, _, cx| this.mouse_up(cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.mouse_up(cx)))
-            .child(self.render_header(cx))
+            .child(self.render_header(window, cx))
             .child(
                 h_flex()
                     .flex_1()

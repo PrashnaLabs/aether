@@ -607,6 +607,7 @@ impl ChatApp {
             quotes: HashMap::new(),
             btw: HashMap::new(),
             btw_open: false,
+            tab_bar_controls: false,
             btw_input,
             file_selection_bar: None,
             selection_bar: None,

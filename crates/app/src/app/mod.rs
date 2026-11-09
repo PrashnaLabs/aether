@@ -617,6 +617,8 @@ pub(crate) struct ChatApp {
     pub(crate) btw: HashMap<i64, chat::BtwThread>,
     /// Whether the BTW panel shows (right sidebar in Tabbed, a tab otherwise).
     pub(crate) btw_open: bool,
+    /// Window controls ride the main window's top-right tab bar instead of a title bar row.
+    pub(crate) tab_bar_controls: bool,
     pub(crate) btw_input: Entity<TextareaState>,
     /// Chat, window point and text of the reply selection the toolbar acts on.
     pub(crate) file_selection_bar: Option<(gpui_kit::Point<gpui_kit::Pixels>, std::path::PathBuf)>,

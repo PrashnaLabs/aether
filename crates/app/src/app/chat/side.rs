@@ -263,7 +263,7 @@ impl ChatApp {
     }
 
     /// The BTW panel: thread turns above a follow-up input.
-    pub(crate) fn render_btw_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_btw_panel(&self, controls: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = self.chats[self.active].id;
         let thread = self.btw.get(&id);
         let turns = thread.map_or(&[][..], |t| t.turns.as_slice());
@@ -309,46 +309,48 @@ impl ChatApp {
             .min_h_0()
             .h_full()
             .when(self.settings.chat_layout == aether_core::ChatLayout::Tabbed, |panel| {
-                panel.child(
-                    h_flex()
-                        .id("btw-title-bar")
-                        .debug_selector(|| "btw-title-bar".into())
-                        .flex_none()
-                        .h(px(38.))
-                        .px_2()
-                        .justify_between()
-                        .items_center()
-                        .gap_2()
-                        .border_b_1()
-                        .border_color(cx.theme().sidebar_border)
-                        .text_sm()
-                        .child(
-                            aether_ui::button("btw-menu")
-                                .ghost()
-                                .xsmall()
-                                .icon(Lucide::MessageCircle)
-                                .label("By the way")
-                                .dropdown_caret(true)
-                                .accessibility_label("By the way options")
-                                .tooltip("Thread options")
-                                .dropdown_menu({
-                                    let app = cx.entity();
-                                    move |menu, _, _| {
-                                        let app = app.clone();
-                                        menu.item(
-                                            PopupMenuItem::new("Clear thread")
-                                                .icon(Lucide::Trash)
-                                                .on_click(move |_, _, cx| {
-                                                    app.update(cx, |this, cx| {
-                                                        this.drop_btw(id);
-                                                        cx.notify();
-                                                    });
-                                                }),
-                                        )
-                                    }
-                                }),
-                        ),
-                )
+                let bar = h_flex()
+                    .id("btw-title-bar")
+                    .debug_selector(|| "btw-title-bar".into())
+                    .flex_none()
+                    .h(px(38.))
+                    .px_2()
+                    .justify_between()
+                    .items_center()
+                    .gap_2()
+                    .when(!controls, |bar| bar.border_b_1().border_color(cx.theme().sidebar_border))
+                    .text_sm()
+                    .child(
+                        aether_ui::button("btw-menu")
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide::MessageCircle)
+                            .label("By the way")
+                            .dropdown_caret(true)
+                            .accessibility_label("By the way options")
+                            .tooltip("Thread options")
+                            .dropdown_menu({
+                                let app = cx.entity();
+                                move |menu, _, _| {
+                                    let app = app.clone();
+                                    menu.item(
+                                        PopupMenuItem::new("Clear thread")
+                                            .icon(Lucide::Trash)
+                                            .on_click(move |_, _, cx| {
+                                                app.update(cx, |this, cx| {
+                                                    this.drop_btw(id);
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    )
+                                }
+                            }),
+                    );
+                panel.child(if controls {
+                    self.window_bar(bar.into_any_element(), 38., false, true, cx)
+                } else {
+                    bar.into_any_element()
+                })
             })
             .child(
                 div()

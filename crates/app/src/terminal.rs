@@ -619,6 +619,7 @@ impl ChatApp {
         let terminal_theme = self.settings.terminal_theme;
         view.update(cx, |t, cx| {
             t.open = true;
+            t.window_top = true;
             t.sync_settings(
                 folder,
                 option_as_meta,

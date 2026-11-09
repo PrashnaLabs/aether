@@ -141,7 +141,10 @@ impl ChatApp {
                         .height(px(40.))
                         .bg(sidebar_bg)
                         .border_color(border)
-                        .info(div().text_xs().text_color(muted).child("No open files")),
+                        .info(div().text_xs().text_color(muted).child("No open files"))
+                        .when(self.page == crate::app::Page::Notes, |bar| {
+                            bar.action(aether_ui::window_controls_gap(window))
+                        }),
                 )
                 .child(
                     v_flex()
@@ -437,7 +440,9 @@ impl ChatApp {
                         ),
                 )
             }))
-            .child(tab_bar)
+            .child(tab_bar.when(self.page == crate::app::Page::Notes, |bar| {
+                bar.action(aether_ui::window_controls_gap(window))
+            }))
             .when_some(conflict, |el, conflict| el.child(self.render_disk_banner(conflict, cx)))
             .child(if preview {
                 let text =
