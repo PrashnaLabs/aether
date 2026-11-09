@@ -67,6 +67,12 @@ fn drag_area(window: &mut Window, cx: &mut App) -> Stateful<Div> {
         })
 }
 
+/// Drag room at the start of a window-top bar for the macOS traffic lights.
+pub fn traffic_lights_gap(inset: bool, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+    let room = inset && cfg!(target_os = "macos") && !window.is_fullscreen();
+    drag_area(window, cx).h_full().w(px(if room { 72. } else { 0. }))
+}
+
 impl ChatSidebar {
     fn header_row(&mut self, cx: &App) -> AnyElement {
         h_flex()

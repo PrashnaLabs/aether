@@ -86,6 +86,13 @@ Aether prompts to register it when a lead first starts.
 back to the lead automatically; leads should not poll `read_agent` for
 completion.
 
+`message_agent` also reaches chats that aren't the lead's children (not
+the lead itself, not archived). Their answers don't come back on their own;
+read them with `read_history` and the chat's `id`, which leads can pass to
+read any chat. A negative `offset` counts back from the end, so `-3` reads
+the last three messages. `list_chats` and the other chat filters take
+`search`, words that must all appear in the title.
+
 ## Linux troubleshooting
 
 If orchestration does not work on Linux, check in this order:

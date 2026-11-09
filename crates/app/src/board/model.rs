@@ -155,6 +155,70 @@ pub(crate) fn lead_move(card: &mut BoardCard, to: &str) -> Result<String, String
     Ok(format!("Moved #{} {} -> {}: {}", card.id, from.key(), col.key(), card.title))
 }
 
+/// Applies an update_card call; checks every field before changing any.
+pub(crate) fn lead_update(
+    card: &mut BoardCard,
+    args: &serde_json::Value,
+) -> Result<String, String> {
+    let text = |k: &str| args[k].as_str().map(str::trim);
+    let title = text("title");
+    if title == Some("") {
+        return Err("title can't be empty".into());
+    }
+    let col = match text("col").filter(|s| !s.is_empty()) {
+        None => None,
+        Some(s) => match Col::parse(s) {
+            Some(Col::Done) => return Err("only a human can move a card to done".into()),
+            Some(c) => Some(c),
+            None => {
+                return Err(format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#));
+            }
+        },
+    };
+    let (body, append) = (text("body"), text("append").filter(|s| !s.is_empty()));
+    let chat = args["chat"].as_i64();
+    if title.is_none()
+        && col.is_none()
+        && body.is_none()
+        && append.is_none()
+        && chat.is_none()
+        && args["before"].is_null()
+    {
+        return Err("nothing to change; pass title, body, append, col, before or chat".into());
+    }
+    let mut changed = Vec::new();
+    if let Some(t) = title {
+        card.title = t.to_string();
+        changed.push("title");
+    }
+    if let Some(b) = body {
+        card.body = b.to_string();
+        changed.push("description");
+    }
+    if let Some(a) = append {
+        card.body = if card.body.trim().is_empty() {
+            a.to_string()
+        } else {
+            format!("{}\n\n{a}", card.body.trim_end())
+        };
+        if !changed.contains(&"description") {
+            changed.push("description");
+        }
+    }
+    if let Some(c) = col {
+        card.col = c;
+        changed.push("column");
+    }
+    if !args["before"].is_null() {
+        changed.push("position");
+    }
+    if let Some(id) = chat {
+        card.chat = Some(id);
+        changed.push("chat");
+    }
+    Ok(format!("Updated #{} {} ({}): {}", card.id, card.col.key(), changed.join(", "), card.title))
+}
+
 fn sorted(cards: &[BoardCard], col: Col, skip: i64) -> Vec<&BoardCard> {
     let mut v: Vec<_> = cards.iter().filter(|c| c.col == col && c.id != skip).collect();
     v.sort_by(|a, b| a.position.total_cmp(&b.position));
@@ -172,14 +236,29 @@ pub(crate) fn slot(cards: &[BoardCard], moved: i64, col: Col, before: Option<i64
     }
 }
 
-pub(crate) fn open_lines(cards: &[BoardCard]) -> String {
+/// One line per card in column order; cards outside `home` name their project folder.
+pub(crate) fn card_lines(cards: &[BoardCard], bodies: bool, home: &str) -> String {
     let lines: Vec<String> = Col::ALL
         .into_iter()
-        .filter(|&c| c != Col::Done)
         .flat_map(|c| sorted(cards, c, -1))
-        .map(list_line)
+        .map(|card| {
+            let mut s = list_line(card);
+            if card.project != home {
+                let dir = std::path::Path::new(&card.project);
+                let name =
+                    dir.file_name().map_or(card.project.clone(), |n| n.to_string_lossy().into());
+                s.push_str(&format!(" [project {name}]"));
+            }
+            if bodies {
+                for line in card.body.trim().lines() {
+                    s.push_str("\n    ");
+                    s.push_str(line);
+                }
+            }
+            s
+        })
         .collect();
-    if lines.is_empty() { "No open cards.".into() } else { lines.join("\n") }
+    if lines.is_empty() { "No matching cards.".into() } else { lines.join("\n") }
 }
 
 /// Every search word is in the title or body (any case), and the author matches `by`.
@@ -340,13 +419,58 @@ mod tests {
 
     #[test]
     fn open_lines_order() {
-        assert_eq!(open_lines(&[]), "No open cards.");
+        assert_eq!(card_lines(&[], false, "p"), "No matching cards.");
         let mut a = card(Col::Doing, None);
         a.id = 1;
         let mut b = card(Col::Todo, Some(5));
         b.id = 2;
         let mut d = card(Col::Done, None);
         d.id = 3;
-        assert_eq!(open_lines(&[a, b, d]), "#2 [todo] Fix parser (agent 5)\n#1 [doing] Fix parser");
+        assert_eq!(
+            card_lines(&[a, b, d.clone()], false, "p"),
+            "#2 [todo] Fix parser (agent 5)\n#1 [doing] Fix parser\n#3 [done] Fix parser"
+        );
+        d.project = "/w/other".into();
+        assert_eq!(card_lines(&[d], false, "p"), "#3 [done] Fix parser [project other]");
+        let mut e = card(Col::Todo, None);
+        e.body = "step one\nstep two\n".into();
+        assert_eq!(card_lines(&[e], true, "p"), "#7 [todo] Fix parser\n    step one\n    step two");
+    }
+
+    #[test]
+    fn lead_update_rules() {
+        use serde_json::json;
+        let mut c = card(Col::Todo, None);
+        assert_eq!(
+            lead_update(&mut c, &json!({"body": "Use a Pratt parser"})),
+            Ok("Updated #7 todo (description): Fix parser".into())
+        );
+        assert_eq!(c.body, "Use a Pratt parser");
+        lead_update(&mut c, &json!({"append": "Blocked on lexer"})).unwrap();
+        assert_eq!(c.body, "Use a Pratt parser\n\nBlocked on lexer");
+        assert_eq!(
+            lead_update(&mut c, &json!({"title": "Rewrite parser", "col": "doing", "body": ""})),
+            Ok("Updated #7 doing (title, description, column): Rewrite parser".into())
+        );
+        assert_eq!(c.body, "");
+        let before = c.clone();
+        assert_eq!(
+            lead_update(&mut c, &json!({"title": "X", "col": "done"})),
+            Err("only a human can move a card to done".into())
+        );
+        assert_eq!(lead_update(&mut c, &json!({"title": " "})), Err("title can't be empty".into()));
+        assert_eq!(
+            lead_update(&mut c, &json!({})),
+            Err("nothing to change; pass title, body, append, col, before or chat".into())
+        );
+        assert_eq!(
+            (c.title.as_str(), c.col, c.body.as_str()),
+            (before.title.as_str(), before.col, "")
+        );
+        assert_eq!(
+            lead_update(&mut c, &json!({"chat": 42, "before": 3})),
+            Ok("Updated #7 doing (position, chat): Rewrite parser".into())
+        );
+        assert_eq!(c.chat, Some(42));
     }
 }

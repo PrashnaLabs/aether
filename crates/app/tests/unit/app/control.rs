@@ -107,6 +107,8 @@ fn list_defaults_to_the_leads_project(cx: &mut TestAppContext) {
             assert_eq!(ids(&list(json!({"filter": {"older_than": "1h"}}))), [10, 20, 21, 23]);
             assert_eq!(ids(&list(json!({"filter": {"state": "running"}}))), [23]);
             assert_eq!(ids(&list(json!({"filter": {"ids": [22]}}))), [22]);
+            assert_eq!(ids(&list(json!({"filter": {"search": "OLD"}}))), [20]);
+            assert_eq!(ids(&list(json!({"filter": {"search": "el wh", "project": "all"}}))), [22]);
             let row = &list(json!({"filter": {"ids": [23]}}))["chats"][0];
             assert_eq!(
                 (row["project"].as_str(), row["state"].as_str()),
@@ -277,6 +279,16 @@ fn read_history_pages_this_chats_messages_with_tools(cx: &mut TestAppContext) {
             let first = app.read_history(1, &json!({"limit": 1, "max_chars": 1})).unwrap();
             assert_eq!(first["next_offset"], 1);
             assert_eq!(first["messages"][0]["text"], "q");
+            let last = app.read_history(1, &json!({"offset": -1})).unwrap();
+            assert_eq!(last["messages"][0]["n"], 1);
+            let all = app.read_history(1, &json!({"offset": -50})).unwrap();
+            assert_eq!(all["messages"].as_array().unwrap().len(), 2);
+            let other = app.read_history(0, &json!({"id": 22, "offset": -1})).unwrap();
+            assert_eq!(other["messages"][0]["text"], "a");
+            assert_eq!(
+                app.read_history(1, &json!({"id": 22})),
+                Err("only a lead can read another chat's history".into())
+            );
         })
         .unwrap();
 }
@@ -306,7 +318,7 @@ fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
             };
             assert_eq!(
                 names(call("20", "list_tools").unwrap()),
-                ["list_cards", "add_card", "move_card", "read_history"]
+                ["list_cards", "add_card", "move_card", "update_card", "read_history"]
             );
             assert!(names(call("10", "list_tools").unwrap()).len() > 1);
             assert!(call("20", "read_history").is_ok());

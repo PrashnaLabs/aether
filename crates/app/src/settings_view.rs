@@ -1,8 +1,8 @@
 use crate::settings_search::{SettingItem, search_settings, tab_match_count};
 use aether_core::{
-    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor, Reasoning,
-    Settings, THEME_FAMILIES, TerminalCursor, TerminalTheme, ThemeFamily, TileLayout, TimeFormat,
-    ToolPolicy, WatchCorner, family_index,
+    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor,
+    NotifyDelivery, NotifySound, Reasoning, Settings, THEME_FAMILIES, TerminalCursor,
+    TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, WatchCorner, family_index,
 };
 use aether_driver::{DriverStartOptions, ProviderProbe};
 use aether_git::Listed;
@@ -81,14 +81,18 @@ fn next_settings_tab(current: SettingsTab, next: bool) -> SettingsTab {
 }
 
 impl ChatApp {
-    pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn render_settings(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         use crate::actions::{SettingsDismiss, SettingsSearch};
         let query = self.settings_search_input.read(cx).value();
         let searching = !query.trim().is_empty();
         let matches = if searching { search_settings(&query) } else { Vec::new() };
         let mut page =
             SettingsPage::new(if searching { "Search Results" } else { self.settings_tab.label() })
-                .sidebar(self.render_settings_sidebar(&matches, searching, cx))
+                .sidebar(self.render_settings_sidebar(&matches, searching, window, cx))
                 .subtitle(if searching {
                     format!("{} matches for \"{}\"", matches.len(), query)
                 } else {
@@ -460,13 +464,42 @@ impl ChatApp {
                                     "Notify when a chat finishes, fails or needs you while you're looking elsewhere.",
                                 )
                                 .control(
-                                    Switch::new("notifications-setting")
-                                        .checked(settings.notifications)
-                                        .accessibility_label("Desktop notifications")
-                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                            let checked = *checked;
-                                            this.update_settings(cx, |s| s.notifications = checked);
-                                        })),
+                                    settings_dropdown(
+                                        "notifications-setting", "Notifications",
+                                        match (settings.notifications, settings.notify_delivery) {
+                                            (false, _) => 0,
+                                            (true, NotifyDelivery::Toast) => 1,
+                                            (true, NotifyDelivery::Os) => 2,
+                                        },
+                                        ["Off", "In-app toast", "System notification"],
+                                        cx.listener(|this, ix: &usize, _, cx| {
+                                            let ix = *ix;
+                                            this.update_settings(cx, |s| {
+                                                s.notifications = ix != 0;
+                                                s.notify_delivery =
+                                                    if ix == 1 { NotifyDelivery::Toast } else { NotifyDelivery::Os };
+                                            });
+                                        }),
+                                        cx,
+                                    ),
+                                ))) })
+                        .when(show("notifications"), |section| { section.child(div().id("notify-sound").child(SettingsRow::new("Notification sound")
+                                .description("Play a sound when a chat finishes, or when it needs you.")
+                                .control(
+                                    settings_dropdown(
+                                        "notify-sound-setting", "Notification sound",
+                                        match settings.notify_sound {
+                                            NotifySound::None => 0,
+                                            NotifySound::Done => 1,
+                                            NotifySound::Request => 2,
+                                        },
+                                        ["None", "When done", "When it needs me"],
+                                        cx.listener(|this, ix: &usize, _, cx| {
+                                            let sound = [NotifySound::None, NotifySound::Done, NotifySound::Request][*ix];
+                                            this.update_settings(cx, |s| s.notify_sound = sound);
+                                        }),
+                                        cx,
+                                    ),
                                 ))) })
                         .when(show("watch-enabled"), |section| { section.child(div().id("watch-enabled").debug_selector(|| "watch-enabled".into()).child(SettingsRow::new("Watch list")
                                 .description("Shows the corner button, its shortcut, and Watch in session and terminal menus.")
@@ -1852,6 +1885,7 @@ impl ChatApp {
         &self,
         matches: &[&SettingItem],
         searching: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         use crate::actions::{SettingsNext, SettingsPrevious};
@@ -1952,6 +1986,12 @@ impl ChatApp {
             .min_h_0()
             .overflow_y_scroll()
             .p_4()
+            .when(
+                cfg!(target_os = "macos")
+                    && self.settings.sidebar_collapsed
+                    && !window.is_fullscreen(),
+                |el| el.pt(px(40.)),
+            )
             .gap_5()
             .border_r_1()
             .border_color(cx.theme().border)

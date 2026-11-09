@@ -971,6 +971,7 @@ impl ChatApp {
                 .flex_none()
                 .items_center()
                 .py_1()
+                .when(cfg!(target_os = "macos") && !window.is_fullscreen(), |rail| rail.pt(px(36.)))
                 .child(
                     aether_ui::button("expand-sidebar")
                         .ghost()

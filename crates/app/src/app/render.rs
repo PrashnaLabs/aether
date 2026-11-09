@@ -82,7 +82,7 @@ impl Render for ChatApp {
             None
         };
         let body = if self.page == Page::Settings {
-            self.render_settings(cx).into_any_element()
+            self.render_settings(window, cx).into_any_element()
         } else if self.page == Page::Notes {
             self.render_notes(window, cx)
         } else if self.page == Page::Skills {
@@ -132,9 +132,14 @@ impl Render for ChatApp {
         let terminal_maximized = is_agent && self.is_terminal_drawer_maximized(cx);
         if let Some(drawer) = self.terminals.get(&self.chats[self.active].id) {
             let hideable = self.settings.chat_layout == aether_core::ChatLayout::Tabbed;
+            let collapsed = self.settings.sidebar_collapsed;
             drawer.view.update(cx, |t, cx| {
-                if t.window_top != terminal_maximized || t.hideable != hideable {
+                if t.window_top != terminal_maximized
+                    || t.hideable != hideable
+                    || t.lights != collapsed
+                {
                     t.window_top = terminal_maximized;
+                    t.lights = collapsed;
                     t.hideable = hideable;
                     cx.notify();
                 }
@@ -309,76 +314,52 @@ impl Render for ChatApp {
                     .when(!self.settings.sidebar_collapsed && !chromeless, |root| {
                         root.child(self.render_sidebar(cx))
                     })
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .h_full()
-                            .min_w_0()
-                            .min_h_0()
-                            .when(
-                                cfg!(target_os = "macos")
-                                    && self.settings.sidebar_collapsed
-                                    && !hosted
-                                    && !chromeless
-                                    && !window.is_fullscreen(),
-                                |main| {
-                                    main.child(
-                                        gpui_kit::component::TitleBar::new()
-                                            .h(gpui_kit::px(36.))
-                                            .bg(cx.theme().background)
-                                            .border_0(),
-                                    )
-                                },
-                            )
-                            .map(|main| {
-                                if let Some(view) = fullscreen {
-                                    return main.child(aether_terminal::dark(
-                                        view.cached(
-                                            gpui_kit::StyleRefinement::default().size_full(),
-                                        ),
-                                        cx,
-                                    ));
-                                }
-                                if terminal_maximized && let Some(drawer) = drawer {
-                                    return main.child(drawer);
-                                }
-                                let Some(body) = body else { return main.children(side) };
-                                main.child(
-                                    // Non-chat pages retain their normal header and content.
-                                    h_flex()
+                    .child(v_flex().flex_1().h_full().min_w_0().min_h_0().map(|main| {
+                        if let Some(view) = fullscreen {
+                            return main.child(aether_terminal::dark(
+                                view.cached(gpui_kit::StyleRefinement::default().size_full()),
+                                cx,
+                            ));
+                        }
+                        if terminal_maximized && let Some(drawer) = drawer {
+                            return main.child(drawer);
+                        }
+                        let Some(body) = body else { return main.children(side) };
+                        main.child(
+                            // Non-chat pages retain their normal header and content.
+                            h_flex()
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .child(
+                                    v_flex()
                                         .relative()
                                         .flex_1()
-                                        .min_h_0()
-                                        .w_full()
-                                        .child(
-                                            v_flex()
-                                                .relative()
-                                                .flex_1()
-                                                .h_full()
-                                                .min_w_0()
-                                                .children(header)
-                                                .child(v_flex().flex_1().min_h_0().min_w_0().map(
-                                                    |column| {
-                                                        match drawer {
-                                                            // the body shrinks and clips so a tall drawer never pushes off-screen
-                                                            Some(drawer) => column
-                                                                .child(
-                                                                    v_flex()
-                                                                        .flex_1()
-                                                                        .min_h_0()
-                                                                        .overflow_hidden()
-                                                                        .child(body),
-                                                                )
-                                                                .child(drawer),
-                                                            None => column.child(body),
-                                                        }
-                                                    },
-                                                )),
-                                        )
-                                        .children(side),
+                                        .h_full()
+                                        .min_w_0()
+                                        .children(header)
+                                        .child(v_flex().flex_1().min_h_0().min_w_0().map(
+                                            |column| {
+                                                match drawer {
+                                                    // the body shrinks and clips so a tall drawer never pushes off-screen
+                                                    Some(drawer) => column
+                                                        .child(
+                                                            v_flex()
+                                                                .flex_1()
+                                                                .min_h_0()
+                                                                .overflow_hidden()
+                                                                .child(body),
+                                                        )
+                                                        .child(drawer),
+                                                    None => column.child(body),
+                                                }
+                                            },
+                                        )),
                                 )
-                            }),
-                    ),
+                                .children(side),
+                        )
+                    })),
             )
             .when(desktop && !hosted, |root| {
                 root.child(
