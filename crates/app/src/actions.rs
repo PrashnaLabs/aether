@@ -11,7 +11,7 @@ pub use aether_terminal::ToggleTerminal;
 use crate::explorer::quick_open::{
     QUICK_OPEN_CONTEXT, QuickOpenConfirm, QuickOpenDismiss, QuickOpenNext, QuickOpenPrev,
 };
-use crate::menus::{Hide, HideOthers, Minimize, Quit};
+use crate::menus::{CloseWindow, Hide, HideOthers, Minimize, Quit};
 use crate::workspace_popover::{
     BRANCH_SEARCH_CONTEXT, POP_CONTEXT, PUBLISH_NAME_CONTEXT, PopBack, PopConfirm, PopDown, PopUp,
     SCRIPT_FORM_CONTEXT,
@@ -335,9 +335,12 @@ pub fn bind_keys(cx: &mut App) {
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("ctrl-q", Quit, None),
             KeyBinding::new("cmd-h", Hide, None),
             KeyBinding::new("cmd-alt-h", HideOthers, None),
             KeyBinding::new("cmd-m", Minimize, None),
+            // not in the terminal: ctrl-w is readline delete-word there
+            KeyBinding::new("ctrl-w", CloseWindow, Some("!Terminal")),
         ]);
     }
 }

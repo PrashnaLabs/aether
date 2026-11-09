@@ -560,7 +560,7 @@ impl Agent {
         for skill in &invoked {
             let _ = tx.unbounded_send(Update::Skill(skill.name.clone()));
         }
-        if settings.provider != Provider::OpenRouter {
+        if settings.provider() != Provider::OpenRouter {
             return self.send_cli(text, attachments, settings, chat, history, tx, updates);
         }
         let always_allowed = self
@@ -608,7 +608,7 @@ impl Agent {
         tx: UnboundedSender<Update>,
         updates: UnboundedReceiver<Update>,
     ) -> Reply {
-        let provider = settings.provider;
+        let provider = settings.provider();
         if let Some(error) = missing_binary_error(provider, settings) {
             let _ = tx.unbounded_send(Update::Error(error));
             drop(tx);
@@ -1006,10 +1006,10 @@ fn session_options(
         attachments: attachments_dir().map(|d| d.join(&chat.key)),
         lead,
         ephemeral: chat.ephemeral,
-        ..DriverStartOptions::for_provider(settings, settings.provider, chat.cwd.clone())
+        ..DriverStartOptions::for_provider(settings, settings.provider(), chat.cwd.clone())
     };
     let key = SessionKey {
-        provider: settings.provider,
+        provider: settings.provider(),
         binary: opts.binary.clone(),
         cwd: opts.cwd.clone(),
         access: opts.access,

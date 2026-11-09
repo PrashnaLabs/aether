@@ -839,8 +839,9 @@ pub struct Settings {
     pub tool_approvals: BTreeMap<String, ToolPolicy>,
     /// Ask the model to propose a plan for approval before doing the work.
     pub plan_mode: bool,
+    /// `None` until the user picks one; new chats then use a detected subscription.
     #[serde(default)]
-    pub provider: Provider,
+    pub provider: Option<Provider>,
     #[serde(default)]
     pub provider_models: BTreeMap<String, String>,
     /// Default access mode for new chats, keyed by provider.
@@ -1014,6 +1015,10 @@ impl Settings {
         dir.map(|d| vec![(var.to_string(), d.to_string_lossy().into_owned())]).unwrap_or_default()
     }
 
+    pub fn provider(&self) -> Provider {
+        self.provider.unwrap_or_default()
+    }
+
     pub fn default_access(&self, provider: Provider) -> AccessMode {
         let modes = AccessMode::for_provider(provider);
         self.provider_access
@@ -1090,7 +1095,7 @@ impl Default for Settings {
             skills: BTreeMap::new(),
             tool_approvals: BTreeMap::new(),
             plan_mode: false,
-            provider: Provider::default(),
+            provider: None,
             provider_models: BTreeMap::new(),
             provider_access: BTreeMap::new(),
             claude_binary: String::new(),

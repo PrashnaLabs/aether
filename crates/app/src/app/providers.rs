@@ -24,7 +24,33 @@ pub(super) fn usage_due(newest: Option<i64>, attempted: i64, configured: bool, n
     old(attempted) && newest.map_or(configured, old)
 }
 
+/// First of Claude, Codex with a login; Claude wins when both have one.
+pub(super) fn subscription_provider(claude: bool, codex: bool) -> Option<Provider> {
+    if claude { Some(Provider::Claude) } else { codex.then_some(Provider::Codex) }
+}
+
 impl ChatApp {
+    /// The user's pick, else a detected subscription, else OpenRouter.
+    pub(crate) fn default_provider(&self) -> Provider {
+        self.settings.provider.or(self.detected_provider).unwrap_or_default()
+    }
+
+    pub(super) fn detect_subscription(&mut self, cx: &mut Context<Self>) {
+        let bg = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let found = bg
+                .spawn(async {
+                    subscription_provider(
+                        read_claude_credentials(None).is_some(),
+                        read_codex_token(None).is_some(),
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, _| this.detected_provider = found);
+        })
+        .detach();
+    }
+
     pub(super) fn refresh_provider_usage(&mut self, provider: Provider, cx: &mut Context<Self>) {
         let bg = cx.background_executor().clone();
         let dir = self.settings.account_dir(provider);
@@ -439,7 +465,7 @@ impl ChatApp {
         }
         let lead = chat.lead;
         self.persist(ix);
-        self.update_settings(cx, |s| s.provider = provider);
+        self.update_settings(cx, |s| s.provider = Some(provider));
         self.sync_selector(cx);
         self.reset_rows(cx);
         if lead && provider == Provider::Antigravity {
@@ -493,7 +519,7 @@ impl ChatApp {
         chat.provider_model = initial_model(&self.settings, provider);
         chat.access = self.settings.default_access(provider);
         chat.effort.clear();
-        self.update_settings(cx, |s| s.provider = provider);
+        self.update_settings(cx, |s| s.provider = Some(provider));
         self.sync_selector(cx);
         self.load_bases(cx);
         self.refresh_git(false, cx);

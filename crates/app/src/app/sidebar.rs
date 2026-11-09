@@ -1170,7 +1170,7 @@ impl ChatApp {
             })
             .max_by_key(|c| c.activity())
             .map(|c| c.provider)
-            .or(CLIS.contains(&self.settings.provider).then_some(self.settings.provider))
+            .or(CLIS.contains(&self.default_provider()).then_some(self.default_provider()))
             .unwrap_or(Provider::Claude);
         self.new_chat(window, cx);
         let ix = self.active;
