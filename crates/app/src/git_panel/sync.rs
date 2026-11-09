@@ -115,7 +115,8 @@ impl ChatApp {
                             GitOp::Push => Lucide::ArrowUpFromLine,
                             _ => Lucide::ArrowDownUp,
                         })
-                        .label(label.clone())
+                        .label(if sync { "Sync" } else { "Push" })
+                        .accessibility_label(label.clone())
                         .when(sync, |button| {
                             button
                                 .accessibility_label(format!("{label}. {tip}"))
@@ -144,7 +145,7 @@ impl ChatApp {
             .ghost()
             .xsmall()
             .icon(Icon::new(icon).text_color(muted))
-            .label(branch_name.clone())
+            .child(div().flex_1().min_w_0().text_left().truncate().child(branch_name.clone()))
             .dropdown_caret(true)
             .max_w_full()
             .selected(open)
@@ -186,15 +187,14 @@ impl ChatApp {
             h_flex()
                 .id("git-branch-bar")
                 .flex_none()
-                .h(px(28.))
+                .h(px(36.))
                 .px_2p5()
                 .gap_2()
                 .items_center()
                 .border_b_1()
                 .border_color(border)
                 .bg(theme.sidebar)
-                .child(branch_info)
-                .child(div().flex_1())
+                .child(div().flex_1().min_w_0().overflow_hidden().child(branch_info))
                 .children(ahead_info)
                 .children(behind_info)
                 .children(push_action)

@@ -29,7 +29,7 @@ impl Tools {
         settings: &Settings,
         skills: &[Skill],
         gate: Arc<Gate>,
-        lead: Option<(String, UnboundedSender<OrchCall>, OrchPending)>,
+        lead: Option<(String, UnboundedSender<OrchCall>, OrchPending, bool)>,
     ) -> Vec<Arc<dyn Tool>> {
         let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(ask_user::tool(gate.clone()))];
         if settings.web_search {
@@ -41,8 +41,10 @@ impl Tools {
         if settings.plan_mode {
             tools.push(Arc::new(propose_plan::tool(gate)));
         }
-        if let Some((key, calls, pending)) = lead {
-            tools.extend(lead::lead_tools(key, calls, pending));
+        if let Some((key, calls, pending, is_lead)) = lead {
+            tools.extend(lead::lead_tools(key, calls, pending).into_iter().filter(|tool| {
+                is_lead || matches!(tool.name(), "list_cards" | "add_card" | "move_card")
+            }));
         }
         tools
     }

@@ -22,7 +22,7 @@ mod manage;
 pub(crate) use manage::Bulk;
 mod send;
 mod side;
-pub(crate) use side::{SideCard, btw_question, btw_rest};
+pub(crate) use side::{BtwThread, btw_question, btw_rest};
 mod turn;
 
 fn default_access(provider: Provider) -> AccessMode {
@@ -368,7 +368,11 @@ impl ChatApp {
         let kept: Vec<_> = (from..chat.messages.len())
             .map(|message| {
                 let opened = &opened;
-                move |id: &str| opened.contains(id) || opened.contains(&format!("{message}-{id}"))
+                let collapsed = chat.open_steps.get(&message) == Some(&false);
+                move |id: &str| {
+                    !collapsed
+                        && (opened.contains(id) || opened.contains(&format!("{message}-{id}")))
+                }
             })
             .collect();
         let last = chat.messages.len().checked_sub(1);

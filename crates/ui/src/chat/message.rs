@@ -11,7 +11,10 @@ use gpui_kit::component::{
     message::MessageAlignment,
     v_flex,
 };
-use gpui_kit::{App, ClickEvent, Div, MouseButton, SharedString, Window, div, prelude::*, px};
+use gpui_kit::{
+    App, ClickEvent, Div, MouseButton, SharedString, Window, div, linear_color_stop,
+    linear_gradient, prelude::*, px,
+};
 
 use super::attachments::{AttachmentView, attachment_strip};
 use crate::components::Column;
@@ -131,13 +134,47 @@ impl RenderOnce for UserMessage {
                 cx,
             )
         });
+        let long = self.text.lines().count() > 8;
+        let expanded_state = window.use_keyed_state(
+            SharedString::from(format!("{}-expanded", self.id)),
+            cx,
+            |_, _| false,
+        );
+        let expanded = *expanded_state.read(cx);
         let text = (!self.text.is_empty()).then(|| {
-            SelectableText::new(SharedString::from(format!("{}-text", self.id)), self.text)
+            div()
+                .relative()
+                .when(long && !expanded, |d| d.max_h(px(182.)).overflow_hidden())
+                .child(SelectableText::new(
+                    SharedString::from(format!("{}-text", self.id)),
+                    self.text.clone(),
+                ))
+                .when(long && !expanded, |d| {
+                    let color = cx.theme().tokens.muted;
+                    d.child(div().absolute().left_0().right_0().bottom_0().h(px(36.)).bg(
+                        linear_gradient(
+                            180.,
+                            linear_color_stop(color.opacity(0.), 0.),
+                            linear_color_stop(color, 1.),
+                        ),
+                    ))
+                })
+        });
+        let toggle = long.then(|| {
+            h_flex().justify_start().child(
+                crate::components::button(SharedString::from(format!("{}-toggle", self.id)))
+                    .ghost()
+                    .xsmall()
+                    .px_0()
+                    .icon(if expanded { Lucide::ChevronUp } else { Lucide::ChevronDown })
+                    .label(if expanded { "Show less" } else { "Show more" })
+                    .on_click(move |_, _, cx| expanded_state.update(cx, |open, _| *open = !*open)),
+            )
         });
         let bubble = Bubble::new()
             .alignment(MessageAlignment::End)
             .with_variant(BubbleVariant::Secondary)
-            .child(v_flex().gap_2().children(strip).children(text));
+            .child(v_flex().gap_1().children(strip).children(text).children(toggle));
         Column::new()
             .px_0()
             .group("message")

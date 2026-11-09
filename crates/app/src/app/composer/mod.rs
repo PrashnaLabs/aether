@@ -279,7 +279,6 @@ impl ChatApp {
                 ))
         });
         let voice = self.voice_banner(cx);
-        let side = self.side_cards(chat.id, cx);
         let recording = self.recording_voice();
         let voice_busy = self.voice_active();
         let cockpit = self.usage_cockpit(cx);
@@ -520,7 +519,6 @@ impl ChatApp {
                     || voice.is_some()
                     || locked
                     || limit.is_some()
-                    || !side.is_empty()
                     || note.is_some()
                     || setup.is_some()
                     || attach_error.is_some()
@@ -534,7 +532,6 @@ impl ChatApp {
                             .children(rows)
                             .children(quote)
                             .children(cockpit)
-                            .children(side)
                             .children(banner)
                             .children(limit)
                             .children(note)

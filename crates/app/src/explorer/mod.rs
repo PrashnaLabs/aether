@@ -442,7 +442,7 @@ impl ChatApp {
         let can_collapse = explorer_entity.read(cx).tree_state.has_expanded_folders();
         let title = match (changes, diff, sidebar_tab) {
             (_, true, _) => "DIFF",
-            (true, _, _) => "CHANGES",
+            (true, _, _) => "Changes",
             (_, _, ExplorerSidebarTab::Files) => "EXPLORER",
             (_, _, ExplorerSidebarTab::Grep) => "SEARCH",
         };

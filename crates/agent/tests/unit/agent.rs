@@ -979,10 +979,12 @@ fn lead_session_gets_lead_tools_and_stable_token() {
     assert_eq!(opts.lead, Some(want));
     let off = ChatSession { key: "9".into(), ..chat("") };
     let (opts, key_off) = session_options(&settings, &off, agent.lead_tools(&off, false));
-    assert_eq!(opts.lead, None);
+    assert_eq!(opts.lead.unwrap().specs, crate::orchestrator::board_specs());
     assert_ne!(key_on, key_off);
     let seeded = agent.lead_tools(&off, true).unwrap();
-    assert_eq!(seeded.specs, crate::orchestrator::history_specs(), "only read_history");
+    let mut specs = crate::orchestrator::board_specs().as_array().unwrap().clone();
+    specs.extend(crate::orchestrator::history_specs().as_array().unwrap().clone());
+    assert_eq!(seeded.specs, serde_json::Value::Array(specs));
 }
 
 struct Side(UnboundedSender<Update>, bool);

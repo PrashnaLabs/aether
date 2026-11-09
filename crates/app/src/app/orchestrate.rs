@@ -255,9 +255,20 @@ impl ChatApp {
             None => Err("lead chat not found".to_string()),
             Some(ix) => match call.tool.as_str() {
                 "list_tools" if self.chats[ix].lead => Ok(tool_specs()),
-                "list_tools" => Ok(history_specs()),
+                "list_tools" => {
+                    let mut specs = aether_agent::orchestrator::board_specs();
+                    specs
+                        .as_array_mut()
+                        .unwrap()
+                        .extend(history_specs().as_array().unwrap().iter().cloned());
+                    Ok(specs)
+                }
                 "read_history" => self.read_history(ix, &call.args),
-                _ if !self.chats[ix].lead => Err("lead chat not found".to_string()),
+                _ if !self.chats[ix].lead
+                    && !matches!(call.tool.as_str(), "list_cards" | "add_card" | "move_card") =>
+                {
+                    Err("lead chat not found".to_string())
+                }
                 "list_agents" => Ok(self.list_agents(ix)),
                 "spawn_agent" => self.spawn_agent(ix, &call.args, window, cx),
                 "read_agent" => self.read_agent(ix, &call.args),

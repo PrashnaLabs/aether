@@ -61,9 +61,9 @@ fn worktree_rows_remove_or_prune_unless_main_locked_or_busy() {
 #[test]
 fn settings_tabs_cycle_with_wrap_around() {
     use SettingsTab::*;
-    assert_eq!(next_settings_tab(Appearance, false), Account);
-    assert_eq!(next_settings_tab(Appearance, true), Tiling);
-    assert_eq!(next_settings_tab(Account, true), Appearance);
+    assert_eq!(next_settings_tab(Appearance, false), Terminal);
+    assert_eq!(next_settings_tab(Appearance, true), BottomBar);
+    assert_eq!(next_settings_tab(Terminal, true), Appearance);
     assert_eq!(next_settings_tab(Worktrees, false), Providers);
 }
 
@@ -215,7 +215,7 @@ fn font_row_matches_the_font_size_row(cx: &mut gpui_kit::TestAppContext) {
 #[cfg(unix)]
 #[gpui_kit::test]
 fn terminal_settings_live_in_their_own_developer_tab(cx: &mut gpui_kit::TestAppContext) {
-    assert_eq!(SettingsTab::ALL[7], SettingsTab::Terminal);
+    assert_eq!(SettingsTab::ALL[8], SettingsTab::Terminal);
     let window = settings_test_window(cx);
     let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
     settle(&mut visual);
@@ -230,7 +230,7 @@ fn terminal_settings_live_in_their_own_developer_tab(cx: &mut gpui_kit::TestAppC
 
 #[gpui_kit::test]
 fn composer_settings_hold_the_voice_section(cx: &mut gpui_kit::TestAppContext) {
-    assert_eq!(SettingsTab::ALL[2], SettingsTab::Composer);
+    assert_eq!(SettingsTab::ALL[3], SettingsTab::Composer);
     let window = settings_test_window(cx);
     let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
     settle(&mut visual);
@@ -281,6 +281,10 @@ fn turning_notes_and_news_off_closes_every_way_in(cx: &mut gpui_kit::TestAppCont
         app.update_settings(cx, |s| (s.notes_enabled, s.hackernews_enabled) = (true, true))
     });
     settle(&mut visual);
+    assert!(visual.debug_bounds("notes-directory").is_none());
+    let toggle = visual.debug_bounds("notes-advanced-toggle").unwrap();
+    visual.simulate_click(toggle.center(), gpui_kit::Modifiers::default());
+    settle(&mut visual);
     assert!(visual.debug_bounds("notes-directory").is_some());
     visual.dispatch_action(crate::actions::ToggleHackerNews);
     visual.read(|cx| assert_eq!(app.read(cx).page, crate::app::Page::HackerNews));
@@ -305,10 +309,10 @@ fn card_previews_round_their_fill(cx: &mut gpui_kit::TestAppContext) {
     let window = settings_test_window(cx);
     let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
     settle(&mut visual);
-    let cards =
-        ["icon-pack-card-solar", "corners-card-round"].map(|id| visual.debug_bounds(id).unwrap());
+    let cards = ["icon-pack-card-lucide", "corners-card-rounded"]
+        .map(|id| visual.debug_bounds(id).unwrap());
     visual.update(|window, cx| {
-        let fill = Some(cx.theme().muted);
+        let fill = Some(cx.theme().accent);
         let scale = window.scale_factor();
         let quads = window.painted_quads();
         for card in cards {
@@ -470,7 +474,7 @@ fn draft_editor_stays_opaque_below_full_opacity(cx: &mut gpui_kit::TestAppContex
     })
     .unwrap();
     let mut visual = gpui_kit::VisualTestContext::from_window(window, cx);
-    let cover = visual.debug_bounds("draft-editor").unwrap();
+    let cover = visual.debug_bounds("draft-editor-dialog").unwrap();
     visual.update(|window, _| {
         let header = cover.origin + gpui_kit::point(px(8.), px(8.));
         assert_eq!(coverage(window, header), 1.);
@@ -745,7 +749,7 @@ fn settings_sidebar_keys_wrap_without_stealing_input_arrows(cx: &mut gpui_kit::T
     .unwrap();
     let mut visual = gpui_kit::VisualTestContext::from_window(window, cx);
     visual.simulate_keystrokes("up");
-    visual.read(|cx| assert_eq!(app.read(cx).settings_tab, SettingsTab::Account));
+    visual.read(|cx| assert_eq!(app.read(cx).settings_tab, SettingsTab::Terminal));
     visual.simulate_keystrokes("down");
     visual.read(|cx| assert_eq!(app.read(cx).settings_tab, SettingsTab::Appearance));
     visual.simulate_keystrokes("secondary-k");
@@ -885,4 +889,42 @@ fn scheme_change_keeps_translucency(cx: &mut gpui_kit::TestAppContext) {
         assert!((cx.theme().tokens.background.color.a - 0.7).abs() < 0.001);
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn model_reasoning_cards_change_effort_and_preserve_search(cx: &mut gpui_kit::TestAppContext) {
+    let window = settings_test_window(cx);
+    let app = window.root(cx).unwrap();
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings_tab = SettingsTab::Model;
+            cx.notify();
+        });
+        let _ = window.draw(cx);
+    });
+    settle(&mut visual);
+    assert!(visual.debug_bounds("default-model").is_some());
+    assert!(visual.debug_bounds("web-search").is_some());
+    for (id, effort) in [
+        ("reasoning-high", Reasoning::High),
+        ("reasoning-off", Reasoning::Off),
+        ("reasoning-medium", Reasoning::Medium),
+        ("reasoning-low", Reasoning::Low),
+    ] {
+        let card = visual.debug_bounds(id).unwrap();
+        visual.simulate_click(card.center(), gpui_kit::Modifiers::default());
+        visual.read(|cx| assert_eq!(app.read(cx).settings.reasoning, effort));
+        settle(&mut visual);
+    }
+    visual.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings_search_input.update(cx, |input, cx| {
+                input.set_value("custom instructions", window, cx);
+            });
+        });
+        let _ = window.draw(cx);
+    });
+    assert!(visual.debug_bounds("instructions").is_some());
+    assert!(visual.debug_bounds("reasoning").is_none());
 }

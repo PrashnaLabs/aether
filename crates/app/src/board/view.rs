@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 use aether_ui::{field, field_area, overlay, overlay_strong, provider_icon};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
-use gpui_kit::component::{
-    ActiveTheme, Icon, Selectable, Sizable, checkbox::Checkbox, h_flex, v_flex,
-};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, checkbox::Checkbox, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, ClickEvent, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*,
     px,
@@ -79,15 +78,24 @@ impl ChatApp {
         badge(status, since, now).map(|text| pill(text, bg, fg).into_any_element())
     }
 
-    pub(crate) fn render_board(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        self.board_view(None, cx)
+    pub(crate) fn render_board(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.board_view(None, Some(aether_ui::window_controls_gap(window)), cx)
     }
 
     pub(crate) fn render_board_tab(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        self.board_view(self.chat_project(self.active), cx)
+        self.board_view(self.chat_project(self.active), None, cx)
     }
 
-    fn board_view(&mut self, project: Option<PathBuf>, cx: &mut Context<Self>) -> AnyElement {
+    fn board_view(
+        &mut self,
+        project: Option<PathBuf>,
+        controls_gap: Option<gpui_kit::Div>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let now = now_ms();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -121,45 +129,55 @@ impl ChatApp {
         };
         let switch = project.is_some().then(|| {
             let all = self.board_all;
-            let tab = |id: &'static str, label: &'static str, on: bool, value: bool| {
-                aether_ui::button(id).ghost().xsmall().label(label).selected(on).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        this.board_all = value;
-                        cx.notify();
-                    }),
-                )
-            };
-            h_flex()
-                .id("board-scope")
-                .role(Role::TabList)
-                .aria_label("Board scope")
-                .gap(px(2.))
-                .p(px(2.))
-                .corner(px(8.))
-                .bg(overlay(cx))
-                .child(tab("board-scope-project", "This project", !all, false))
-                .child(tab("board-scope-all", "All projects", all, true))
+            let app = cx.entity();
+            aether_ui::button("board-scope")
+                .ghost()
+                .small()
+                .label(if all { "All projects" } else { "This project" })
+                .dropdown_caret(true)
+                .accessibility_label("Board project scope")
+                .dropdown_menu(move |mut menu, _, _| {
+                    for (value, label) in [(false, "This project"), (true, "All projects")] {
+                        let app = app.clone();
+                        menu = menu.item(PopupMenuItem::new(label).checked(all == value).on_click(
+                            move |_, _, cx| {
+                                app.update(cx, |this, cx| {
+                                    this.board_all = value;
+                                    cx.notify();
+                                })
+                            },
+                        ));
+                    }
+                    menu
+                })
         });
         let by = self.board_by;
-        let author_tab = |id: &'static str, label: &'static str, value: Option<bool>| {
-            aether_ui::button(id).ghost().xsmall().label(label).selected(by == value).on_click(
-                cx.listener(move |this, _, _, cx| {
-                    this.board_by = value;
-                    cx.notify();
-                }),
-            )
-        };
-        let authors = h_flex()
-            .id("board-author")
-            .role(Role::TabList)
-            .aria_label("Cards added by")
-            .gap(px(2.))
-            .p(px(2.))
-            .corner(px(8.))
-            .bg(overlay(cx))
-            .child(author_tab("board-author-all", "All", None))
-            .child(author_tab("board-author-user", "Mine", Some(false)))
-            .child(author_tab("board-author-agent", "Agents", Some(true)));
+        let app = cx.entity();
+        let authors = aether_ui::button("board-author")
+            .ghost()
+            .small()
+            .label(match by {
+                None => "All",
+                Some(false) => "Mine",
+                Some(true) => "Agents",
+            })
+            .dropdown_caret(true)
+            .accessibility_label("Cards added by")
+            .dropdown_menu(move |mut menu, _, _| {
+                for (value, label) in [(None, "All"), (Some(false), "Mine"), (Some(true), "Agents")]
+                {
+                    let app = app.clone();
+                    menu = menu.item(PopupMenuItem::new(label).checked(by == value).on_click(
+                        move |_, _, cx| {
+                            app.update(cx, |this, cx| {
+                                this.board_by = value;
+                                cx.notify();
+                            })
+                        },
+                    ));
+                }
+                menu
+            });
         let search = div().w(px(200.)).child(
             field(&self.board_search)
                 .small()
@@ -183,12 +201,14 @@ impl ChatApp {
                             .id("board-title")
                             .role(Role::Heading)
                             .text_size(px(16.))
+                            .line_height(px(20.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(title),
                     )
                     .child(
                         div()
-                            .text_size(px(12.5))
+                            .text_size(px(14.))
+                            .line_height(px(20.))
                             .text_color(muted)
                             .truncate()
                             .child(summary.join(" · ")),
@@ -208,7 +228,8 @@ impl ChatApp {
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.board_new_card(Col::Todo, window, cx)
                     })),
-            );
+            )
+            .children(controls_gap);
         let all: Vec<i64> = visible.iter().map(|c| c.id).collect();
         let bulk = self.board_bulk_bar(all, cx);
         let empty = visible.is_empty();

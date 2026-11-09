@@ -73,6 +73,12 @@ impl ChatApp {
             })
         });
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("Chat name"));
+        let btw_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(1, 5)
+                .submit_on_enter(true)
+                .placeholder("Ask a follow-up…")
+        });
         let board_title = cx.new(|cx| InputState::new(window, cx).placeholder("Title"));
         let board_body =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 16).placeholder("Description"));
@@ -86,7 +92,7 @@ impl ChatApp {
             s
         });
         let commit_tip = key_hint(&CommitChanges, cx)
-            .map_or("Message".into(), |k| format!("Message ({k} to commit)"));
+            .map_or("Commit message".into(), |k| format!("Commit message · {k}"));
         let commit_message =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8).placeholder(commit_tip));
         let scroller = cx.new(|cx| ChatScrollerState::new(0, cx));
@@ -265,6 +271,11 @@ impl ChatApp {
                     _ => {}
                 },
             ),
+            cx.subscribe_in(&btw_input, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = ev {
+                    this.submit_btw(window, cx);
+                }
+            }),
             cx.subscribe_in(&terminal_font_input, window, |this, input, ev: &InputEvent, _, cx| {
                 if let InputEvent::Change = ev {
                     let value = input.read(cx).value().trim().to_string();
@@ -573,6 +584,8 @@ impl ChatApp {
             skills: aether_agent::skills::load_all(),
             skill_tab: SkillSource::Aether,
             settings_tab: SettingsTab::default(),
+            settings_provider: aether_core::Provider::Claude,
+            notes_advanced_open: false,
             settings_search_input,
             font_select,
             opacity_slider,
@@ -592,8 +605,11 @@ impl ChatApp {
             attach_error: None,
             attaching: HashMap::new(),
             quotes: HashMap::new(),
-            side: HashMap::new(),
-            side_runs: 0,
+            btw: HashMap::new(),
+            btw_open: false,
+            tab_bar_controls: false,
+            btw_input,
+            file_selection_bar: None,
             selection_bar: None,
             copied: None,
             sessions_made: 0,
@@ -722,6 +738,22 @@ impl ChatApp {
         app.probe_providers(&CLIS, window, cx);
         app.scan_agents(cx);
         app.load_open_apps(cx);
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(6)).await;
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        if window.is_window_active() && this.composer.read(cx).value().is_empty() {
+                            this.sync_placeholder(window, cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(30)).await;

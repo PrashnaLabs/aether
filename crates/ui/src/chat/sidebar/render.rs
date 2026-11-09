@@ -3,12 +3,12 @@ use std::{rc::Rc, time::Duration};
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::base::{HandleEdge, resize_handle};
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Sizable, StyledExt, button::ButtonVariants, h_flex,
-    resizable::resize_handle_appearance, v_flex,
+    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable, StyledExt,
+    button::ButtonVariants, h_flex, resizable::resize_handle_appearance, v_flex,
 };
 use gpui_kit::{
-    App, Axis, DragMoveEvent, ElementId, MouseButton, SharedString, Window, div, linear_color_stop,
-    linear_gradient, list, prelude::*, px, rems,
+    AnyElement, App, Axis, Div, DragMoveEvent, ElementId, MouseButton, SharedString, Stateful,
+    Window, WindowControlArea, div, linear_color_stop, linear_gradient, list, prelude::*, px, rems,
 };
 
 const FADE_HEIGHT: f32 = 2.;
@@ -33,6 +33,95 @@ struct SidebarResize;
 impl Render for SidebarResize {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui_kit::Empty
+    }
+}
+
+fn title_inset(window: &Window) -> f32 {
+    if window.is_fullscreen() || !cfg!(target_os = "macos") { 12. } else { 80. }
+}
+
+/// Title bar drag and double click, without the window controls `TitleBar` always draws.
+fn drag_area(window: &mut Window, cx: &mut App) -> Stateful<Div> {
+    let moving = window.use_keyed_state("sidebar-header-drag", cx, |_, _| false);
+    let (down, up, out) = (moving.clone(), moving.clone(), moving.clone());
+    h_flex()
+        .id("sidebar-header")
+        .flex_none()
+        .items_center()
+        .window_control_area(WindowControlArea::Drag)
+        .on_double_click(|_, window, _| {
+            if cfg!(target_os = "macos") {
+                window.titlebar_double_click()
+            } else if cfg!(target_os = "linux") {
+                window.zoom_window()
+            }
+        })
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| down.update(cx, |m, _| *m = true))
+        .on_mouse_up(MouseButton::Left, move |_, _, cx| up.update(cx, |m, _| *m = false))
+        .on_mouse_down_out(move |_, _, cx| out.update(cx, |m, _| *m = false))
+        .on_mouse_move(move |_, window, cx| {
+            if *moving.read(cx) {
+                moving.update(cx, |m, _| *m = false);
+                window.start_window_move();
+            }
+        })
+}
+
+impl ChatSidebar {
+    fn header_row(&mut self, cx: &App) -> AnyElement {
+        h_flex()
+            .w_full()
+            .justify_between()
+            .items_center()
+            .p_1()
+            .child(
+                h_flex()
+                    .min_w_0()
+                    .gap_2()
+                    .items_center()
+                    .font_semibold()
+                    .children(self.mark.clone().map(BrandMark::new))
+                    .child(div().truncate().child(self.title.clone()))
+                    .children(self.count.map(|n| count_chip(n, cx))),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        crate::components::button("new-chat")
+                            .ghost()
+                            .small()
+                            .icon(IconName::Plus)
+                            .accessibility_label("New chat")
+                            .map(|b| match &self.new_chat_action {
+                                Some(action) => {
+                                    b.tooltip_with_action("New chat", action.as_ref(), None)
+                                }
+                                None => b.tooltip("New chat"),
+                            })
+                            .when_some(self.on_new_chat.take(), |b, handler| b.on_click(handler)),
+                    )
+                    .when_some(self.on_collapse.take(), |flex, handler| {
+                        flex.child(
+                            crate::components::button("collapse-sidebar")
+                                .ghost()
+                                .small()
+                                .icon(IconName::PanelLeftClose)
+                                .accessibility_label("Collapse sidebar")
+                                .map(|b| match &self.collapse_action {
+                                    Some(action) => b.tooltip_with_action(
+                                        "Collapse sidebar",
+                                        action.as_ref(),
+                                        None,
+                                    ),
+                                    None => b.tooltip("Collapse sidebar"),
+                                })
+                                .on_click(handler),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 }
 
@@ -91,7 +180,9 @@ impl RenderOnce for ChatSidebar {
             }
         })
         .size_full();
-        let count = self.count.map(|n| count_chip(n, cx));
+        let header = self.header_row(cx);
+        let drag = drag_area(window, cx);
+        let left = title_inset(window);
         let theme = cx.theme();
         let (sidebar_bg, sidebar_fg, border) =
             (theme.tokens.sidebar, theme.sidebar_foreground, theme.sidebar_border);
@@ -130,64 +221,25 @@ impl RenderOnce for ChatSidebar {
             .border_r_1()
             .border_color(border)
             .child(
-                h_flex().pt_3().px_3().child(
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .items_center()
-                        .p_1()
-                        .child(
-                            h_flex()
-                                .min_w_0()
-                                .gap_2()
-                                .items_center()
-                                .font_semibold()
-                                .children(self.mark.map(BrandMark::new))
-                                .child(div().truncate().child(self.title))
-                                .children(count),
-                        )
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    crate::components::button("new-chat")
-                                        .ghost()
-                                        .small()
-                                        .icon(IconName::Plus)
-                                        .accessibility_label("New chat")
-                                        .map(|b| match &self.new_chat_action {
-                                            Some(action) => b.tooltip_with_action(
-                                                "New chat",
-                                                action.as_ref(),
-                                                None,
-                                            ),
-                                            None => b.tooltip("New chat"),
-                                        })
-                                        .when_some(self.on_new_chat, |b, handler| {
-                                            b.on_click(handler)
-                                        }),
-                                )
-                                .when_some(self.on_collapse, |flex, handler| {
-                                    flex.child(
-                                        crate::components::button("collapse-sidebar")
-                                            .ghost()
-                                            .small()
-                                            .icon(IconName::PanelLeftClose)
-                                            .accessibility_label("Collapse sidebar")
-                                            .map(|b| match &self.collapse_action {
-                                                Some(action) => b.tooltip_with_action(
-                                                    "Collapse sidebar",
-                                                    action.as_ref(),
-                                                    None,
-                                                ),
-                                                None => b.tooltip("Collapse sidebar"),
-                                            })
-                                            .on_click(handler),
-                                    )
-                                }),
-                        ),
-                ),
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .when(
+                        !cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+                        |header| header.pt_3().px_3(),
+                    )
+                    .child(header)
+                    .map(|header| {
+                        if cfg!(any(
+                            target_os = "macos",
+                            target_os = "linux",
+                            target_os = "windows"
+                        )) {
+                            drag.h(px(36.)).pl(px(left)).pr_2().child(header).into_any_element()
+                        } else {
+                            header.into_any_element()
+                        }
+                    }),
             )
             .child(
                 v_flex()

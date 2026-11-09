@@ -428,7 +428,7 @@ impl ChatApp {
     pub(super) fn git_commit_area(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let status = self.git_status()?;
         let theme = cx.theme();
-        let (muted, border) = (theme.muted_foreground, theme.sidebar_border);
+        let border = theme.sidebar_border;
         let staged = status.changes.iter().filter(|c| c.staged).count();
         let changed = changed_files(&status.changes);
         let message = self.git.message.read(cx).value().to_string();
@@ -471,15 +471,11 @@ impl ChatApp {
                     commit_menu(menu, &view, &allowed, busy)
                 })
         });
-        let reason = match &commit {
-            Err(reason) if changed > 0 && !feedback => Some(*reason),
-            _ => None,
-        };
         Some(IntoElement::into_any_element(
             v_flex()
                 .flex_none()
-                .p_2p5()
-                .gap_2()
+                .p_3()
+                .gap_2p5()
                 .border_b_1()
                 .border_color(border)
                 .when(changed > 0, |area| {
@@ -494,6 +490,9 @@ impl ChatApp {
                                     .w_full()
                                     .bg(field_fill(cx))
                                     .corner(px(6.))
+                                    .border_1()
+                                    .border_color(border)
+                                    .text_sm()
                                     .px(px(0.))
                                     .py(px(0.))
                                     .child(Textarea::new(&self.git.message).appearance(false)),
@@ -501,7 +500,6 @@ impl ChatApp {
                     )
                 })
                 .children(commit_button)
-                .children(reason.map(|reason| div().text_xs().text_color(muted).child(reason)))
                 .children(self.git_feedback(cx)),
         ))
     }

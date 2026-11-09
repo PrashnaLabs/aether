@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use aether_explorer::{DiskConflict, ExplorerSidebarTab};
 use aether_git::{Change, ChangeKind, Stat};
+use aether_ui::theme::Corners;
 use aether_ui::{
     DiffChange, DiffRow, Markdown, Tab, TabBar, file_icon, file_icon_color, parse_diff,
 };
@@ -140,7 +141,10 @@ impl ChatApp {
                         .height(px(40.))
                         .bg(sidebar_bg)
                         .border_color(border)
-                        .info(div().text_xs().text_color(muted).child("No open files")),
+                        .info(div().text_xs().text_color(muted).child("No open files"))
+                        .when(self.page == crate::app::Page::Notes, |bar| {
+                            bar.action(aether_ui::window_controls_gap(window))
+                        }),
                 )
                 .child(
                     v_flex()
@@ -360,7 +364,85 @@ impl ChatApp {
             .flex_1()
             .h_full()
             .min_w_0()
-            .child(tab_bar)
+            .on_mouse_up(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|_this, ev: &gpui_kit::MouseUpEvent, window, cx| {
+                    let at = ev.position;
+                    cx.defer_in(window, move |this, _, cx| {
+                        let explorer = this.active_project_explorer(cx);
+                        this.file_selection_bar =
+                            explorer.read(cx).active_buffer().and_then(|buffer| {
+                                let (editor, _) = this.explorer_editors.get(&buffer.id)?;
+                                (!editor.read(cx).selected_range().is_empty())
+                                    .then(|| (at, buffer.path.clone()))
+                            });
+                        cx.notify();
+                    });
+                }),
+            )
+            .children(self.file_selection_bar.clone().map(|(at, path)| {
+                gpui_kit::deferred(
+                    gpui_kit::anchored()
+                        .position(point(at.x, at.y - px(8.)))
+                        .anchor(gpui_kit::Anchor::BottomCenter)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .occlude()
+                                .p_1()
+                                .corner(gpui_kit::rems(0.5))
+                                .shadow_lg()
+                                .bg(cx.theme().popover)
+                                .border_1()
+                                .border_color(border)
+                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                    this.file_selection_bar = None;
+                                    cx.notify();
+                                }))
+                                .child(
+                                    aether_ui::button("file-selection-ask-agent")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(Lucide::MessageCircle)
+                                        .label("Ask agent")
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.file_selection_bar = None;
+                                            this.ask_agent_about_file(path.clone(), window, cx);
+                                        })),
+                                )
+                                .child(
+                                    aether_ui::button("file-selection-copy")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Copy)
+                                        .label("Copy")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            let explorer = this.active_project_explorer(cx);
+                                            let text = explorer
+                                                .read(cx)
+                                                .active_buffer()
+                                                .and_then(|buffer| {
+                                                    this.explorer_editors.get(&buffer.id)
+                                                })
+                                                .map(|(editor, _)| {
+                                                    editor.read(cx).selected_text().to_string()
+                                                });
+                                            if let Some(text) = text {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    text,
+                                                ));
+                                            }
+                                            this.file_selection_bar = None;
+                                            cx.notify();
+                                        })),
+                                ),
+                        ),
+                )
+            }))
+            .child(tab_bar.when(self.page == crate::app::Page::Notes, |bar| {
+                bar.action(aether_ui::window_controls_gap(window))
+            }))
             .when_some(conflict, |el, conflict| el.child(self.render_disk_banner(conflict, cx)))
             .child(if preview {
                 let text =

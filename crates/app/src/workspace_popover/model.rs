@@ -10,6 +10,7 @@ use crate::git_panel::{PickMode, PickRow, pick_rows};
 pub(crate) enum PopView {
     Main,
     Location,
+    ChatLayout,
     Apps,
     Script(Option<usize>),
     Branch,
@@ -25,6 +26,7 @@ pub(crate) fn view_title(view: &PopView) -> Option<&'static str> {
     match view {
         PopView::Main => None,
         PopView::Location => Some("Location"),
+        PopView::ChatLayout => Some("Chat layout"),
         PopView::Apps => Some("Open in"),
         PopView::Script(None) => Some("Add project script"),
         PopView::Script(Some(_)) => Some("Edit project script"),

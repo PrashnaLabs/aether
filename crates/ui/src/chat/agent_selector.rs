@@ -8,7 +8,6 @@ use gpui_kit::component::{
     button::{ButtonCustomVariant, ButtonVariants},
     h_flex,
     input::{InputEvent, InputState},
-    scroll::ScrollableElement,
     searchable_list::SearchableListItem,
     tag::Tag,
     tooltip::Tooltip,
@@ -17,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, MouseButton, Render,
     Role, ScrollStrategy, SharedString, Subscription, Toggled, UniformListScrollHandle, Window,
-    actions, div, prelude::*, px, uniform_list,
+    actions, canvas, div, linear_color_stop, linear_gradient, prelude::*, px, uniform_list,
 };
 
 use super::ModelItem;
@@ -679,6 +678,12 @@ impl Render for AgentSelectorState {
             .py_1()
             .into_any_element()
         };
+        let scroll = self.scroll.0.borrow().base_handle.clone();
+        let edges = |handle: &gpui_kit::ScrollHandle| {
+            let at = -handle.offset().y;
+            (at > px(1.), at < handle.max_offset().y - px(1.))
+        };
+        let (above, below) = edges(&scroll);
         let single = self.single();
         let theme = cx.theme();
         let (fg, bg, border, muted, ring) =
@@ -801,8 +806,29 @@ impl Render for AgentSelectorState {
                             .flex_1()
                             .min_h_0()
                             .relative()
+                            .overflow_hidden()
                             .child(rows)
-                            .vertical_scrollbar(&self.scroll),
+                            .when(!self.rows.is_empty(), |list| {
+                                let fade = |angle| {
+                                    div().absolute().left_0().right_0().h(px(24.)).bg(
+                                        linear_gradient(
+                                            angle,
+                                            linear_color_stop(bg.opacity(0.), 0.),
+                                            linear_color_stop(bg, 1.),
+                                        ),
+                                    )
+                                };
+                                list.when(above, |list| list.child(fade(0.).top_0()))
+                                    .when(below, |list| list.child(fade(180.).bottom_0()))
+                                    .child(canvas(
+                                        |_, _, _| (),
+                                        move |_, _, window, _| {
+                                            if edges(&scroll) != (above, below) {
+                                                window.request_animation_frame();
+                                            }
+                                        },
+                                    ))
+                            }),
                     )
                     .children(reasoning)
                     .children(lock_row),

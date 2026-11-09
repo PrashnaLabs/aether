@@ -21,18 +21,29 @@ fn terminal_page_enum_and_toggle_state() {
 }
 
 #[test]
-fn resume_command_opens_nvim_then_the_cli_in_a_per_chat_tmux_session() {
+fn resume_command_runs_cli_directly_in_the_project_folder() {
     let s = aether_core::Settings::default();
     let folder = std::path::Path::new("/tmp/it's here");
-    let cmd = resume_command(&s, aether_core::Provider::Claude, "abc", 7, folder).unwrap();
-    assert!(cmd.contains("tmux has-session -t '=aether-7' "));
-    assert!(cmd.contains(r"new-session -d -s aether-7 -c '/tmp/it'\''s here' nvim"));
-    assert!(cmd.contains(r"split-window -h -t '=aether-7:' -c '/tmp/it'\''s here' ''\''claude'\'' --resume '\''abc'\'''"));
-    assert!(cmd.contains("env -u TMUX -u TMUX_PANE tmux attach-session -t '=aether-7'"));
-    assert!(cmd.ends_with("else 'claude' --resume 'abc'; fi"));
+    for (provider, cli) in [
+        (Provider::Claude, "'claude' --resume"),
+        (Provider::Codex, "'codex' resume"),
+        (Provider::Pi, "'pi' --session"),
+        (Provider::OpenCode, "'opencode' --session"),
+        (Provider::Antigravity, "'agy' --conversation"),
+    ] {
+        let cmd = resume_command(&s, provider, "session'1", folder).unwrap();
+        assert_eq!(cmd, format!(r"cd '/tmp/it'\''s here' && {cli} 'session'\''1'"));
+    }
+    assert_eq!(resume_command(&s, Provider::Claude, "", folder), None);
+    assert_eq!(resume_command(&s, Provider::OpenRouter, "x", folder), None);
+}
 
-    let codex = resume_command(&s, aether_core::Provider::Codex, "t1", 7, folder).unwrap();
-    assert!(codex.ends_with("else 'codex' resume 't1'; fi"));
-    assert_eq!(resume_command(&s, aether_core::Provider::Claude, "", 7, folder), None);
-    assert_eq!(resume_command(&s, aether_core::Provider::OpenRouter, "x", 7, folder), None);
+#[test]
+fn resume_command_quotes_custom_binary_paths() {
+    let mut s = aether_core::Settings::default();
+    s.codex_binary = "/tmp/agent's bin/codex".into();
+    assert_eq!(
+        resume_command(&s, Provider::Codex, "abc", std::path::Path::new("/tmp/project")),
+        Some(r"cd '/tmp/project' && '/tmp/agent'\''s bin/codex' resume 'abc'".into())
+    );
 }

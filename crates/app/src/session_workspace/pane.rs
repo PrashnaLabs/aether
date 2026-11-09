@@ -326,6 +326,9 @@ impl ChatApp {
                     .border_b_1()
                     .border_color(cx.theme().foreground.opacity(0.055))
                     .child(merged)
+                    .when(!self.side_open(), |header| {
+                        header.child(aether_ui::window_controls_gap(window))
+                    })
             } else {
                 header.child(controls)
             };

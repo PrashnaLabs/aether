@@ -36,6 +36,7 @@ const SETTINGS_DROPDOWN_WIDTH: f32 = 280.;
 pub(crate) enum SettingsTab {
     #[default]
     Appearance,
+    BottomBar,
     Tiling,
     Composer,
     Model,
@@ -43,12 +44,12 @@ pub(crate) enum SettingsTab {
     Worktrees,
     Tools,
     Terminal,
-    Account,
 }
 
 impl SettingsTab {
     pub(crate) const ALL: [Self; 9] = [
         Self::Appearance,
+        Self::BottomBar,
         Self::Tiling,
         Self::Composer,
         Self::Model,
@@ -56,20 +57,19 @@ impl SettingsTab {
         Self::Worktrees,
         Self::Tools,
         Self::Terminal,
-        Self::Account,
     ];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
+            Self::BottomBar => "Bottom Bar",
             Self::Tiling => "Tiling",
             Self::Composer => "Composer",
-            Self::Model => "Model",
+            Self::Model => "Direct Chat",
             Self::Providers => "Providers",
             Self::Worktrees => "Worktrees",
             Self::Tools => "Tools",
             Self::Terminal => "Terminal",
-            Self::Account => "Account",
         }
     }
 }
@@ -240,8 +240,6 @@ impl ChatApp {
                 .items_center()
                 .content_center()
                 .justify_center()
-                .corner(px(11.))
-                .bg(cx.theme().muted)
                 .text_color(fg)
                 .children(
                     PREVIEW_ICONS
@@ -293,19 +291,18 @@ impl ChatApp {
         let active = self.settings.corner_style;
         let line = cx.theme().muted_foreground;
         let cards = CornerStyle::ALL.map(|style| {
-            let preview =
-                div().h(px(76.)).w_full().relative().corner(px(11.)).bg(cx.theme().muted).child(
-                    div()
-                        .absolute()
-                        .top(px(24.))
-                        .left(px(40.))
-                        .right_0()
-                        .bottom_0()
-                        .border_t_2()
-                        .border_l_2()
-                        .border_color(line)
-                        .rounded_tl(px(16. * style.scale())),
-                );
+            let preview = div().h(px(76.)).w_full().relative().child(
+                div()
+                    .absolute()
+                    .top(px(24.))
+                    .left(px(40.))
+                    .right_0()
+                    .bottom_0()
+                    .border_t_2()
+                    .border_l_2()
+                    .border_color(line)
+                    .rounded_tl(px(16. * style.scale())),
+            );
             ChoiceCard::new(format!("corners-card-{}", style.label().to_lowercase()), style.label())
                 .selected(style == active)
                 .preview(preview)
@@ -330,7 +327,6 @@ impl ChatApp {
     ) -> impl IntoElement {
         let settings = &self.settings;
         let muted = cx.theme().muted_foreground;
-        let reasoning = Reasoning::ALL.iter().position(|r| *r == settings.reasoning).unwrap_or(0);
         let show = |id: &str| {
             matches.is_none_or(|items| items.iter().any(|item| item.tab == tab && item.id == id))
         };
@@ -617,6 +613,101 @@ impl ChatApp {
                             }),
                     )
                 });
+            }
+            SettingsTab::BottomBar => {
+                let mut entry_cards = Vec::new();
+                for (key, label, mark) in [
+                    ("nav-direct", "Direct chats", gpui_kit::assets::IconName::MessageCircle),
+                    ("nav-archive", "Archive", gpui_kit::assets::IconName::Archive),
+                    ("nav-outside", "Outside agents", gpui_kit::assets::IconName::Laptop),
+                    ("nav-terminal", "Terminal", gpui_kit::assets::IconName::SquareTerminal),
+                    ("nav-notes", "Notes", gpui_kit::assets::IconName::BookOpen),
+                    ("nav-board", "Board", gpui_kit::assets::IconName::LayoutDashboard),
+                    ("nav-hackernews", "Hacker News", gpui_kit::assets::IconName::Flame),
+                    ("nav-settings", "Settings", gpui_kit::assets::IconName::Settings),
+                    ("usage", "Agent usage", gpui_kit::assets::IconName::Bot),
+                    ("cpu", "CPU", gpui_kit::assets::IconName::Cpu),
+                    ("memory", "Memory", gpui_kit::assets::IconName::MemoryStick),
+                    ("clock", "Date and time", gpui_kit::assets::IconName::Timer),
+                ] {
+                    let selected = !settings.bottom_bar_hidden.iter().any(|k| k == key);
+                    entry_cards.push(
+                        div().w(px(120.)).flex_none().child(
+                            ChoiceCard::new(format!("bottom-bar-{key}"), label)
+                                .selected(selected)
+                                .preview(
+                                    h_flex()
+                                        .h(px(48.))
+                                        .w_full()
+                                        .justify_center()
+                                        .items_center()
+                                        .child(Icon::new(mark).size(px(22.))),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.update_settings(cx, |s| {
+                                        let selected =
+                                            !s.bottom_bar_hidden.iter().any(|k| k == key);
+                                        s.bottom_bar_hidden.retain(|k| k != key);
+                                        if selected {
+                                            s.bottom_bar_hidden.push(key.to_string());
+                                        }
+                                    });
+                                })),
+                        ),
+                    );
+                }
+                let entries = SettingsSection::new("Visible entries")
+                    .icon(Icon::new(gpui_kit::assets::IconName::Eye))
+                    .child(h_flex().flex_wrap().gap_3().p_4().children(entry_cards));
+                page = page.when(show("bottom-bar-entries"), |page| {
+                    page.child(div().id("bottom-bar-entries").child(entries))
+                });
+                let agents = SettingsSection::new("Agent usage").icon(Icon::new(gpui_kit::assets::IconName::Bot))
+                    .child(div().px_3().py_3().text_sm().text_color(cx.theme().muted_foreground)
+                        .child("Choose which agents appear in the bottom bar. Select at least one. The usage popover shows all agents."));
+                let cards = [
+                    aether_core::Provider::Claude,
+                    aether_core::Provider::Codex,
+                    aether_core::Provider::Antigravity,
+                    aether_core::Provider::OpenRouter,
+                    aether_core::Provider::OpenCode,
+                ]
+                .into_iter()
+                .map(|provider| {
+                    let selected = !settings.bottom_bar_hidden_agents.contains(&provider);
+                    ChoiceCard::new(
+                        format!("bottom-bar-agent-{}", provider.key()),
+                        provider.label(),
+                    )
+                    .selected(selected)
+                    .preview(
+                        h_flex()
+                            .h(px(48.))
+                            .w_full()
+                            .justify_center()
+                            .items_center()
+                            .child(aether_ui::provider_icon(provider).size(px(22.))),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.update_settings(cx, |s| {
+                            let selected = !s.bottom_bar_hidden_agents.contains(&provider);
+                            if selected && s.bottom_bar_hidden_agents.len() >= 4 {
+                                return;
+                            }
+                            s.bottom_bar_hidden_agents.retain(|p| *p != provider);
+                            if selected {
+                                s.bottom_bar_hidden_agents.push(provider);
+                            }
+                        });
+                    }))
+                });
+                let agents = agents.child(div().p_3().child(
+                    CardCarousel::new("bottom-bar-agent-cards", 0).compact().children(cards),
+                ));
+                page = page.when(show("bottom-bar-agents"), |page| {
+                    page.child(div().id("bottom-bar-agents").child(agents))
+                });
+
                 let current_time_format_ix = match settings.status_bar_time_format {
                     TimeFormat::Hour12 => 0,
                     TimeFormat::Hour24 => 1,
@@ -634,8 +725,8 @@ impl ChatApp {
                         || show("status-bar-hn"),
                     |page| {
                         page.child(
-                            SettingsSection::new("Status Bar")
-                                .icon(Icon::new(gpui_kit::assets::IconName::PanelBottom))
+                            SettingsSection::new("Date and Time")
+                                .icon(Icon::new(gpui_kit::assets::IconName::Timer))
                                 .when(show("status-bar-time-format"), |section| {
                                     section.child(
                                         div()
@@ -868,56 +959,204 @@ impl ChatApp {
                 });
             }
             SettingsTab::Model => {
+                use gpui_kit::assets::IconName as Lucide;
+                page = page.when(show("api-key"), |page| { page.child(SettingsSection::new("OpenRouter API key").icon(Icon::new(Lucide::KeyRound)).when(show("api-key"), |section| { section.child(div().id("api-key").debug_selector(|| "api-key".into()).child(SettingsRow::new("API key")
+                            .description(
+                                "Stored in your system keychain, never in the settings file.",
+                            )
+                            .stacked()
+                            .control(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .child(div().flex_1().child(field(&self.key_input).aria_label("OpenRouter API key")))
+                                            .child(
+                                                aether_ui::button("save-key")
+                                                    .primary()
+                                                    .small()
+                                                    .label("Save")
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.save_key(window, cx)
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(self.key_status.clone()),
+                                    ),
+                            ))) })) });
                 page = page
-                    .when(show("default-model") || show("reasoning") || show("web-search"), |page| { page.child(SettingsSection::new("Model")
-                            .when(show("default-model"), |section| { section.child(div().id("default-model").debug_selector(|| "default-model".into()).child(SettingsRow::new("Default model")
-                                    .description(
-                                        "Used for new OpenRouter chats. Also changeable from the composer.",
+                    .when(show("default-model"), |page| {
+                        page.child(
+                            SettingsSection::new("Default model")
+                                .icon(aether_ui::provider_icon(aether_core::Provider::OpenRouter))
+                                .child(
+                                    div().id("default-model")
+                                        .debug_selector(|| "default-model".into())
+                                        .child(
+                                            SettingsRow::new("OpenRouter model")
+                                                .description("Used for new OpenRouter chats. You can choose another model in the composer.")
+                                                .stacked()
+                                                .control(AgentSelector::new(&self.default_model)),
+                                        ),
+                                ),
+                        )
+                    })
+                    .when(show("reasoning") || show("web-search"), |page| {
+                        page.child(
+                            SettingsSection::new("Response behavior")
+                                .icon(Icon::new(Lucide::Lightbulb))
+                                .when(show("reasoning"), |section| {
+                                    let cards = [
+                                        (Reasoning::Off, "Off", Lucide::CircleSlash),
+                                        (Reasoning::Low, "Low", Lucide::Zap),
+                                        (Reasoning::Medium, "Medium", Lucide::Gauge),
+                                        (Reasoning::High, "High", Lucide::Lightbulb),
+                                    ].map(|(effort, label, icon)| {
+                                        ChoiceCard::new(format!("reasoning-{}", label.to_lowercase()), label)
+                                            .selected(settings.reasoning == effort)
+                                            .preview(
+                                                h_flex().h(px(48.)).justify_center()
+                                                    .child(Icon::new(icon).size(px(22.))),
+                                            )
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.update_settings(cx, |s| s.reasoning = effort);
+                                            }))
+                                    });
+                                    let hint = match settings.reasoning {
+                                        Reasoning::Off => "No reasoning requested. Some models still reason by default.",
+                                        Reasoning::Low => "Less reasoning for faster responses and lower cost.",
+                                        Reasoning::Medium => "A balance of reasoning depth, response time and cost.",
+                                        Reasoning::High => "More reasoning for complex tasks. Responses can take longer and cost more.",
+                                    };
+                                    section.child(
+                                        div().id("reasoning")
+                                            .debug_selector(|| "reasoning".into())
+                                            .child(
+                                                SettingsRow::new("Reasoning effort")
+                                                    .description("How much the OpenRouter model thinks before answering.")
+                                                    .stacked()
+                                                    .control(
+                                                        v_flex().gap_3()
+                                                            .child(
+                                                                h_flex().w_full().max_w(px(560.)).gap_3()
+                                                                    .children(cards.into_iter().map(|card| {
+                                                                        div().flex_1().min_w_0().child(card)
+                                                                    })),
+                                                            )
+                                                            .child(div().text_xs().text_color(muted).child(hint)),
+                                                    ),
+                                            ),
                                     )
-                                    .control(AgentSelector::new(&self.default_model)))) })
-                            .when(show("reasoning"), |section| { section.child(div().id("reasoning").debug_selector(|| "reasoning".into()).child(SettingsRow::new("Reasoning")
-                                    .description(
-                                        "How hard the model thinks before answering. Higher is slower and costs more. \
-                                         Off stops asking, though some models still reason by default.",
+                                })
+                                .when(show("web-search"), |section| {
+                                    section.child(
+                                        div().id("web-search")
+                                            .debug_selector(|| "web-search".into())
+                                            .child(
+                                                SettingsRow::new("Web search")
+                                                    .icon(Icon::new(Lucide::Search))
+                                                    .description("Allow DuckDuckGo searches. Also available from the Search chip in the composer.")
+                                                    .control(
+                                                        Switch::new("web-search-setting")
+                                                            .checked(settings.web_search)
+                                                            .accessibility_label("Web search")
+                                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                                                this.update_settings(cx, |s| s.web_search = *checked);
+                                                            })),
+                                                    ),
+                                            ),
                                     )
-                                    .control(
-                                        Segmented::new("reasoning")
-                                            .option("Off")
-                                            .option("Low")
-                                            .option("Medium")
-                                            .option("High")
-                                            .selected(reasoning)
-                                            .on_change(cx.listener(|this, ix: &usize, _, cx| {
-                                                this.update_settings(cx, |s| {
-                                                    s.reasoning = Reasoning::ALL[*ix]
-                                                });
-                                            })),
-                                    ))) })
-                            .when(show("web-search"), |section| { section.child(div().id("web-search").debug_selector(|| "web-search".into()).child(SettingsRow::new("Web search")
-                                    .description(
-                                        "Let the assistant search DuckDuckGo. Same as the Search chip.",
-                                    )
-                                    .control(
-                                        Switch::new("web-search-setting")
-                                            .checked(settings.web_search)
-                                            .accessibility_label("Web search")
-                                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                                let checked = *checked;
-                                                this.update_settings(cx, |s| {
-                                                    s.web_search = checked
-                                                });
-                                            })),
-                                    ))) })) })
-                    .when(show("instructions"), |page| { page.child(SettingsSection::new("Custom instructions").when(show("instructions"), |section| { section.child(div().id("instructions").debug_selector(|| "instructions".into()).child(SettingsRow::new("Instructions")
-                                .description("Added to every conversation.")
-                                .stacked()
-                                .control(field_area(&self.instructions).aria_label("Custom instructions")))) })) });
+                                }),
+                        )
+                    })
+                    .when(show("instructions"), |page| {
+                        page.child(
+                            SettingsSection::new("Custom instructions")
+                                .icon(Icon::new(Lucide::TextQuote))
+                                .child(
+                                    div().id("instructions")
+                                        .debug_selector(|| "instructions".into())
+                                        .child(
+                                            SettingsRow::new("Instructions")
+                                                .description("Added to every conversation. Set your preferred tone, format or conventions here.")
+                                                .stacked()
+                                                .control(field_area(&self.instructions).aria_label("Custom instructions")),
+                                        ),
+                                ),
+                        )
+                    });
             }
             SettingsTab::Providers => {
+                let mut coding_agents = SettingsSection::new("Coding agents")
+                    .icon(Icon::new(gpui_kit::assets::IconName::Bot));
+                if matches.is_none() {
+                    let cards = CLIS.into_iter().map(|provider| {
+                        let installed =
+                            self.probes.get(&provider).is_some_and(|probe| probe.installed);
+                        let status = if self.probes.get(&provider).is_none() {
+                            "Checking…"
+                        } else if installed {
+                            "Available"
+                        } else {
+                            "Not installed"
+                        };
+                        ChoiceCard::new(
+                            format!("provider-card-{}", provider.key()),
+                            provider.label(),
+                        )
+                        .selected(self.settings_provider == provider)
+                        .preview(
+                            v_flex()
+                                .h(px(76.))
+                                .w_full()
+                                .gap_2()
+                                .items_center()
+                                .justify_center()
+                                .child(aether_ui::provider_icon(provider).size(px(24.)))
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(
+                                            Icon::new(if installed {
+                                                gpui_kit::assets::IconName::Check
+                                            } else {
+                                                gpui_kit::assets::IconName::Circle
+                                            })
+                                            .size(px(10.)),
+                                        )
+                                        .child(status),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.settings_provider = provider;
+                            cx.notify();
+                        }))
+                    });
+                    coding_agents = coding_agents.child(
+                        div().p_4().child(
+                            CardCarousel::new(
+                                "provider-cards",
+                                CLIS.iter().position(|p| *p == self.settings_provider).unwrap_or(0),
+                            )
+                            .compact()
+                            .children(cards),
+                        ),
+                    );
+                }
                 let root = settings.workspace_root.clone();
                 page = page
 
-                    .when(show("workspace"), |page| { page.child(SettingsSection::new("Workspace").when(show("workspace"), |section| { section.child(div().id("workspace").debug_selector(|| "workspace".into()).child(SettingsRow::new("Folder")
+                    .when(show("workspace"), |page| { page.child(SettingsSection::new("Workspace").icon(Icon::new(gpui_kit::assets::IconName::Folder)).when(show("workspace"), |section| { section.child(div().id("workspace").debug_selector(|| "workspace".into()).child(SettingsRow::new("Folder")
                                 .description(
                                     "Coding agents run here. Defaults to your home folder.",
                                 )
@@ -960,8 +1199,8 @@ impl ChatApp {
                                                 })),
                                         ),
                                 ))) })) })
-                    .when(show("claude") || show("codex") || show("pi") || show("opencode") || show("antigravity"), |page| { page.child(CLIS.into_iter().filter(|p| show(p.key())).fold(
-                        SettingsSection::new("Coding agents"),
+                    .when(show("claude") || show("codex") || show("pi") || show("opencode") || show("antigravity"), |page| { page.child(CLIS.into_iter().filter(|p| show(p.key()) && (matches.is_some() || *p == self.settings_provider)).fold(
+                        coding_agents,
                         |section, p| {
                             let binary = DriverStartOptions::for_provider(settings, p, "").binary;
                             let access = settings.default_access(p);
@@ -972,7 +1211,7 @@ impl ChatApp {
                             )
                             .accessibility_label(format!("{} default access mode", p.label()))
                             .dropdown_menu_with_anchor(
-                                Anchor::TopRight,
+                                Anchor::TopLeft,
                                 move |mut menu: PopupMenu, _, _| {
                                     menu = settings_dropdown_menu(menu);
                                     for &mode in AccessMode::for_provider(p) {
@@ -999,8 +1238,8 @@ impl ChatApp {
                                     .description(provider_status(self.probes.get(&p), &binary))
                                     .stacked()
                                     .control(
-                                        h_flex()
-                                            .gap_3()
+                                        v_flex().gap_4()
+                                            .child(h_flex().gap_3()
                                             .child(labeled_input(
                                                 "Binary path",
                                                 &self.binary_inputs[&p],
@@ -1010,7 +1249,7 @@ impl ChatApp {
                                                 "Default model",
                                                 &self.model_inputs[&p],
                                                 muted,
-                                            ))
+                                            )))
                                             .child(
                                                 v_flex()
                                                     .gap_1()
@@ -1020,7 +1259,7 @@ impl ChatApp {
                                                             .text_color(muted)
                                                             .child("Default access mode"),
                                                     )
-                                                    .child(access_picker),
+                                                    .child(h_flex().child(access_picker)),
                                             ),
                                     ),
                             )
@@ -1040,20 +1279,31 @@ impl ChatApp {
                     "notes-session",
                     "notes-socket",
                 ];
-                let show_note = |id: &str| settings.notes_enabled && show(id);
+                let expanded = self.notes_advanced_open || matches.is_some();
+                let show_note = |id: &str| settings.notes_enabled && expanded && show(id);
                 page = page.when(show("notes-enabled") || notes_ids.into_iter().any(show_note), |page| {
-                    let mut section = SettingsSection::new("Notes").when(show("notes-enabled"), |section| section.child(
+                    let mut section = SettingsSection::new("Notes").icon(Icon::new(gpui_kit::assets::IconName::BookOpen)).when(show("notes-enabled"), |section| section.child(
                         div().id("notes-enabled").debug_selector(|| "notes-enabled".into()).child(
                             SettingsRow::new("Enable notes")
                                 .description("Shows Notes in the sidebar and palette, its shortcuts, and Save to note in menus.")
                                 .control(
-                                    Switch::new("notes-enabled-setting")
+                                    h_flex().gap_2().items_center().child(Switch::new("notes-enabled-setting")
                                         .checked(settings.notes_enabled)
                                         .accessibility_label("Enable notes")
                                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                             let checked = *checked;
+                                            this.notes_advanced_open = false;
                                             this.update_settings(cx, |s| s.notes_enabled = checked);
-                                        })),
+                                        })))
+                                        .when(settings.notes_enabled, |row| row.child(
+                                            aether_ui::button("notes-advanced-toggle").debug_selector(|| "notes-advanced-toggle".into()).ghost().small()
+                                                .icon(if expanded { gpui_kit::assets::IconName::ChevronUp } else { gpui_kit::assets::IconName::ChevronDown })
+                                                .accessibility_label("Advanced notes settings")
+                                                .tooltip(if expanded { "Hide advanced settings" } else { "Show advanced settings" })
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.notes_advanced_open = !this.notes_advanced_open;
+                                                    cx.notify();
+                                                })))),
                                 ),
                         ),
                     ));
@@ -1103,7 +1353,7 @@ impl ChatApp {
                         section.child(div().text_sm().text_color(aether_ui::theme::danger_text(cx)).child(error))
                     }))
                 });
-                page = page.when(show("hackernews-enabled"), |page| page.child(SettingsSection::new("Hacker News").child(
+                page = page.when(show("hackernews-enabled"), |page| page.child(SettingsSection::new("Hacker News").icon(Icon::new(gpui_kit::assets::IconName::Flame)).child(
                     div().id("hackernews-enabled").debug_selector(|| "hackernews-enabled".into()).child(
                         SettingsRow::new("Enable Hacker News")
                             .description("Shows Hacker News in the sidebar and palette, and its shortcuts.")
@@ -1124,7 +1374,7 @@ impl ChatApp {
                     ]
                     .into_iter()
                     .filter(|(tool, _, _)| show(tool))
-                    .fold(SettingsSection::new("Tool approvals"), |section, (tool, title, description)| {
+                    .fold(SettingsSection::new("Tool approvals").icon(Icon::new(gpui_kit::assets::IconName::Wrench)), |section, (tool, title, description)| {
                         let policy = settings.tool_policy(tool);
                         section.child(
                             SettingsRow::new(title)
@@ -1272,39 +1522,6 @@ impl ChatApp {
                                                 this.update_settings(cx, |s| s.terminal_option_as_meta = checked);
                                             })),
                                     ))) })) });
-            }
-            SettingsTab::Account => {
-                page = page.when(show("api-key"), |page| { page.child(SettingsSection::new("OpenRouter").when(show("api-key"), |section| { section.child(div().id("api-key").debug_selector(|| "api-key".into()).child(SettingsRow::new("API key")
-                            .description(
-                                "Stored in your system keychain, never in the settings file.",
-                            )
-                            .stacked()
-                            .control(
-                                v_flex()
-                                    .gap_2()
-                                    .child(
-                                        h_flex()
-                                            .gap_2()
-                                            .child(div().flex_1().child(field(&self.key_input).aria_label("OpenRouter API key")))
-                                            .child(
-                                                aether_ui::button("save-key")
-                                                    .primary()
-                                                    .small()
-                                                    .label("Save")
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.save_key(window, cx)
-                                                        },
-                                                    )),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .child(self.key_status.clone()),
-                                    ),
-                            ))) })) });
             }
         }
         page
@@ -1535,6 +1752,7 @@ fn labeled_input(
 ) -> impl IntoElement {
     v_flex()
         .flex_1()
+        .min_w_0()
         .gap_1()
         .child(div().text_xs().text_color(muted).child(label))
         .child(field(input).aria_label(label))
@@ -1573,14 +1791,14 @@ impl SettingsTab {
     fn description(self) -> &'static str {
         match self {
             Self::Appearance => "Customize how the app looks.",
+            Self::BottomBar => "Choose bottom bar entries, agent usage and clock formats.",
             Self::Tiling => "Arrange docked session panes in the window.",
             Self::Composer => "Set up dictation in the message box.",
-            Self::Model => "Choose defaults for new conversations.",
+            Self::Model => "Set your default model, response behavior and custom instructions.",
             Self::Providers => "Configure coding agents and their workspace.",
             Self::Worktrees => "Manage isolated checkouts used by your chats.",
             Self::Tools => "Control tool permissions and planning.",
             Self::Terminal => "Set the terminal's colors, font, cursor and keys.",
-            Self::Account => "Manage your OpenRouter credentials.",
         }
     }
 
@@ -1588,14 +1806,14 @@ impl SettingsTab {
         use gpui_kit::assets::IconName as Lucide;
         match self {
             Self::Appearance => Lucide::Palette,
+            Self::BottomBar => Lucide::PanelBottom,
             Self::Tiling => Lucide::LayoutDashboard,
             Self::Composer => Lucide::MessageSquare,
-            Self::Model => Lucide::Cpu,
+            Self::Model => Lucide::MessageCircle,
             Self::Providers => Lucide::Bot,
             Self::Worktrees => Lucide::GitFork,
             Self::Tools => Lucide::Wrench,
             Self::Terminal => Lucide::SquareTerminal,
-            Self::Account => Lucide::KeyRound,
         }
     }
 }
@@ -1658,9 +1876,25 @@ impl ChatApp {
                 cx.listener(|this, _: &SettingsPrevious, _, cx| this.cycle_settings_tab(false, cx)),
             );
         for (label, tabs) in [
-            ("General", &SettingsTab::ALL[0..5]),
-            ("Developer", &SettingsTab::ALL[5..8]),
-            ("Account & Security", &SettingsTab::ALL[8..9]),
+            (
+                "General",
+                &[
+                    SettingsTab::Appearance,
+                    SettingsTab::BottomBar,
+                    SettingsTab::Tiling,
+                    SettingsTab::Composer,
+                    SettingsTab::Model,
+                ][..],
+            ),
+            (
+                "Developer",
+                &[
+                    SettingsTab::Providers,
+                    SettingsTab::Worktrees,
+                    SettingsTab::Tools,
+                    SettingsTab::Terminal,
+                ][..],
+            ),
         ] {
             let mut group = v_flex()
                 .gap_1()

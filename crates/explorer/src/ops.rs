@@ -49,8 +49,32 @@ fn same_file(a: &Path, b: &Path) -> bool {
     matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
+/// Sends `path` to the Recycle Bin through Windows PowerShell's VisualBasic helper.
+#[cfg(windows)]
+pub fn trash(path: &Path) -> std::result::Result<(), String> {
+    let call = if path.is_dir() { "DeleteDirectory" } else { "DeleteFile" };
+    // the path travels in the environment, so no quoting can break it
+    let script = format!(
+        "Add-Type -AssemblyName Microsoft.VisualBasic; \
+         [Microsoft.VisualBasic.FileIO.FileSystem]::{call}($env:AETHER_TRASH, \
+         'OnlyErrorDialogs', 'SendToRecycleBin')"
+    );
+    let out = aether_core::command("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .env("AETHER_TRASH", path)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Couldn't run PowerShell: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// Moves `path` to the Trash with `/usr/bin/trash` on macOS or `gio trash`
 /// elsewhere; without either tool nothing is deleted.
+#[cfg(not(windows))]
 pub fn trash(path: &Path) -> std::result::Result<(), String> {
     let (tool, args): (Option<PathBuf>, &[&str]) = if cfg!(target_os = "macos") {
         (Some(PathBuf::from("/usr/bin/trash")).filter(|p| p.is_file()), &[])

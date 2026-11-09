@@ -585,6 +585,8 @@ pub(crate) struct ChatApp {
     pub(crate) skills: Vec<Skill>,
     pub(crate) skill_tab: SkillSource,
     pub(crate) settings_tab: SettingsTab,
+    pub(crate) settings_provider: Provider,
+    pub(crate) notes_advanced_open: bool,
     pub(crate) settings_search_input: Entity<InputState>,
     pub(crate) font_select: Entity<SelectState<SearchableVec<FontItem>>>,
     pub(crate) opacity_slider: Entity<SliderState>,
@@ -611,10 +613,15 @@ pub(crate) struct ChatApp {
     pub(crate) attaching: HashMap<i64, usize>,
     /// Reply text each chat's next message quotes, by chat id.
     quotes: HashMap<i64, SharedString>,
-    /// In-memory `/btw` cards per chat id, oldest first; never saved.
-    pub(crate) side: HashMap<i64, Vec<chat::SideCard>>,
-    side_runs: u64,
+    /// In-memory `/btw` thread per chat id; one thread, many follow-ups; never saved.
+    pub(crate) btw: HashMap<i64, chat::BtwThread>,
+    /// Whether the BTW panel shows (right sidebar in Tabbed, a tab otherwise).
+    pub(crate) btw_open: bool,
+    /// Window controls ride the main window's top-right tab bar instead of a title bar row.
+    pub(crate) tab_bar_controls: bool,
+    pub(crate) btw_input: Entity<TextareaState>,
     /// Chat, window point and text of the reply selection the toolbar acts on.
+    pub(crate) file_selection_bar: Option<(gpui_kit::Point<gpui_kit::Pixels>, std::path::PathBuf)>,
     selection_bar: Option<(i64, gpui_kit::Point<gpui_kit::Pixels>, SharedString)>,
     /// (chat, message) whose Copy button reads "Copied" until the timer clears it.
     copied: Option<(usize, usize)>,

@@ -566,3 +566,9 @@ impl RenderOnce for InlineRename {
         )
     }
 }
+
+/// Room at the end of a window-top bar for the window controls floating over it.
+pub fn window_controls_gap(window: &Window) -> gpui_kit::Div {
+    let room = cfg!(any(target_os = "linux", target_os = "windows")) && !window.is_fullscreen();
+    gpui_kit::div().flex_none().w(px(if room { 110. } else { 0. }))
+}

@@ -46,7 +46,7 @@ impl ChatApp {
     /// Header with branding, category filter tabs, search filter, and refresh action
     fn render_hn_header(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme();
@@ -194,6 +194,7 @@ impl ChatApp {
                                     this.composer.update(cx, |c, cx| c.focus(window, cx));
                                 })),
                         )
+                        .child(aether_ui::window_controls_gap(window))
                     }),
             )
     }

@@ -468,6 +468,10 @@ pub enum ToolPolicy {
     Allow,
 }
 
+fn default_bottom_bar_hidden_agents() -> Vec<Provider> {
+    vec![Provider::OpenRouter, Provider::OpenCode]
+}
+
 fn default_font_size() -> f32 {
     16.0
 }
@@ -914,6 +918,12 @@ pub struct Settings {
     /// Whether to display seconds in the status bar clock.
     #[serde(default)]
     pub status_bar_show_seconds: bool,
+    /// Bottom bar entries explicitly hidden by the user.
+    #[serde(default)]
+    pub bottom_bar_hidden: Vec<String>,
+    /// Providers omitted from the compact usage strip, but still shown in its popover.
+    #[serde(default = "default_bottom_bar_hidden_agents")]
+    pub bottom_bar_hidden_agents: Vec<Provider>,
     /// Show hook runs in a reply's timeline. Failed hooks always show.
     #[serde(default)]
     pub show_hooks: bool,
@@ -938,6 +948,9 @@ pub struct Settings {
     pub right_panel_share: f32,
     #[serde(default)]
     pub right_panel_collapsed: bool,
+    /// BTW sidebar width in px (Tabbed layout).
+    #[serde(default = "default_background_panel_width")]
+    pub btw_width: f32,
     #[serde(default)]
     pub tile_layout: TileLayout,
     /// Share of the width the Stack layout's first pane takes, 0.3–0.8.
@@ -1073,6 +1086,8 @@ impl Default for Settings {
             status_bar_time_format: TimeFormat::default(),
             status_bar_date_format: DateFormat::default(),
             status_bar_show_seconds: false,
+            bottom_bar_hidden: Vec::new(),
+            bottom_bar_hidden_agents: default_bottom_bar_hidden_agents(),
             show_hooks: false,
             chat_detail: ChatDetail::Normal,
             show_running_agents: false,
@@ -1083,6 +1098,7 @@ impl Default for Settings {
             chat_layout: ChatLayout::Tabbed,
             right_panel_share: default_right_panel_share(),
             right_panel_collapsed: false,
+            btw_width: default_background_panel_width(),
             tile_layout: TileLayout::Manual,
             tile_ratio: 0.55,
             tile_gap: 0.,
