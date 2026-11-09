@@ -393,7 +393,7 @@ fn rooted_window(
 fn agent_settings(opacity: u8) -> Settings {
     Settings {
         window_opacity: opacity,
-        provider: aether_core::Provider::Codex,
+        provider: Some(aether_core::Provider::Codex),
         workspace_root: std::env::temp_dir().to_string_lossy().into_owned(),
         ..Settings::default()
     }

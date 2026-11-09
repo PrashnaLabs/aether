@@ -7,7 +7,7 @@ use crate::actions::{
     ToggleSidebar, ToggleTerminal,
 };
 
-actions!(aether, [About, Hide, HideOthers, ShowAll, Quit, Minimize, Zoom]);
+actions!(aether, [About, Hide, HideOthers, ShowAll, Quit, Minimize, Zoom, CloseWindow]);
 
 /// Installs the native menu bar; call after `bind_keys` so items show their shortcuts.
 pub fn init(cx: &mut App) {
@@ -16,6 +16,7 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(|_: &Minimize, cx| with_window(cx, |window, _| window.minimize_window()));
+    cx.on_action(|_: &CloseWindow, cx| with_window(cx, |window, _| window.remove_window()));
     cx.on_action(|_: &Zoom, cx| with_window(cx, |window, _| window.zoom_window()));
     cx.on_action(|_: &About, cx| {
         with_window(cx, |window, cx| {
@@ -73,8 +74,11 @@ fn menus() -> Vec<Menu> {
             MenuItem::action("Usage", OpenUsage),
             MenuItem::action("Tasks Board", OpenBoard),
         ]),
-        Menu::new("Window")
-            .items([MenuItem::action("Minimize", Minimize), MenuItem::action("Zoom", Zoom)]),
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", Minimize),
+            MenuItem::action("Zoom", Zoom),
+            MenuItem::action("Close Window", CloseWindow),
+        ]),
         Menu::new("Help").items([MenuItem::action("Search Commands…", ToggleCommandMenu)]),
     ]
 }

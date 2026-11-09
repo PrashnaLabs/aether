@@ -9,7 +9,7 @@ fn notes_quick_open_renders_and_closes_for_openrouter(cx: &mut TestAppContext) {
     let root = std::env::temp_dir().join(format!("aether-notes-quick-open-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = Settings {
-        provider: Provider::OpenRouter,
+        provider: Some(Provider::OpenRouter),
         workspace_root: root.display().to_string(),
         ..Settings::default()
     };
