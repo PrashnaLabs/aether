@@ -391,6 +391,9 @@ struct ChatItem {
     active: bool,
     status: ChatStatus,
     pinned: bool,
+    /// The Pinned section's copy; the in-place copy keeps the crew.
+    pin: bool,
+    tally: Option<CrewSummary>,
     watched: bool,
     depth: u8,
     lead: bool,
@@ -726,7 +729,7 @@ impl ChatSidebar {
     }
 
     /// Adds a chat row; `id` keeps its scroll anchor and focus across reorders.
-    /// Pinned chats go to Pinned; others to project `project` (an index from
+    /// Pinned chats go to Pinned and, with a project, stay in it; others to project `project` (an index from
     /// [`Self::project`]), its worktree `worktree` (an index from
     /// [`Self::worktree`]), or the plain Chats list. `line` makes it a
     /// two-line agent row. `on_remove_worktree` adds "Remove worktree…" to
@@ -758,6 +761,8 @@ impl ChatSidebar {
             active,
             status,
             pinned,
+            pin: false,
+            tally: None,
             watched: self.watched.contains(&id),
             depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
@@ -776,8 +781,11 @@ impl ChatSidebar {
             pick: self.pick_for(id),
             now: 0,
         };
+        if pinned {
+            self.pinned.push(ChatItem { pin: true, ..item.clone() });
+        }
         match (project, worktree) {
-            _ if pinned => self.pinned.push(item),
+            _ if pinned && project.is_none() => {}
             (Some(k), Some(w))
                 if k < self.projects.len() && w < self.projects[k].worktrees.len() =>
             {
@@ -974,6 +982,8 @@ impl ChatSidebar {
             active,
             status,
             pinned,
+            pin: false,
+            tally: None,
             watched: self.watched.contains(&id),
             depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
@@ -993,6 +1003,7 @@ impl ChatSidebar {
             now: 0,
         };
         let section = section.into();
+        let item = ChatItem { pin: pinned && section == "Pinned", ..item };
         if let Some((_, list)) = self.custom_sections.iter_mut().find(|(s, _)| s == &section) {
             list.push(item);
         } else {

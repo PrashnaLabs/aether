@@ -189,16 +189,12 @@ pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, u8)>
 }
 
 /// Keep a crew in its lead's section, even across date or project boundaries.
-/// An explicitly pinned child stays independent; an absent lead never hides a chat.
+/// An absent lead never hides a chat.
 pub(super) fn nest_section_children(
     chats: &[Chat],
     sections: Vec<(String, Vec<usize>)>,
 ) -> Vec<(String, Vec<(usize, u8)>)> {
-    let group: Vec<usize> = sections
-        .iter()
-        .flat_map(|(_, ixs)| ixs.iter().copied())
-        .filter(|&ix| !chats[ix].pinned || chats[ix].lead)
-        .collect();
+    let group: Vec<usize> = sections.iter().flat_map(|(_, ixs)| ixs.iter().copied()).collect();
     let mut families: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
     let mut lead = None;
     for (ix, depth) in nest_children(chats, &group) {
@@ -212,16 +208,8 @@ pub(super) fn nest_section_children(
     sections
         .into_iter()
         .filter_map(|(label, ixs)| {
-            let rows: Vec<_> = ixs
-                .into_iter()
-                .flat_map(|ix| {
-                    if chats[ix].pinned && !chats[ix].lead {
-                        vec![(ix, 0)]
-                    } else {
-                        families.remove(&ix).unwrap_or_default()
-                    }
-                })
-                .collect();
+            let rows: Vec<_> =
+                ixs.into_iter().flat_map(|ix| families.remove(&ix).unwrap_or_default()).collect();
             (!rows.is_empty()).then_some((label, rows))
         })
         .collect()
@@ -234,7 +222,7 @@ impl ChatApp {
             self.chats
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| !c.archived && !c.pinned && c.provider != Provider::OpenRouter)
+                .filter(|(_, c)| !c.archived && c.provider != Provider::OpenRouter)
                 .map(|(ix, c)| (ix, project_dir(c, root), c.activity()))
                 .collect(),
         );
@@ -441,12 +429,6 @@ impl ChatApp {
                 .map(|&(ix, d)| (self.chats[ix].id, d))
                 .collect(),
         );
-        for (ix, chat) in self.chats.iter().enumerate().rev() {
-            if chat.pinned && !chat.archived && chat.is_agent() {
-                sidebar =
-                    self.chat_row(sidebar, ix, None, None, self.chat_line(ix, false, now), cx);
-            }
-        }
         let folders: Vec<PathBuf> = groups.iter().map(|g| g.folder.clone()).collect();
         let mut names = disambiguated_names(&folders);
         for (k, group) in groups.iter().enumerate() {
@@ -581,8 +563,7 @@ impl ChatApp {
                 )
             }
         };
-        let sections = std::iter::once(("Pinned".to_string(), pinned)).chain(sections).collect();
-        let sections = if style == SidebarStyle::Minimal {
+        let mut sections = if style == SidebarStyle::Minimal {
             nest_section_children(&self.chats, sections)
         } else {
             sections
@@ -590,6 +571,7 @@ impl ChatApp {
                 .map(|(label, ixs)| (label, ixs.into_iter().map(|ix| (ix, 0)).collect()))
                 .collect()
         };
+        sections.insert(0, ("Pinned".to_string(), pinned.into_iter().map(|ix| (ix, 0)).collect()));
         sidebar = sidebar.child_agents(
             sections
                 .iter()

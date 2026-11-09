@@ -20,6 +20,7 @@ use super::{
 };
 use crate::components::provider_icon;
 use aether_core::{Provider, SidebarStyle};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// One sidebar body row. Custom rows so chat items match the bottom
@@ -124,6 +125,7 @@ impl ChatRow {
             Self::Link { label, .. } => format!("link:{label}").into(),
             Self::Project { header, .. } => format!("project:{}", header.path).into(),
             Self::Worktree { header, .. } => format!("worktree:{}", header.path).into(),
+            Self::Chat { chat, .. } if chat.pin => format!("pin:{}", chat.id).into(),
             Self::Chat { chat, .. } => chat_key(chat.id),
             Self::CardHeader { lead, card, .. } => format!("card:{lead}:{card}").into(),
             Self::CrewMore { lead, .. } => format!("crew-more:{lead}").into(),
@@ -714,6 +716,16 @@ fn families(chats: Vec<ChatItem>) -> Vec<(ChatItem, Vec<ChatItem>)> {
     out
 }
 
+fn tally(list: &[ChatItem], out: &mut HashMap<i64, CrewSummary>) {
+    for (i, lead) in list.iter().enumerate().filter(|(_, c)| c.lead && !c.pin) {
+        let mut summary = CrewSummary::default();
+        for chat in list[i + 1..].iter().take_while(|c| c.depth > lead.depth) {
+            summary.add(chat.status);
+        }
+        out.insert(lead.id, summary);
+    }
+}
+
 fn git_differs(a: &ChatLine, b: &ChatLine) -> bool {
     (&a.place, a.added, a.deleted) != (&b.place, b.added, b.deleted)
 }
@@ -781,7 +793,7 @@ impl ChatSidebar {
             && head.child()
             && matches!((parent, &head.line), (Some(a), Some(b)) if git_differs(a, b));
         let parent = parent.map(|line| line.provider);
-        if self.style == SidebarStyle::Focus || !head.lead || rest.is_empty() {
+        if self.style == SidebarStyle::Focus || !head.lead || rest.is_empty() || head.pin {
             out.push(self.chat_row(head, nested, None, None, 0, parent, carded, git));
             out.extend(self.crew_rows(rest, nested));
             return;
@@ -883,9 +895,29 @@ impl ChatSidebar {
         }
     }
 
+    fn tally_pinned(&mut self) {
+        let mut tallies = HashMap::new();
+        tally(&self.chats, &mut tallies);
+        for project in &self.projects {
+            tally(&project.chats, &mut tallies);
+            for worktree in &project.worktrees {
+                tally(&worktree.chats, &mut tallies);
+            }
+        }
+        for (_, list) in &self.custom_sections {
+            tally(list, &mut tallies);
+        }
+        let pins =
+            self.pinned.iter_mut().chain(self.custom_sections.iter_mut().flat_map(|(_, l)| l));
+        for chat in pins.filter(|c| c.pin && c.lead) {
+            chat.tally = tallies.get(&chat.id).copied().filter(|s| s.total() > 0);
+        }
+    }
+
     /// Body rows in display order.
     pub(super) fn rows(&mut self) -> Vec<ChatRow> {
         let now = self.now;
+        self.tally_pinned();
         let header = |title: &str| ChatRow::Header {
             tools: None,
             title: SharedString::from(title.to_string()),
@@ -1030,6 +1062,15 @@ impl ChatSidebar {
                 collapse: None,
                 tools,
             });
+        }
+        let mut renaming = false;
+        for row in &mut rows {
+            if let ChatRow::Chat { rename_editor, .. } = row
+                && rename_editor.is_some()
+                && std::mem::replace(&mut renaming, true)
+            {
+                *rename_editor = None;
+            }
         }
         if rows.is_empty() {
             rows.extend(self.empty.take().map(|title| ChatRow::Header {

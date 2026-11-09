@@ -377,14 +377,14 @@ fn minimal_crews_follow_leads_across_sections_without_duplicates() {
 }
 
 #[test]
-fn minimal_pinned_lead_keeps_crew_but_pinned_children_stay_independent() {
+fn minimal_sections_keep_pinned_chats_in_their_section() {
     let mut chats = [crew(10, None, true), crew(11, Some(10), false), crew(12, Some(10), false)];
     chats[0].pinned = true;
     chats[2].pinned = true;
-    let sections = vec![("Pinned".into(), vec![2, 0]), ("Today".into(), vec![1])];
+    let sections = vec![("Today".into(), vec![2, 0, 1])];
     assert_eq!(
         nest_section_children(&chats, sections),
-        vec![("Pinned".into(), vec![(2, 0), (0, 0), (1, 1)])]
+        vec![("Today".into(), vec![(0, 0), (1, 1), (2, 1)])]
     );
 }
 

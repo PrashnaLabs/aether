@@ -573,7 +573,7 @@ fn agents_and_pinned_collapse_independently() {
         }
         expected.push("caption:Pinned");
         if !pinned_collapsed {
-            expected.push("chat:7");
+            expected.push("pin:7");
         }
         assert_eq!(actual, expected);
         for (title, collapsed) in [("Agents", agents_collapsed), ("Pinned", pinned_collapsed)] {
@@ -701,4 +701,112 @@ fn show_all_groups_same_card_once_across_statuses() {
     unique.sort();
     unique.dedup();
     assert_eq!(unique.len(), keys.len());
+}
+
+fn pinned_in_project(chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
+    let mut sidebar = ChatSidebar::new("Aether")
+        .style(SidebarStyle::Default)
+        .lead_agents(vec![10])
+        .child_agents(vec![(100, 1), (101, 1)])
+        .project(
+            ProjectHeader {
+                name: "aether".into(),
+                count: chats.len(),
+                collapsed: false,
+                status: ChatStatus::Idle,
+                missing: false,
+                path: "/w/aether".into(),
+            },
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+        );
+    for (ix, &(id, status, pinned, active)) in chats.iter().enumerate() {
+        sidebar = sidebar.chat(
+            ix,
+            id,
+            "t",
+            active,
+            status,
+            pinned,
+            Some(0),
+            None,
+            None,
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            |_, _, _| {},
+            None,
+            None,
+        );
+    }
+    sidebar
+}
+
+#[test]
+fn pinned_chat_appears_in_pinned_and_project() {
+    let mut sidebar = pinned_in_project(&[(7, ChatStatus::Idle, true, false)]);
+    assert_eq!(
+        keys(&mut sidebar),
+        ["caption:Pinned", "pin:7", "caption:Projects", "project:/w/aether", "chat:7"]
+    );
+}
+
+#[test]
+fn pinned_and_project_copies_have_distinct_keys() {
+    let mut sidebar = pinned_in_project(&[
+        (10, ChatStatus::Idle, true, true),
+        (100, ChatStatus::Waiting, true, false),
+        (101, ChatStatus::Idle, false, false),
+    ]);
+    let rows = sidebar.rows();
+    let mut keys: Vec<_> = rows.iter().map(|r| r.key()).collect();
+    let all = keys.len();
+    keys.sort();
+    keys.dedup();
+    assert_eq!(keys.len(), all);
+    let active: Vec<_> = rows
+        .iter()
+        .filter_map(|r| match r {
+            ChatRow::Chat { chat, .. } if chat.active => Some(r.key().to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(active, ["pin:10", "chat:10"]);
+}
+
+#[test]
+fn pinned_lead_shows_rollup_without_crew_in_pinned() {
+    let mut sidebar = pinned_in_project(&[
+        (10, ChatStatus::Idle, true, false),
+        (100, ChatStatus::Waiting, false, false),
+        (101, ChatStatus::Working { since_ms: 0 }, false, false),
+    ]);
+    let rows = sidebar.rows();
+    let find = |key: &str| {
+        rows.iter()
+            .find_map(|r| match r {
+                ChatRow::Chat { chat, crew, open, .. } if r.key() == key => {
+                    Some((chat.tally, *crew, *open))
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (tally, crew, open) = find("pin:10");
+    let tally = tally.unwrap();
+    assert_eq!((tally.needs_you, tally.working), (1, 1));
+    assert_eq!((crew, open), (None, None));
+    assert_eq!(keys_of(&rows).iter().filter(|k| k.starts_with("pin:")).count(), 1);
+    let (tally, crew, open) = find("chat:10");
+    assert_eq!((tally, open), (None, Some(true)));
+    assert_eq!(crew.unwrap().total(), 2);
+}
+
+fn keys_of(rows: &[ChatRow]) -> Vec<String> {
+    rows.iter().map(|r| r.key().to_string()).collect()
 }

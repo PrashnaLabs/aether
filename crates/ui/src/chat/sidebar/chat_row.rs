@@ -646,6 +646,7 @@ pub(super) fn render_chat(
             .child(actions);
         return row.child(title_row).context_menu(context).into_any_element();
     };
+    let tally = chat.tally.map(|summary| rollup(summary, Tier::Narrow, cx));
     let background = background_chip(line.background, ix, cx);
     // The chip carries the background count, so the badge would repeat it.
     let status = match status {
@@ -682,9 +683,15 @@ pub(super) fn render_chat(
                 .child(
                     div().flex_1().min_w_0().truncate().child(project_label(line.project.as_ref())),
                 )
-                .when(status == ChatStatus::Idle && !line.time.is_empty(), |el| {
-                    el.child(div().flex_none().font_features(tabular()).child(line.time.clone()))
-                })
+                .when(
+                    status == ChatStatus::Idle && !line.time.is_empty() && tally.is_none(),
+                    |el| {
+                        el.child(
+                            div().flex_none().font_features(tabular()).child(line.time.clone()),
+                        )
+                    },
+                )
+                .children(tally)
                 .children(background)
                 .child(provider_icon(line.provider).size(rems(0.8125)).flex_none());
             return row.gap_0p5().child(top).child(meta).context_menu(context).into_any_element();
@@ -741,12 +748,14 @@ pub(super) fn render_chat(
                     .gap_1()
                     .items_center()
                     .font_features(tabular())
-                    .when(status != ChatStatus::Idle, |el| {
+                    .when(status != ChatStatus::Idle && tally.is_none(), |el| {
                         el.child(status.badge(("chat-status-badge", ix), Some(now), cx))
                     })
-                    .when(status == ChatStatus::Idle && !corner.is_empty(), |el| {
-                        el.child(corner.clone())
-                    }),
+                    .when(
+                        status == ChatStatus::Idle && !corner.is_empty() && tally.is_none(),
+                        |el| el.child(corner.clone()),
+                    )
+                    .children(tally),
             );
         let line_elem = h_flex()
             .w_full()

@@ -23,7 +23,7 @@ fn fade(color: gpui_kit::Hsla, angle: f32, opacity: f32) -> gpui_kit::Div {
 }
 
 use super::ChatSidebar;
-use super::rows::{ChatRow, chat_key, count_chip};
+use super::rows::{ChatRow, count_chip};
 use super::state::SidebarState;
 use crate::components::BrandMark;
 
@@ -144,7 +144,7 @@ impl RenderOnce for ChatSidebar {
             ChatRow::Chat { chat, rename_editor, .. }
                 if rename_editor.is_some() || (chat.active && self.rename_ix.is_none()) =>
             {
-                Some(chat_key(chat.id))
+                Some(row.key())
             }
             _ => None,
         });
