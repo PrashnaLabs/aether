@@ -31,19 +31,10 @@ impl Render for DetachedWorkspace {
         })
     }
 }
-/// Why `pane` may not leave its window (`close`) or main (detach), if it may not.
-fn pane_refusal(model: &WorkspaceModel, pane: PaneId, close: bool) -> Option<&'static str> {
-    let host = model.window_of(pane)?;
-    if host != 0 {
-        return None;
-    }
-    let layout = model.windows.get(&0)?;
-    if close {
-        return (layout.panes().len() <= 1)
-            .then_some("Can't close the last pane in the main window");
-    }
-    let docked = layout.root.as_ref().map(|r| r.leaves()).unwrap_or_default();
-    (docked == [pane]).then_some("Can't move the last pane out of the main window")
+/// Why `pane` may not be closed, if it may not: main always keeps one pane.
+fn close_refusal(model: &WorkspaceModel, pane: PaneId) -> Option<&'static str> {
+    let layout = model.windows.get(&0).filter(|_| model.window_of(pane) == Some(0))?;
+    (layout.panes().len() <= 1).then_some("Can't close the last pane in the main window")
 }
 impl ChatApp {
     pub(crate) fn restore_session_windows(&mut self, cx: &mut Context<Self>) {
@@ -99,11 +90,6 @@ impl ChatApp {
     ) {
         let Some(chat) = self.workspace.model.panes.get(&pane).copied() else { return };
         let Some(source) = self.workspace.model.window_of(pane) else { return };
-        if let Some(error) = pane_refusal(&self.workspace.model, pane, false) {
-            self.workspace.error = Some(error.into());
-            cx.notify();
-            return;
-        }
         let app = cx.entity();
         let reusable = self
             .workspace
@@ -198,7 +184,7 @@ impl ChatApp {
         });
     }
     pub(crate) fn close_session_pane(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        if let Some(error) = pane_refusal(&self.workspace.model, pane, true) {
+        if let Some(error) = close_refusal(&self.workspace.model, pane) {
             self.workspace.error = Some(error.into());
             return;
         }
