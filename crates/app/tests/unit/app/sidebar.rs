@@ -337,6 +337,20 @@ fn nested_lead_keeps_its_row_and_its_children() {
 }
 
 #[test]
+fn self_parent_lead_still_renders() {
+    let chats = [crew(1, Some(1), true)];
+    assert_eq!(nest_children(&chats, &[0]), [(0, 0)]);
+}
+
+#[test]
+fn lead_cycle_renders_every_chat() {
+    let chats = [crew(1, Some(2), true), crew(2, Some(1), true), crew(3, None, false)];
+    let mut ixs: Vec<usize> = nest_children(&chats, &[0, 1, 2]).iter().map(|r| r.0).collect();
+    ixs.sort();
+    assert_eq!(ixs, [0, 1, 2]);
+}
+
+#[test]
 fn great_grandchildren_cap_at_depth_two() {
     let chats = [
         crew(1, None, true),
@@ -380,10 +394,7 @@ fn minimal_missing_leads_and_normal_chats_keep_their_section_order() {
     let sections = vec![("Project B".into(), vec![2, 0]), ("Project A".into(), vec![1])];
     assert_eq!(
         nest_section_children(&chats, sections),
-        vec![
-            ("Project B".into(), vec![(2, 0), (0, 0)]),
-            ("Project A".into(), vec![(1, 0)]),
-        ]
+        vec![("Project B".into(), vec![(2, 0), (0, 0)]), ("Project A".into(), vec![(1, 0)]),]
     );
 }
 

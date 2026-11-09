@@ -162,20 +162,28 @@ pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, u8)>
         kids: &std::collections::HashMap<i64, Vec<usize>>,
         ix: usize,
         level: u8,
+        seen: &mut std::collections::HashSet<usize>,
         out: &mut Vec<(usize, u8)>,
     ) {
+        if !seen.insert(ix) {
+            return;
+        }
         out.push((ix, level.min(2)));
         if chats[ix].lead
             && let Some(list) = kids.get(&chats[ix].id)
         {
             for &k in list {
-                walk(chats, kids, k, level + 1, out);
+                walk(chats, kids, k, (level + 1).min(2), seen, out);
             }
         }
     }
     let mut out = Vec::with_capacity(group.len());
+    let mut seen = std::collections::HashSet::new();
     for &ix in group.iter().filter(|&&ix| !live(ix)) {
-        walk(chats, &kids, ix, 0, &mut out);
+        walk(chats, &kids, ix, 0, &mut seen, &mut out);
+    }
+    for &ix in group {
+        walk(chats, &kids, ix, 0, &mut seen, &mut out);
     }
     out
 }
