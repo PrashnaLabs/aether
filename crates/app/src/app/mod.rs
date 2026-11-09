@@ -484,6 +484,8 @@ pub(crate) struct ChatApp {
     /// (lead id, spawn_agent args) waiting for a free agent slot, oldest first.
     // ponytail: in memory only; a restart drops queued spawns
     pub(crate) spawn_queue: Vec<(i64, serde_json::Value)>,
+    /// Highest card id ever handed out; new cards count up from it.
+    pub(crate) card_seq: i64,
     pub(crate) session_views: HashMap<i64, SessionState>,
     pub(crate) session_subscriptions: HashMap<i64, Vec<Subscription>>,
     pub(crate) session_windows: HashMap<i64, gpui_kit::WindowId>,

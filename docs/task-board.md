@@ -25,7 +25,7 @@ but their cards still update automatically.
 | Tool | Arguments | Reply |
 | --- | --- | --- |
 | `list_cards` | `filter?` (same fields as `delete_cards`: `ids`, `col`, `project`, `added_by`, `search`, `label`), `bodies?` (show descriptions, indented) | One line per card: `#<id> [<column>] <title> (agent <chat id>) {labels} blocked by #<id> · <n> note(s)`, plus `[project <folder>]` for other projects. Without `col` or `ids`, Done cards are left out |
-| `read_card` | `id` | JSON: description, labels, blockers, linked chats with their state, and every note, including linked agents' results |
+| `read_card` | `id`, `brief?` (leave out the description) | JSON: description, labels, blockers, linked chats with their state, every note including linked agents' results, and `added_by` (`user`, `lead <id>` or `agent <id>`) |
 | `add_card` | `title`, `body?`, `col?` (`backlog`, `todo`, `doing`, `review`; default `todo`), `labels?`, `blocked_by?` | `Created #<id> in todo: <title>` |
 | `move_card` | `id`, `col` | `Moved #<id> todo -> review: <title>` |
 | `update_card` | `id`, any of `title?`, `body?` (replaces; empty clears), `append?` (adds a paragraph), `note?` (dated note signed by the caller), `col?`, `before?` (card id to sit above), `chat?` (also link this chat), `labels?` (replaces), `blocked_by?` (replaces; `[]` clears) | `Updated #<id> todo (title, description): <title>` |
@@ -81,8 +81,8 @@ Replies are plain text to keep tokens low. With Pi the tools appear as
 
 - `move_card` and `update_card` only reach cards in the lead's own project;
   `list_cards` and `delete_cards` take `project: "all"` for the rest.
-- Card ids are short counters (`#66`). Cards made before that kept their
-  millisecond-timestamp ids.
+- Card ids are short counters (`#66`) and are never reused, even after a
+  delete. Cards made before short ids were renumbered on first launch.
 - Queued spawns live in memory; quitting Aether drops them.
 - A lead running in a worktree records the worktree folder on the cards it
   creates, so they may be missing from **This project**; **All projects** shows

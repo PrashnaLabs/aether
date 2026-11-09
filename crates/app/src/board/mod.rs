@@ -25,7 +25,11 @@ impl ChatApp {
         chat: Option<i64>,
         by_agent: bool,
     ) -> i64 {
-        let id = next_id(&self.cards);
+        let id = next_id(&self.cards, self.card_seq);
+        self.card_seq = id;
+        if let Some(store) = &self.store {
+            store.save_card_seq(id);
+        }
         let position = slot(&self.cards, id, col, None);
         self.cards.push(BoardCard {
             id,
@@ -40,6 +44,7 @@ impl ChatApp {
             labels: vec![],
             blocked_by: vec![],
             notes: vec![],
+            author: String::new(),
         });
         self.board_save(id);
         id
@@ -47,8 +52,10 @@ impl ChatApp {
 
     /// `homes`: worktree folder -> its project.
     pub(crate) fn board_tidy(&mut self, homes: &HashMap<String, String>) {
-        let Some(retired) = tidy(&mut self.cards, homes) else { return };
+        let Some(retired) = tidy(&mut self.cards, homes, self.card_seq) else { return };
+        self.card_seq = next_id(&self.cards, self.card_seq) - 1;
         let Some(store) = &self.store else { return };
+        store.save_card_seq(self.card_seq);
         for id in retired {
             store.delete_card(id);
         }

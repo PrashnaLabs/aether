@@ -490,6 +490,7 @@ impl ChatApp {
             stopped_by_lead: HashSet::new(),
             spawn_nonces: HashMap::new(),
             spawn_queue: Vec::new(),
+            card_seq: store.as_ref().map_or(0, |s| s.card_seq()),
             session_views: HashMap::new(),
             session_subscriptions: HashMap::new(),
             session_windows: HashMap::new(),

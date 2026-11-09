@@ -200,7 +200,10 @@ pub fn tool_specs() -> Value {
             "description": "Read one task-board card in full: description, labels, blockers, linked chats with their state, and every note, including linked agents' final results.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"id": {"type": "integer", "description": "Card id from the list_cards tool"}},
+                "properties": {
+                    "id": {"type": "integer", "description": "Card id from the list_cards tool"},
+                    "brief": {"type": "boolean", "description": "Leave out the description"}
+                },
                 "required": ["id"]
             }
         },

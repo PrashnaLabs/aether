@@ -43,6 +43,12 @@ const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
     meta TEXT NOT NULL DEFAULT ''
 )";
 
+/// The highest card id ever handed out, so deleted ids aren't reused.
+const CARD_SEQ_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS card_seq (
+    id INTEGER PRIMARY KEY CHECK (id = 0),
+    last INTEGER NOT NULL
+)";
+
 // Added after the first release; existing files gain them with zero values.
 
 /// A chat as kept on disk. `id` also orders chats, oldest first.
@@ -110,6 +116,7 @@ enum Write {
     Save(Box<SavedChat>),
     SaveCard(SavedCard),
     DeleteCard(i64),
+    CardSeq(i64),
     /// Answered once every write queued before it is done.
     Flush(std::sync::mpsc::Sender<()>),
 }
@@ -133,6 +140,7 @@ impl Store {
             let pool = SqlitePool::connect_with(options).await?;
             sqlx::query(SCHEMA).execute(&pool).await?;
             sqlx::query(CARDS_SCHEMA).execute(&pool).await?;
+            sqlx::query(CARD_SEQ_SCHEMA).execute(&pool).await?;
             let card_cols: Vec<String> = sqlx::query("PRAGMA table_info(cards)")
                 .fetch_all(&pool)
                 .await?
@@ -242,6 +250,18 @@ impl Store {
                             eprintln!("aether: couldn't delete card {id}: {e}");
                         }
                     }
+                    Write::CardSeq(last) => {
+                        if let Err(e) = sqlx::query(
+                            "INSERT INTO card_seq (id, last) VALUES (0, ?)
+                             ON CONFLICT(id) DO UPDATE SET last = max(last, excluded.last)",
+                        )
+                        .bind(last)
+                        .execute(&writer)
+                        .await
+                        {
+                            eprintln!("aether: couldn't save card id {last}: {e}");
+                        }
+                    }
                     Write::Flush(done) => {
                         let _ = done.send(());
                     }
@@ -301,6 +321,21 @@ impl Store {
         let id = chat.id;
         if let Err(e) = self.writes.unbounded_send(Write::Save(Box::new(chat))) {
             eprintln!("aether: couldn't queue save for chat {id}: {e}");
+        }
+    }
+
+    /// The highest card id ever handed out; 0 for a new file.
+    pub fn card_seq(&self) -> i64 {
+        let row = self.rt.block_on(
+            sqlx::query("SELECT last FROM card_seq WHERE id = 0").fetch_optional(&self.pool),
+        );
+        row.ok().flatten().and_then(|r| r.try_get("last").ok()).unwrap_or(0)
+    }
+
+    /// Raises the stored highest card id to `last` in the background; never lowers it.
+    pub fn save_card_seq(&self, last: i64) {
+        if let Err(e) = self.writes.unbounded_send(Write::CardSeq(last)) {
+            eprintln!("aether: couldn't queue card id {last}: {e}");
         }
     }
 

@@ -352,11 +352,11 @@ impl ChatApp {
             None,
             true,
         );
-        if let Some(card) = self.cards.iter_mut().find(|c| c.id == id)
-            && (!labels.is_empty() || !blocked_by.is_empty())
-        {
+        let author = self.card_author(lead_ix);
+        if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
             card.labels = labels;
             card.blocked_by = blocked_by;
+            card.author = author;
             self.board_save(id);
         }
         Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
@@ -434,18 +434,25 @@ impl ChatApp {
             .iter()
             .map(|n| json!({"by": n.by, "age": super::control::age_label(now - n.at), "text": n.text}))
             .collect();
-        Ok(json!({
+        let mut reply = json!({
             "id": card.id,
             "title": card.title,
             "col": card.col.key(),
             "project": card.project,
-            "body": card.body,
             "labels": card.labels,
             "blocked_by": blockers,
             "chats": chats,
             "notes": notes,
-            "added_by": if card.by_agent { "agent" } else { "user" },
-        }))
+            "added_by": match (card.by_agent, card.author.as_str()) {
+                (false, _) => "user",
+                (true, "") => "agent",
+                (true, author) => author,
+            },
+        });
+        if args["brief"] != true {
+            reply["body"] = card.body.clone().into();
+        }
+        Ok(reply)
     }
 
     fn update_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
@@ -815,14 +822,22 @@ impl ChatApp {
                 self.board_link(id, child_id);
                 id
             }
-            None => self.board_add(
-                a.title.clone(),
-                a.task.clone(),
-                Col::Doing,
-                project,
-                Some(child_id),
-                true,
-            ),
+            None => {
+                let id = self.board_add(
+                    a.title.clone(),
+                    a.task.clone(),
+                    Col::Doing,
+                    project,
+                    Some(child_id),
+                    true,
+                );
+                let author = self.card_author(lead_ix);
+                if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
+                    card.author = author;
+                    self.board_save(id);
+                }
+                id
+            }
         };
         let mut reply = json!({
             "id": child_id,

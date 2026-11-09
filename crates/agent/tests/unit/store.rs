@@ -474,3 +474,20 @@ fn old_card_tables_gain_meta() {
     let _ = std::fs::remove_file(&path);
     assert_eq!((cards[0].chat, cards[0].meta.as_str()), (Some(7), ""));
 }
+
+#[test]
+fn card_seq_only_rises_and_survives_reopen() {
+    let path = std::env::temp_dir().join(format!("aether-store-cardseq-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    assert_eq!(store.card_seq(), 0);
+    store.save_card_seq(7);
+    store.save_card_seq(3);
+    store.flush();
+    drop(store);
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let seq = store.card_seq();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(seq, 7);
+}

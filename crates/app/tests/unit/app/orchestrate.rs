@@ -1835,14 +1835,21 @@ fn cards_take_labels_blockers_notes_and_read_back_in_full(cx: &mut TestAppContex
                 "Updated #2 todo (note): Build"
             );
             assert_eq!(
+                text(call("update_card", json!({"id": 2, "labels": ["UI", "Backend"]}))),
+                "Updated #2 todo (labels: ui, backend): Build"
+            );
+            assert_eq!(
                 call("update_card", json!({"id": 2, "notes": "x"})),
                 Err(r#"unknown argument "notes"; expected one of: append, before, blocked_by, body, chat, col, id, labels, note, title"#.into())
             );
             let card = call("read_card", json!({"id": "#2"})).unwrap();
-            assert_eq!(card["labels"], json!(["ui"]));
+            assert_eq!(card["labels"], json!(["ui", "backend"]));
             assert_eq!(card["blocked_by"], json!([{"id": 1, "title": "Design", "col": "todo"}]));
             assert_eq!(card["notes"][0]["by"], "lead 10");
             assert_eq!(card["notes"][0]["text"], "waiting on design");
+            assert_eq!((card["added_by"].as_str(), card["body"].as_str()), (Some("lead 10"), Some("")));
+            let brief = call("read_card", json!({"id": 2, "brief": true})).unwrap();
+            assert!(brief.get("body").is_none(), "brief leaves out the description");
         })
         .unwrap();
     window
@@ -1884,6 +1891,24 @@ fn finished_agents_file_their_reply_on_linked_cards(cx: &mut TestAppContext) {
                 (card.notes[0].by.as_str(), card.notes[0].text.as_str()),
                 (&*format!("agent {a}"), "done: parser fixed")
             );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn deleted_card_ids_are_not_reused(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let add = |app: &mut ChatApp| {
+                app.board_add("c".into(), String::new(), Col::Todo, "/tmp/proj".into(), None, false)
+            };
+            let first = add(app);
+            let second = add(app);
+            app.board_delete(second);
+            assert_eq!(add(app), second + 1, "#{second} stays retired");
+            app.board_delete(first);
+            assert_eq!(add(app), second + 2);
         })
         .unwrap();
 }
