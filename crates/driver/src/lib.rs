@@ -40,6 +40,8 @@ pub struct DriverStartOptions {
     pub lead: Option<LeadTools>,
     /// A `/btw` side run: the CLI shouldn't save its session.
     pub ephemeral: bool,
+    /// Extra env for the CLI, such as the account's config dir.
+    pub env: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +82,7 @@ impl DriverStartOptions {
                     background: Vec::new(),
                     lead: None,
                     ephemeral: false,
+                    env: Vec::new(),
                 };
             }
         };
@@ -95,6 +98,7 @@ impl DriverStartOptions {
             background: Vec::new(),
             lead: None,
             ephemeral: false,
+            env: s.account_env(p),
         }
     }
 }

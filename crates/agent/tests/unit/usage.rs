@@ -1,6 +1,17 @@
 use super::*;
 
 #[test]
+fn codex_auth_path_prefers_the_account_dir() {
+    let dir = std::path::Path::new("/w/codex");
+    assert_eq!(codex_auth_path(Some(dir)), dir.join("auth.json"));
+}
+
+#[test]
+fn claude_account_without_a_credentials_file_has_no_token() {
+    assert_eq!(read_claude_credentials(Some(std::path::Path::new("/nonexistent/aether"))), None);
+}
+
+#[test]
 fn parses_anthropic_usage_json() {
     let payload = r#"{
             "five_hour": {

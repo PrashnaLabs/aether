@@ -65,6 +65,7 @@ fn tool(updates: &[Update]) -> &ToolCall {
 fn opts(access: AccessMode, model: &str, resume: &str) -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: PathBuf::from("/tmp/codex-probe"),
         model: model.into(),

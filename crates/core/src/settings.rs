@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -798,6 +799,14 @@ impl Default for NotesSettings {
     }
 }
 
+/// A named login for one provider's CLI, kept in its own config dir.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Account {
+    pub provider: Provider,
+    pub name: String,
+    pub dir: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -924,6 +933,12 @@ pub struct Settings {
     /// Providers omitted from the compact usage strip, but still shown in its popover.
     #[serde(default = "default_bottom_bar_hidden_agents")]
     pub bottom_bar_hidden_agents: Vec<Provider>,
+    /// Extra CLI logins, each a config dir the CLI keeps its own credentials in.
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    /// Account name in use per provider key; unlisted providers use the CLI's own login.
+    #[serde(default)]
+    pub default_accounts: BTreeMap<String, String>,
     /// Show hook runs in a reply's timeline. Failed hooks always show.
     #[serde(default)]
     pub show_hooks: bool,
@@ -975,6 +990,30 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// The account chosen for `provider`, if it still exists and has a dir.
+    pub fn active_account(&self, provider: Provider) -> Option<&Account> {
+        let name = self.default_accounts.get(provider.key())?;
+        self.accounts
+            .iter()
+            .find(|a| a.provider == provider && a.name == *name && !a.dir.trim().is_empty())
+    }
+
+    /// The active account's config dir, `~` expanded.
+    pub fn account_dir(&self, provider: Provider) -> Option<PathBuf> {
+        self.active_account(provider).map(|a| crate::paths::expand_tilde(a.dir.trim()))
+    }
+
+    /// Env that points the CLI at the active account, without logging out of the other.
+    pub fn account_env(&self, provider: Provider) -> Vec<(String, String)> {
+        let var = match provider {
+            Provider::Claude => "CLAUDE_CONFIG_DIR",
+            Provider::Codex => "CODEX_HOME",
+            _ => return Vec::new(),
+        };
+        let dir = self.account_dir(provider);
+        dir.map(|d| vec![(var.to_string(), d.to_string_lossy().into_owned())]).unwrap_or_default()
+    }
+
     pub fn default_access(&self, provider: Provider) -> AccessMode {
         let modes = AccessMode::for_provider(provider);
         self.provider_access
@@ -1088,6 +1127,8 @@ impl Default for Settings {
             status_bar_show_seconds: false,
             bottom_bar_hidden: Vec::new(),
             bottom_bar_hidden_agents: default_bottom_bar_hidden_agents(),
+            accounts: Vec::new(),
+            default_accounts: BTreeMap::new(),
             show_hooks: false,
             chat_detail: ChatDetail::Normal,
             show_running_agents: false,
