@@ -428,6 +428,57 @@ fn native_lead_chats_get_the_lead_marker(cx: &mut gpui_kit::TestAppContext) {
     assert!(visual.debug_bounds("chat-lead-1").is_none());
 }
 
+fn pinned_sidebar(cx: &mut gpui_kit::TestAppContext) -> gpui_kit::VisualTestContext {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        app.chats.clear();
+        for (id, project, pinned) in
+            [(1, "/w/a", true), (2, "/w/b", true), (3, "/w/h", true), (4, "/w/a", false)]
+        {
+            let mut chat = chat_with("t", &["hi", "hello"]);
+            chat.id = id;
+            chat.provider = Provider::Claude;
+            chat.project = project.into();
+            chat.pinned = pinned;
+            app.chats.push(chat);
+        }
+        app.active = 3;
+        app.sidebar_view = SidebarView::Projects;
+        app.settings.hidden_projects = vec!["/w/h".into()];
+        app
+    });
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    visual
+}
+
+#[gpui_kit::test]
+fn pinned_chat_in_hidden_project_shows_only_in_pinned(cx: &mut gpui_kit::TestAppContext) {
+    let mut visual = pinned_sidebar(cx);
+    assert!(visual.debug_bounds("pin:3").is_some());
+    assert!(visual.debug_bounds("chat:3").is_none());
+    assert!(visual.debug_bounds("chat:1").is_some());
+}
+
+#[gpui_kit::test]
+fn default_pinned_lists_newest_first(cx: &mut gpui_kit::TestAppContext) {
+    let mut visual = pinned_sidebar(cx);
+    let y: Vec<_> =
+        ["pin:3", "pin:2", "pin:1"].map(|k| visual.debug_bounds(k).unwrap().origin.y).into();
+    assert!(y.is_sorted());
+}
+
 #[gpui_kit::test]
 fn direct_and_archive_nav_buttons_toggle_back(cx: &mut gpui_kit::TestAppContext) {
     cx.update(gpui_kit::init);

@@ -221,6 +221,20 @@ fn lead_with_waiting_child_sits_in_needs_you() {
 }
 
 #[test]
+fn done_member_is_recent_but_done_lead_needs_you() {
+    use aether_ui::ChatStatus;
+    let mut chats = vec![
+        (0, ChatStatus::Idle, 9, None),
+        (1, ChatStatus::Done, 8, Some(0)),
+        (2, ChatStatus::Idle, 7, Some(0)),
+        (3, ChatStatus::Idle, 6, Some(0)),
+    ];
+    assert_eq!(focus_sections(&chats), [("Recent", vec![0, 1, 2, 3])]);
+    chats[0].1 = ChatStatus::Done;
+    assert_eq!(focus_sections(&chats), [("Needs you", vec![0, 1, 2, 3])]);
+}
+
+#[test]
 fn focus_section_count_counts_rows_needing_attention() {
     use aether_ui::ChatStatus;
     let mut chats = vec![(0, ChatStatus::Idle, 99, None)];

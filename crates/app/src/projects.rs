@@ -337,7 +337,8 @@ pub(crate) fn focus_sections(
             families.len() - 1
         });
         let (_, rank, members) = &mut families[at];
-        *rank = (*rank).min(bucket(status));
+        let own = if *ix != top && *status == ChatStatus::Done { 2 } else { bucket(status) };
+        *rank = (*rank).min(own);
         members.push(*ix);
     }
     for (top, _, members) in &mut families {

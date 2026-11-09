@@ -472,6 +472,14 @@ impl ChatApp {
                     self.chat_row(sidebar, ix, Some(k), None, self.chat_line(ix, true, now), cx);
             }
         }
+        sidebar = sidebar.pins_only();
+        for ix in (0..self.chats.len()).rev() {
+            let chat = &self.chats[ix];
+            if chat.pinned && !chat.archived && chat.is_agent() {
+                sidebar =
+                    self.chat_row(sidebar, ix, None, None, self.chat_line(ix, false, now), cx);
+            }
+        }
         if !hidden.is_empty() {
             let label = match hidden.len() {
                 1 => "Show 1 hidden project".to_string(),

@@ -185,6 +185,10 @@ impl RenderOnce for ChatSidebar {
                 let key = keys[ix].clone();
                 div()
                     .id(ElementId::Name(key.clone()))
+                    .debug_selector({
+                        let key = key.clone();
+                        move || key.to_string()
+                    })
                     .when(ix == 0, |el| el.pt_3())
                     .when(ix + 1 == count, |el| el.pb_3())
                     .child(row.render(key, &state, window, cx))

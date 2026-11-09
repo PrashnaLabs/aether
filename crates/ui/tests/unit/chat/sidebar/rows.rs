@@ -638,7 +638,7 @@ fn git_flags(sidebar: &mut ChatSidebar) -> Vec<(i64, bool)> {
 
 #[test]
 fn show_all_groups_consecutive_children_by_card() {
-    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 4], None);
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 6], None);
     sidebar.crew_open.insert(10, true);
     sidebar.crew_all.insert(10);
     sidebar.cards =
@@ -647,10 +647,19 @@ fn show_all_groups_consecutive_children_by_card() {
     let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
     assert_eq!(
         keys[3..],
-        ["card:10:9", "chat:102", "card:10:7", "chat:101", "chat:100", "chat:103"]
+        [
+            "chat:102",
+            "card:10:7",
+            "chat:101",
+            "chat:100",
+            "chat:105",
+            "chat:104",
+            "chat:103",
+            "crew-more:10"
+        ]
     );
-    assert!(matches!(&rows[5], ChatRow::CardHeader { count: 2, card: 7, .. }));
-    assert!(!rows[5].focusable());
+    assert!(matches!(&rows[4], ChatRow::CardHeader { count: 2, card: 7, .. }));
+    assert!(!rows[4].focusable());
     let carded: Vec<_> = rows
         .iter()
         .filter_map(|r| match r {
@@ -658,7 +667,27 @@ fn show_all_groups_consecutive_children_by_card() {
             _ => None,
         })
         .collect();
-    assert_eq!(carded[1..], [(102, true), (101, true), (100, true), (103, false)]);
+    assert_eq!(carded[1..5], [(102, false), (101, true), (100, true), (105, false)]);
+}
+
+#[test]
+fn single_card_child_gets_no_header_and_keeps_its_title() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 6], None);
+    sidebar.crew_open.insert(10, true);
+    sidebar.crew_all.insert(10);
+    sidebar.cards = [(100, (7, "Auth".into()))].into();
+    let rows = sidebar.rows();
+    assert!(!keys_of(&rows).iter().any(|k| k.starts_with("card:")));
+    assert!(rows.iter().all(|r| !matches!(r, ChatRow::Chat { carded: true, .. })));
+}
+
+#[test]
+fn card_headers_need_more_than_five_children() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 5], None);
+    sidebar.crew_open.insert(10, true);
+    sidebar.crew_all.insert(10);
+    sidebar.cards = [(100, (7, "Auth".into())), (101, (7, "Auth".into()))].into();
+    assert!(!keys(&mut sidebar).iter().any(|k| k.starts_with("card:")));
 }
 
 #[test]
@@ -689,12 +718,26 @@ fn child_in_own_worktree_shows_git_line() {
 }
 
 #[test]
+fn sub_lead_on_own_branch_shows_git_line() {
+    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 2], None);
+    let chats = &mut sidebar.projects[0].chats;
+    chats[1].lead = true;
+    let mut grandchild = chats[2].clone();
+    (grandchild.id, grandchild.depth) = (200, 2);
+    chats.insert(2, grandchild);
+    with_lines(&mut sidebar, &[("main", 3), ("wt/x", 3), ("wt/x", 3), ("main", 3)]);
+    assert!(git_flags(&mut sidebar).contains(&(100, true)));
+}
+
+#[test]
 fn show_all_groups_same_card_once_across_statuses() {
     let statuses = [
         ChatStatus::Working { since_ms: 0 },
         ChatStatus::Done,
         ChatStatus::Working { since_ms: 0 },
         ChatStatus::Done,
+        ChatStatus::Idle,
+        ChatStatus::Idle,
     ];
     let mut sidebar = default_crew_sidebar(&statuses, None);
     sidebar.crew_open.insert(10, true);
@@ -714,9 +757,7 @@ fn show_all_groups_same_card_once_across_statuses() {
             _ => None,
         })
         .collect();
-    assert_eq!(headers.len(), 2);
-    assert!(headers.contains(&("card:10:7".into(), 7, 3)));
-    assert!(headers.contains(&("card:10:9".into(), 9, 1)));
+    assert_eq!(headers, [("card:10:7".into(), 7, 3)]);
     let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
     let mut unique = keys.clone();
     unique.sort();
@@ -826,6 +867,25 @@ fn pinned_lead_shows_rollup_without_crew_in_pinned() {
     let (tally, crew, open) = find("chat:10");
     assert_eq!((tally, open), (None, Some(true)));
     assert_eq!(crew.unwrap().total(), 2);
+}
+
+#[test]
+fn pinned_child_copy_is_top_level() {
+    use super::super::state::{Tree, parent_rows};
+    let mut sidebar = pinned_in_project(&[
+        (7, ChatStatus::Idle, true, false),
+        (10, ChatStatus::Idle, false, false),
+        (100, ChatStatus::Waiting, true, false),
+    ]);
+    let rows = sidebar.rows();
+    let at = keys_of(&rows).iter().position(|k| k == "pin:100").unwrap();
+    assert!(matches!(&rows[at], ChatRow::Chat { chat, .. } if chat.depth == 0));
+    let parents = parent_rows(rows.iter().map(|row| match row {
+        ChatRow::Chat { chat, .. } => Tree::Chat { depth: chat.depth, pin: chat.pin },
+        ChatRow::CrewMore { .. } | ChatRow::CardHeader { .. } => Tree::Inside,
+        _ => Tree::Break,
+    }));
+    assert_eq!(parents[at], None);
 }
 
 fn keys_of(rows: &[ChatRow]) -> Vec<String> {

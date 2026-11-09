@@ -490,6 +490,7 @@ pub struct ChatSidebar {
     custom_sections: Vec<(SharedString, Vec<ChatItem>)>,
     style: SidebarStyle,
     archived: bool,
+    pins_only: bool,
     top: Vec<SectionButtonItem>,
     section_tools: Option<ToolsFactory>,
     rename_ix: Option<usize>,
@@ -536,6 +537,7 @@ impl ChatSidebar {
             custom_sections: Vec::new(),
             style: SidebarStyle::Default,
             archived: false,
+            pins_only: false,
             top: Vec::new(),
             section_tools: None,
             rename_ix: None,
@@ -782,7 +784,10 @@ impl ChatSidebar {
             now: 0,
         };
         if pinned {
-            self.pinned.push(ChatItem { pin: true, ..item.clone() });
+            self.pinned.push(ChatItem { pin: true, depth: 0, ..item.clone() });
+        }
+        if self.pins_only {
+            return self;
         }
         match (project, worktree) {
             (Some(k), Some(w))
@@ -876,6 +881,14 @@ impl ChatSidebar {
     /// Action whose shortcut the collapse tooltip shows.
     pub fn collapse_action(mut self, action: impl Action) -> Self {
         self.collapse_action = Some(Box::new(action));
+        self
+    }
+
+    /// Drops the Pinned copies added so far; [`Self::chat`] calls after
+    /// this fill Pinned in call order and skip the chat's normal place.
+    pub fn pins_only(mut self) -> Self {
+        self.pinned.clear();
+        self.pins_only = true;
         self
     }
 
@@ -1002,7 +1015,8 @@ impl ChatSidebar {
             now: 0,
         };
         let section = section.into();
-        let item = ChatItem { pin: pinned && section == "Pinned", ..item };
+        let pin = pinned && section == "Pinned";
+        let item = ChatItem { pin, depth: if pin { 0 } else { item.depth }, ..item };
         if let Some((_, list)) = self.custom_sections.iter_mut().find(|(s, _)| s == &section) {
             list.push(item);
         } else {

@@ -829,7 +829,7 @@ impl ChatSidebar {
             crew.len(),
             parent,
             carded,
-            false,
+            git,
         ));
         let mut members: Vec<_> = members.into_iter().map(Some).collect();
         let mut visible: Vec<usize> = crew
@@ -841,7 +841,7 @@ impl ChatSidebar {
         let cards: Vec<Option<&(i64, SharedString)>> = visible
             .iter()
             .map(|&ix| {
-                let grouped = all && self.style == SidebarStyle::Default;
+                let grouped = all && crew.len() > 5 && self.style == SidebarStyle::Default;
                 grouped
                     .then(|| members[ix].as_ref())
                     .flatten()
@@ -862,8 +862,13 @@ impl ChatSidebar {
         });
         let (ixs, cards): (Vec<usize>, Vec<_>) = paired.into_iter().unzip();
         visible = ixs;
+        let run = |n: usize, id: &i64| {
+            let same = |c: &Option<&(i64, SharedString)>| c.is_some_and(|(i, _)| i == id);
+            cards[n..].iter().take_while(|c| same(c)).count()
+                + cards[..n].iter().rev().take_while(|c| same(c)).count()
+        };
         for (n, &ix) in visible.iter().enumerate() {
-            let card = cards[n];
+            let card = cards[n].filter(|(id, _)| run(n, id) > 1);
             if let Some((id, title)) = card
                 && n.checked_sub(1).and_then(|p| cards[p]).is_none_or(|(prev, _)| prev != id)
             {
@@ -871,10 +876,7 @@ impl ChatSidebar {
                     lead,
                     card: *id,
                     title: title.clone(),
-                    count: cards[n..]
-                        .iter()
-                        .take_while(|c| c.is_some_and(|(i, _)| i == id))
-                        .count(),
+                    count: run(n, id),
                     depth,
                     nested,
                 });
