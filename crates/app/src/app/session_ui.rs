@@ -178,10 +178,24 @@ impl ChatApp {
         let prev = self.ui_owner;
         let prev_draft_owner = self.draft_owner;
         let prev_active = self.chats.get(self.active).map(|c| c.id);
+        let detached = self
+            .workspace
+            .model
+            .pane_for(id)
+            .and_then(|pane| self.workspace.model.window_of(pane))
+            .is_some_and(|host| host != 0);
+        let page = self.page;
         self.swap_session_ui(id);
         self.active = ix;
         self.draft_owner = Some(id);
+        // detached windows have no page; main's Project/Settings page mustn't strip their tabs
+        if detached {
+            self.page = Page::Chat;
+        }
         let result = f(self, cx);
+        if detached && self.page == Page::Chat {
+            self.page = page;
+        }
         if let Some(prev) = prev {
             self.swap_session_ui(prev);
         }
