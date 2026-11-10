@@ -45,7 +45,7 @@ pub(super) fn row(
         .gap(px(8.))
         .items_center()
         .px(px(10.))
-        .py(px(8.))
+        .py(px(4.))
         .text_sm();
     match off {
         None => row_style(base, false, cx),
