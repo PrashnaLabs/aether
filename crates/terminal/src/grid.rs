@@ -372,6 +372,7 @@ pub(crate) fn search_lines<'a>(
     if needle.is_empty() {
         return Vec::new();
     }
+    const MAX_MATCHES: usize = 1000;
     let mut matches = Vec::new();
     for (line, text) in lines {
         let hay: Vec<char> = text.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect();
@@ -379,6 +380,9 @@ pub(crate) fn search_lines<'a>(
         while col + needle.len() <= hay.len() {
             if hay[col..col + needle.len()] == needle[..] {
                 matches.push(SearchMatch { line, start_col: col, end_col: col + needle.len() });
+                if matches.len() >= MAX_MATCHES {
+                    return matches;
+                }
                 col += needle.len();
             } else {
                 col += 1;

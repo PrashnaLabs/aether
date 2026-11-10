@@ -19,26 +19,26 @@ static CHECKED: Mutex<Option<(PathBuf, u64, Option<SystemTime>, bool)>> = Mutex:
 
 pub fn installed() -> bool {
     let Some(path) = model_path() else { return false };
-    let Ok(meta) = fs::metadata(&path) else { return false };
+    verify_model(&path)
+}
+
+pub(crate) fn verify_model(path: &Path) -> bool {
+    let Ok(meta) = fs::metadata(path) else { return false };
     if meta.len() != MODEL_BYTES {
         return false;
     }
-    let stamp = (path.clone(), meta.len(), meta.modified().ok());
+    let stamp = (path.to_path_buf(), meta.len(), meta.modified().ok());
     if let Ok(guard) = CHECKED.lock()
         && let Some((p, len, modified, ok)) = &*guard
         && (p, *len, *modified) == (&stamp.0, stamp.1, stamp.2)
     {
         return *ok;
     }
-    let ok = file_verified(&path, SHA256, MODEL_BYTES);
+    let ok = file_verified(path, SHA256, MODEL_BYTES);
     if let Ok(mut guard) = CHECKED.lock() {
         *guard = Some((stamp.0, stamp.1, stamp.2, ok));
     }
     ok
-}
-
-pub(crate) fn verify_model(path: &Path) -> bool {
-    file_verified(path, SHA256, MODEL_BYTES)
 }
 
 fn file_verified(path: &Path, sha256: &str, bytes: u64) -> bool {

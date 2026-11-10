@@ -166,6 +166,12 @@ pub(crate) fn grep_files(
     let mut results = Vec::new();
     for rel in files {
         let path = root.join(rel);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() || meta.len() > 10 * 1024 * 1024 {
+            continue;
+        }
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
