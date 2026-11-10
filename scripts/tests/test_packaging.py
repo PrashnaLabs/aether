@@ -79,6 +79,21 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(offset, len(data))
         self.assertEqual(chunks, 7)
 
+    def test_windows_icon_contains_existing_artwork_at_each_size(self):
+        data = (build.ICONS / "Aether.ico").read_bytes()
+        sizes = (16, 32, 48, 64, 128, 256)
+        self.assertEqual(struct.unpack_from("<HHH", data), (0, 1, len(sizes)))
+        expected_offset = 6 + 16 * len(sizes)
+        for index, size in enumerate(sizes):
+            width, height, colors, reserved, planes, depth, length, offset = struct.unpack_from(
+                "<BBBBHHII", data, 6 + 16 * index)
+            self.assertEqual((width or 256, height or 256), (size, size))
+            self.assertEqual((colors, reserved, planes, depth), (0, 0, 1, 32))
+            self.assertEqual(offset, expected_offset)
+            self.assertEqual(data[offset:offset + length], (build.ICONS / f"{size}.png").read_bytes())
+            expected_offset += length
+        self.assertEqual(len(data), expected_offset)
+
     def test_env_value_reads_dotenv_when_environment_lacks_key(self):
         env = self.root / ".env"
         env.write_text('OTHER=x\nAETHER_TEST_KEY="Name <a@b.c>"\n')

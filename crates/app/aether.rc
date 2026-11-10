@@ -1,0 +1,2 @@
+// GPUI loads the application icon from resource 1.
+1 ICON "assets/app-icons/Aether.ico"

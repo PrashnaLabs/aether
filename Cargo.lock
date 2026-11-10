@@ -326,6 +326,7 @@ dependencies = [
  "block2 0.6.2",
  "chrono",
  "dotenvy",
+ "embed-resource",
  "futures",
  "gpui-kit",
  "gpui-pre",
