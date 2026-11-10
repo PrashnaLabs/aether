@@ -225,6 +225,14 @@ fn background_chip(count: usize, ix: usize, cx: &App) -> Option<AnyElement> {
     })
 }
 
+/// How long a working chat has run, for rows that already show its spinner.
+pub(super) fn run_clock(status: ChatStatus, now_ms: i64) -> Option<String> {
+    match status {
+        ChatStatus::Working { since_ms } => super::live::since(Some(since_ms), now_ms),
+        _ => None,
+    }
+}
+
 fn project_label(project: Option<&SharedString>) -> SharedString {
     project.cloned().unwrap_or_else(|| "No project".into())
 }
@@ -682,6 +690,7 @@ pub(super) fn render_chat(
                 .items_center()
                 .child(slot(swap(icon, chevron)))
                 .child(title_cell(title.clone()))
+                .children(run_clock(status, now).map(|clock| time_text(clock.into())))
                 .child(
                     div()
                         .flex_none()
@@ -706,13 +715,32 @@ pub(super) fn render_chat(
             .child(trailing)
             .children(approve_action)
             .child(actions);
-        if !big {
+        let minimal = style == SidebarStyle::Minimal;
+        if !big && !minimal {
             return with_card(row.child(top).context_menu(context), ix, title, card_line);
         }
+        let folder = line.as_ref().filter(|_| minimal).map(|line| {
+            h_flex()
+                .min_w_0()
+                .gap_1()
+                .items_center()
+                .text_xs()
+                .text_color(muted)
+                .child(
+                    Icon::new(Lucide::Folder)
+                        .size(rems(0.75))
+                        .flex_none()
+                        .when_some(line.project.as_ref(), |icon, name| {
+                            icon.text_color(project_color(name, cx))
+                        }),
+                )
+                .child(div().min_w_0().truncate().child(project_label(line.project.as_ref())))
+        });
         let second = h_flex()
             .pl(rems(1.5))
             .gap_1p5()
             .items_center()
+            .children(folder)
             .when(!chat.providers.is_empty(), |el| el.child(avatars(&chat.providers, cx)))
             .child(rollup(summary, tier, cx));
         let row = row

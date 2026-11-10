@@ -138,3 +138,11 @@ fn status_state_predicates_and_waiting_action() {
     assert!(!ChatStatus::Done.is_busy());
     assert!(!ChatStatus::Idle.is_busy());
 }
+
+#[test]
+fn run_clock_only_for_working_chats() {
+    let now = 169_000;
+    assert_eq!(run_clock(ChatStatus::Working { since_ms: 0 }, now), Some("2m 49s".into()));
+    assert_eq!(run_clock(ChatStatus::Idle, now), None);
+    assert_eq!(run_clock(ChatStatus::Waiting, now), None);
+}
