@@ -9,6 +9,20 @@ fn pend() -> crate::orchestrator::OrchPending {
     Arc::new(AtomicUsize::new(0))
 }
 
+#[test]
+fn tcp_listener_starts_before_config_directory_exists() {
+    let dir = std::env::temp_dir().join(format!("ao-tcp-first-run-{}", std::process::id()));
+    let path = dir.join("aether/orchestrator.sock");
+    let _ = std::fs::remove_dir_all(&dir);
+    let listener = listen_tcp(&path).expect("first-run orchestrator must create its directory");
+    let addr = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(addr, listener.local_addr().unwrap().to_string());
+    assert!(listener.local_addr().unwrap().ip().is_loopback());
+    let _client = std::net::TcpStream::connect(addr).unwrap();
+    listener.accept().unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn sock(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("ao-{name}-{}", std::process::id()));
     #[cfg(unix)]

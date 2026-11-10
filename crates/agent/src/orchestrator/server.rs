@@ -49,11 +49,7 @@ pub(crate) fn listen(
         listener
     };
     #[cfg(windows)]
-    let listener = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-        std::fs::write(path, listener.local_addr()?.to_string())?;
-        listener
-    };
+    let listener = listen_tcp(path)?;
     let conns = Arc::new(AtomicUsize::new(0));
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -70,6 +66,16 @@ pub(crate) fn listen(
         }
     });
     Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn listen_tcp(path: &Path) -> std::io::Result<std::net::TcpListener> {
+    // The orchestrator starts before the store creates the config directory.
+    let dir = path.parent().ok_or_else(|| std::io::Error::other("no socket directory"))?;
+    aether_core::create_private_dir(dir)?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    std::fs::write(path, listener.local_addr()?.to_string())?;
+    Ok(listener)
 }
 
 fn serve(
