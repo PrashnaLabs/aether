@@ -74,8 +74,7 @@ impl Render for ChatApp {
         let pane_header = self.page == Page::Chat
             && self.workspace.model.windows.get(&0).is_some_and(|w| !w.panes().is_empty());
         let header = if show_header && !pane_header {
-            let pop = self.render_workspace_pop(window, cx);
-            Some(self.render_header(pop, cx).into_any_element())
+            Some(self.render_header(cx).into_any_element())
         } else if self.page == Page::Project {
             Some(self.render_project_top_bar(cx).into_any_element())
         } else {

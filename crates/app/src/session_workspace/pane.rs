@@ -307,9 +307,7 @@ impl ChatApp {
                     );
                 let lights = aether_ui::traffic_lights_gap(inset, window, cx)
                     .when(beside_rail, |gap| gap.w(px(40.)));
-                let pop = focused.then(|| self.render_workspace_pop(window, cx)).flatten();
                 let merged = self.render_header_with_pane(
-                    pop,
                     controls,
                     leading == Some(pane),
                     focused,

@@ -601,7 +601,7 @@ impl ChatApp {
     }
 
     /// Window the latest reply's provider reported for this model, else the catalog's, else a guess.
-    pub(in crate::app) fn context_limit(&self, chat: &Chat) -> u64 {
+    pub(crate) fn context_limit(&self, chat: &Chat) -> u64 {
         let model = chat.model(&self.settings);
         let sent_with = (!model.is_empty()).then(|| model.clone());
         chat.messages

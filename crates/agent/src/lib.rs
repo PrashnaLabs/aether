@@ -2,6 +2,7 @@ mod agent;
 mod events;
 mod external;
 mod gate;
+pub mod inventory;
 mod models;
 pub mod orchestrator;
 pub mod skills;

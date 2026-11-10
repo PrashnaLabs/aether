@@ -1,11 +1,9 @@
 use crate::session_workspace::WindowId;
-use aether_ui::theme::Corners;
 use std::path::{Path, PathBuf};
 
 use aether_git::Branches;
-use aether_ui::{TriggerBounds, popup_height, room};
 use gpui_kit::component::input::InputState;
-use gpui_kit::component::{ActiveTheme, FocusTrapElement, v_flex};
+use gpui_kit::component::v_flex;
 use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, Role, SharedString, Window, actions, div,
     prelude::*, px,
@@ -36,10 +34,7 @@ pub(crate) const PUBLISH_NAME_CONTEXT: &str = "PopPublishName";
 pub(crate) const SCRIPT_FORM_CONTEXT: &str = "PopScriptForm";
 
 pub(crate) struct WorkspacePopover {
-    pub(crate) open: bool,
     pub(crate) view: PopView,
-    pub(crate) focus: FocusHandle,
-    pub(crate) restore: Option<FocusHandle>,
     pub(crate) machine: Option<SharedString>,
     pub(crate) error: Option<SharedString>,
     pub(crate) script_name: Entity<InputState>,
@@ -51,21 +46,16 @@ pub(crate) struct WorkspacePopover {
     pub(crate) publish_private: bool,
     pub(crate) publishing: bool,
     pub(crate) gh_checking: bool,
-    pub(crate) trigger: TriggerBounds,
     rows: Vec<FocusHandle>,
 }
 
 impl WorkspacePopover {
     pub(crate) fn new(window: &mut Window, cx: &mut App) -> Self {
-        let focus = cx.focus_handle();
         let branch_query =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search or create a branch…"));
         let mut input = |hint| cx.new(|cx| InputState::new(window, cx).placeholder(hint));
         Self {
-            open: false,
             view: PopView::Main,
-            focus,
-            restore: None,
             machine: None,
             error: None,
             script_name: input("dev"),
@@ -77,14 +67,12 @@ impl WorkspacePopover {
             publish_private: true,
             publishing: false,
             gh_checking: false,
-            trigger: TriggerBounds::default(),
             rows: Vec::new(),
         }
     }
 
     pub(crate) fn dismiss(&mut self) {
-        self.open = false;
-        self.restore = None;
+        self.view = PopView::Main;
     }
 
     pub(crate) fn rows(&mut self, n: usize, cx: &mut App) -> &[FocusHandle] {
@@ -117,14 +105,9 @@ fn read_machine() -> Option<String> {
 }
 
 impl ChatApp {
-    pub(crate) fn toggle_workspace_pop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.workspace_pop.open {
-            return self.close_workspace_pop(window, cx);
-        }
-        let pop = &mut self.workspace_pop;
-        pop.open = true;
-        pop.restore = window.focused(cx);
-        if pop.machine.is_none() {
+    /// Reads the machine name and remote the Workspace panel's rows show.
+    pub(crate) fn load_workspace_info(&mut self, cx: &mut Context<Self>) {
+        if self.workspace_pop.machine.is_none() {
             let task = cx.background_executor().spawn(async { read_machine() });
             cx.spawn(async move |this, cx| {
                 let name = task.await;
@@ -137,7 +120,6 @@ impl ChatApp {
             .detach();
         }
         self.load_pop_remote(cx);
-        self.pop_view(PopView::Main, window, cx);
     }
 
     pub(crate) fn pop_view(&mut self, view: PopView, window: &mut Window, cx: &mut Context<Self>) {
@@ -154,16 +136,9 @@ impl ChatApp {
         cx.notify();
     }
 
-    pub(crate) fn close_workspace_pop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pop = &mut self.workspace_pop;
-        if !std::mem::take(&mut pop.open) {
-            return;
-        }
-        if let Some(previous) = pop.restore.take()
-            && pop.focus.contains_focused(window, cx)
-        {
-            previous.focus(window, cx);
-        }
+    /// An action finished: back to the main rows.
+    pub(crate) fn close_workspace_pop(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.workspace_pop.dismiss();
         cx.notify();
     }
 
@@ -222,7 +197,7 @@ impl ChatApp {
     /// Reopening clears the footer, so a late failure goes to the header line instead.
     pub(crate) fn pop_error(&mut self, error: impl Into<SharedString>, cx: &mut Context<Self>) {
         let error = Some(error.into());
-        if self.workspace_pop.open {
+        if self.workspace_shown() {
             self.workspace_pop.error = error;
         } else {
             self.open_error = error;
@@ -230,16 +205,12 @@ impl ChatApp {
         cx.notify();
     }
 
-    pub(crate) fn render_workspace_pop(
+    /// The Workspace panel's rows: location, apps, scripts, branch, remote and changes.
+    pub(crate) fn render_workspace_section(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if !self.workspace_pop.open {
-            return None;
-        }
-        let max_h =
-            popup_height(room(self.workspace_pop.trigger.get(), true, window), f32::INFINITY);
+    ) -> AnyElement {
         let focused = self.workspace_pop.rows.iter().position(|row| row.is_focused(window));
         let body = self.pop_body(cx);
         let rows = &self.workspace_pop.rows;
@@ -248,54 +219,31 @@ impl ChatApp {
         }
         let error = self.workspace_pop.error.clone();
         let danger = aether_ui::theme::danger_text(cx);
-        let theme = cx.theme();
-        Some(
-            v_flex()
-                .id("workspace-pop")
-                .key_context(POP_CONTEXT)
-                .role(Role::Dialog)
-                .aria_label("Workspace")
-                .on_action(
-                    cx.listener(|this, _: &PopUp, window, cx| this.pop_move(false, window, cx)),
-                )
-                .on_action(
-                    cx.listener(|this, _: &PopDown, window, cx| this.pop_move(true, window, cx)),
-                )
-                .on_action(
-                    cx.listener(|this, _: &PopFirst, window, cx| this.pop_edge(false, window, cx)),
-                )
-                .on_action(
-                    cx.listener(|this, _: &PopLast, window, cx| this.pop_edge(true, window, cx)),
-                )
-                .on_action(cx.listener(|this, _: &PopBack, window, cx| this.pop_back(window, cx)))
-                .on_mouse_down_out(
-                    cx.listener(|this, _, window, cx| this.close_workspace_pop(window, cx)),
-                )
-                .w(px(380.))
-                .max_h(px(max_h))
-                .overflow_y_scroll()
-                .p(px(6.))
-                .gap(px(2.))
-                .corner(px(12.))
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.popover)
-                .text_color(theme.popover_foreground)
-                .shadow_lg()
-                .children(body)
-                .children(error.map(|e| {
-                    div()
-                        .id("pop-error")
-                        .role(Role::Alert)
-                        .aria_label(e.clone())
-                        .px(px(10.))
-                        .py(px(6.))
-                        .text_xs()
-                        .text_color(danger)
-                        .child(e)
-                }))
-                .focus_trap("workspace-pop-trap", &self.workspace_pop.focus)
-                .into_any_element(),
-        )
+        v_flex()
+            .id("workspace-pop")
+            .key_context(POP_CONTEXT)
+            .role(Role::Group)
+            .aria_label("Workspace")
+            .on_action(cx.listener(|this, _: &PopUp, window, cx| this.pop_move(false, window, cx)))
+            .on_action(cx.listener(|this, _: &PopDown, window, cx| this.pop_move(true, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &PopFirst, window, cx| this.pop_edge(false, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &PopLast, window, cx| this.pop_edge(true, window, cx)))
+            .on_action(cx.listener(|this, _: &PopBack, window, cx| this.pop_back(window, cx)))
+            .gap(px(2.))
+            .children(body)
+            .children(error.map(|e| {
+                div()
+                    .id("pop-error")
+                    .role(Role::Alert)
+                    .aria_label(e.clone())
+                    .px(px(10.))
+                    .py(px(6.))
+                    .text_xs()
+                    .text_color(danger)
+                    .child(e)
+            }))
+            .into_any_element()
     }
 }

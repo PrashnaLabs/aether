@@ -2,7 +2,7 @@ use super::*;
 use gpui_kit::TestAppContext;
 
 #[gpui_kit::test]
-fn workspace_popover_opens_in_all_chat_layouts(cx: &mut TestAppContext) {
+fn workspace_panel_opens_in_all_chat_layouts(cx: &mut TestAppContext) {
     use gpui_kit::VisualTestContext;
     cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
@@ -46,19 +46,17 @@ fn workspace_popover_opens_in_all_chat_layouts(cx: &mut TestAppContext) {
         })
         .unwrap();
         let mut visual = VisualTestContext::from_window(main, cx);
-        for _ in 0..2 {
-            let bounds = visual.read(|cx| app.read(cx).workspace_pop.trigger.get());
-            assert!(bounds.size.width > gpui_kit::px(0.), "Workspace button must be rendered");
+        let click = |visual: &mut VisualTestContext| {
+            let bounds = visual.debug_bounds("workspace-toggle").expect("Workspace button");
             visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
             visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
-            visual.read(|cx| {
-                assert!(
-                    app.read(cx).workspace_pop.open,
-                    "clicking the Workspace button must open the Workspace popover"
-                )
-            });
-            visual.simulate_keystrokes("escape");
-            visual.read(|cx| assert!(!app.read(cx).workspace_pop.open));
+        };
+        click(&mut visual);
+        visual.read(|cx| assert!(app.read(cx).workspace_shown(), "{layout:?} must show Workspace"));
+        assert!(visual.debug_bounds("workspace-panel").is_some(), "{layout:?} panel rendered");
+        if layout != aether_core::ChatLayout::Split {
+            click(&mut visual);
+            visual.read(|cx| assert!(!app.read(cx).workspace_shown(), "{layout:?} toggles closed"));
         }
     }
 }

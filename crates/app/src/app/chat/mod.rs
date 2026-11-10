@@ -322,7 +322,11 @@ impl ChatApp {
         } else if matches!(self.active_terminal_tab, aether_terminal::TerminalTab::Project(_)) {
             self.active_terminal_tab = aether_terminal::TerminalTab::Project(self.chats[ix].id);
         }
-        self.workspace_pop.dismiss();
+        if self.workspace_shown() {
+            self.open_workspace_panel(cx);
+        } else {
+            self.workspace_pop.dismiss();
+        }
         for selector in [&self.selector, &self.default_model] {
             selector.update(cx, |s, cx| s.dismiss(cx));
         }

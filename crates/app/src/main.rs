@@ -9,6 +9,7 @@ mod attachments;
 mod attachments_view;
 mod board;
 mod browser;
+mod context_panel;
 mod explorer;
 mod font_picker;
 mod git_panel;

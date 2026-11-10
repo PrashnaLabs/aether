@@ -292,7 +292,7 @@ impl Chat {
         }
     }
 
-    fn context_used(&self) -> u64 {
+    pub(crate) fn context_used(&self) -> u64 {
         self.messages
             .iter()
             .rev()
@@ -627,6 +627,11 @@ pub(crate) struct ChatApp {
     pub(crate) btw: HashMap<i64, chat::BtwThread>,
     /// Whether the BTW panel shows (right sidebar in Tabbed, a tab otherwise).
     pub(crate) btw_open: bool,
+    /// Whether the Workspace sidebar shows in the Tabbed layout.
+    pub(crate) workspace_open: bool,
+    pub(crate) inventory: crate::context_panel::InventoryCache,
+    pub(crate) context_expanded: HashSet<&'static str>,
+    pub(crate) connectors_all: bool,
     /// Window controls ride the main window's top-right tab bar instead of a title bar row.
     pub(crate) tab_bar_controls: bool,
     pub(crate) btw_input: Entity<TextareaState>,
