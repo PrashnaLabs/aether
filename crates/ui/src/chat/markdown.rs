@@ -109,9 +109,26 @@ fn wants_link(live: bool, unlinked: bool, linking: bool, text: &str, has_cwd: bo
     !live && unlinked && !linking && has_cwd && text.contains('`')
 }
 
+const VIEW_CAP: usize = 256 * 1024;
+
+// text view layout grows ~quadratically: a 1 MB message would stall the UI ~13 s
+pub(crate) fn clip_for_view(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.len() <= VIEW_CAP {
+        return text.into();
+    }
+    let mut cut = VIEW_CAP;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let cut = text[..cut].rfind('\n').filter(|&i| i > VIEW_CAP / 2).unwrap_or(cut);
+    let more = (text.len() - cut).div_ceil(1024);
+    format!("{}\n\n*… message truncated in view ({more} KB more)*", &text[..cut]).into()
+}
+
 fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
     register_aliases();
-    let text = md.text.trim();
+    let clipped = clip_for_view(md.text.trim());
+    let text: &str = &clipped;
     if text.is_empty() {
         return None;
     }
