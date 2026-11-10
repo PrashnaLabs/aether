@@ -6,7 +6,7 @@ use crate::session_workspace::WindowId;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use aether_git::{Change, ChangeKind, GitOp, Status, StatusError};
+use aether_git::{Change, ChangeKind, GitOp, Stat, Status, StatusError};
 use aether_ui::{icon_chip, theme};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{InputState, TextareaState};
@@ -52,6 +52,28 @@ pub(crate) fn sidebar_status_summary(status: &Status) -> (usize, u32, u32, Optio
     };
     let (added, removed) = crate::workspace_popover::line_totals(&status.changes);
     (changed_files(&status.changes), added, removed, ahead_behind)
+}
+
+/// Sidebar counts for one of several chats sharing a folder: only the changes in files `edited`
+/// names (paths from the chat folder), so each row shows what that chat did, not the whole
+/// folder. Ahead/behind is the folder's branch, shared by design.
+pub(crate) fn sidebar_chat_summary(
+    status: &Status,
+    edited: &HashSet<String>,
+) -> (usize, u32, u32, Option<(u32, u32)>) {
+    // change paths come from the repo root, edit paths from the chat folder
+    let mine = |c: &&Change| {
+        edited.iter().any(|f| {
+            c.path == *f || c.path.strip_suffix(f.as_str()).is_some_and(|d| d.ends_with('/'))
+        })
+    };
+    let changes: Vec<&Change> = status.changes.iter().filter(mine).collect();
+    let files = changes.iter().map(|c| c.path.as_str()).collect::<HashSet<_>>().len();
+    let (added, removed) = changes.iter().fold((0, 0), |(a, r), c| match c.stat {
+        Stat::Lines(add, rem) => (a + add, r + rem),
+        Stat::Binary | Stat::Unknown => (a, r),
+    });
+    (files, added, removed, sidebar_status_summary(status).3)
 }
 
 /// Cached sidebar counts for `folder`: `None` until a good read exists.
@@ -237,6 +259,11 @@ impl GitPanel {
         folder: &Path,
     ) -> Option<(usize, u32, u32, Option<(u32, u32)>)> {
         sidebar_cached_summary(&self.statuses, folder)
+    }
+
+    /// The cached read of `folder`, if it succeeded.
+    pub(crate) fn sidebar_status(&self, folder: &Path) -> Option<&Status> {
+        self.statuses.get(folder)?.status.as_ref().ok()
     }
 
     /// Deduped folders with no good read yet, claimed in flight so rapid
@@ -437,9 +464,6 @@ impl ChatApp {
         Some(panel.into_any_element())
     }
 }
-
-#[cfg(test)]
-use aether_git::Stat;
 
 #[cfg(test)]
 pub(super) fn change(path: &str, kind: ChangeKind, staged: bool) -> Change {

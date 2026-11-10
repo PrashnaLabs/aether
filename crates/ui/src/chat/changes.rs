@@ -60,6 +60,14 @@ pub fn reply_edits<'a>(
     files
 }
 
+/// Paths, from `cwd`, of the files finished edits touched, without copying their diffs.
+pub fn edited_paths<'a>(
+    steps: impl IntoIterator<Item = &'a Step>,
+    cwd: Option<&str>,
+) -> std::collections::HashSet<String> {
+    steps.into_iter().filter_map(applied_edit).map(|(path, ..)| relative_path(path, cwd)).collect()
+}
+
 pub fn edit_totals<'a>(steps: impl IntoIterator<Item = &'a Step>) -> (u32, u32) {
     steps.into_iter().filter_map(applied_edit).fold((0, 0), |(a, r), (_, _, x, y)| (a + x, r + y))
 }

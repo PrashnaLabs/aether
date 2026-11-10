@@ -31,7 +31,8 @@ mod usage_cockpit;
 pub use activity::*;
 pub use attachments::{AttachmentView, attachment_caption, attachment_strip, format_size};
 pub use changes::{
-    ChangesCard, FileEdits, OnOpenDiff, ReplyDiff, edit_totals, reply_edits, reveal_file,
+    ChangesCard, FileEdits, OnOpenDiff, ReplyDiff, edit_totals, edited_paths, reply_edits,
+    reveal_file,
 };
 
 pub use agent_selector::{

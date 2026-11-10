@@ -14,7 +14,7 @@ use aether_driver::CliModel;
 use aether_git::BranchInfo;
 use aether_ui::{
     AgentState, CLI_DEFAULT, ChatLine, ChatSidebar, ChatStatus, OutsideLine, OutsideState,
-    ProjectHeader, RowPlace, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, edit_totals,
+    ProjectHeader, RowPlace, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, edit_totals, edited_paths,
 };
 use gpui_kit::{Context, Entity, PathPromptOptions, SharedString, Window, prelude::*};
 
@@ -976,8 +976,7 @@ impl ChatApp {
             _ => status.text(now),
         };
         let removed = chat.worktree_removed() || self.worktree_missing(ix);
-        let (changed, added, deleted, ahead_behind) =
-            self.sidebar_git_summary(&folder).unwrap_or((0, 0, 0, None));
+        let (changed, added, deleted, ahead_behind) = self.chat_git_summary(ix, &folder);
         let models = self.probes.get(&chat.provider).map_or(&[][..], |probe| &probe.models);
         Some(ChatLine {
             provider: chat.provider,
@@ -1256,6 +1255,25 @@ impl ChatApp {
             .ok();
         })
         .detach();
+    }
+
+    /// Counts for chat `ix`'s row. A chat alone in its folder owns the folder's whole diff; one
+    /// sharing it with other agent chats shows only the changes in files it edited, so the
+    /// rows don't all repeat the same numbers.
+    fn chat_git_summary(&self, ix: usize, folder: &Path) -> (usize, u32, u32, Option<(u32, u32)>) {
+        let root = &self.settings.workspace_root;
+        let shared = self.chats.iter().enumerate().any(|(i, c)| {
+            i != ix && c.is_agent() && !c.archived && chat_cwd(c, root).as_path() == folder
+        });
+        if !shared {
+            return self.sidebar_git_summary(folder).unwrap_or((0, 0, 0, None));
+        }
+        let Some(status) = self.git.sidebar_status(folder) else { return (0, 0, 0, None) };
+        let edited = edited_paths(
+            self.chats[ix].messages.iter().flat_map(|m| &m.steps),
+            Some(&folder.to_string_lossy()),
+        );
+        crate::git_panel::sidebar_chat_summary(status, &edited)
     }
 
     /// Sidebar row counts for `folder` from the shared per-folder git cache.

@@ -486,3 +486,144 @@ fn bulk_actions_apply_to_picked_chats_and_clear_picks(cx: &mut gpui_kit::TestApp
         })
         .unwrap();
 }
+
+#[test]
+fn shared_folder_row_counts_only_the_files_its_chat_edited() {
+    use crate::git_panel::{sidebar_chat_summary, sidebar_status_summary};
+    use aether_git::{Change, ChangeKind, Stat, Status};
+
+    let change = |path: &str, add: u32, rem: u32| Change {
+        path: path.into(),
+        from: None,
+        kind: ChangeKind::Modified,
+        staged: false,
+        stat: Stat::Lines(add, rem),
+    };
+    let status = Status {
+        changes: vec![
+            change("src/a.rs", 10, 2),
+            change("src/b.rs", 5, 0),
+            change("docs/notes.md", 100, 0),
+        ],
+        ahead_behind: Some((1, 0)),
+        commit: Some("abc1234".into()),
+        upstream: Some("origin/main".into()),
+        ..Default::default()
+    };
+    let folder_wide = sidebar_status_summary(&status);
+    assert_eq!(folder_wide, (3, 115, 2, Some((1, 0))));
+
+    let edited = |paths: &[&str]| paths.iter().map(|p| p.to_string()).collect::<HashSet<_>>();
+    assert_eq!(
+        sidebar_chat_summary(&status, &edited(&["src/a.rs"])),
+        (1, 10, 2, Some((1, 0))),
+        "one chat sees its own file, not the folder's other changes"
+    );
+    assert_eq!(
+        sidebar_chat_summary(&status, &edited(&["src/b.rs", "docs/notes.md"])),
+        (2, 105, 0, Some((1, 0))),
+        "a second chat in the same folder gets different numbers"
+    );
+    assert_eq!(
+        sidebar_chat_summary(&status, &edited(&["xa.rs"])),
+        (0, 0, 0, Some((1, 0))),
+        "a name that only ends the same is not a match"
+    );
+    assert_eq!(
+        sidebar_chat_summary(&status, &edited(&["already_committed.rs"])).0,
+        0,
+        "an edit to an already committed file leaves nothing to show"
+    );
+    assert_eq!(sidebar_chat_summary(&status, &HashSet::new()).0, 0, "no edits, no chip");
+}
+
+#[test]
+fn chat_in_a_subfolder_matches_repo_rooted_changes() {
+    use crate::git_panel::sidebar_chat_summary;
+    use aether_git::{Change, ChangeKind, Stat, Status};
+
+    let status = Status {
+        changes: vec![Change {
+            path: "crates/app/src/lib.rs".into(),
+            from: None,
+            kind: ChangeKind::Modified,
+            staged: false,
+            stat: Stat::Lines(3, 1),
+        }],
+        ..Default::default()
+    };
+    let edited: HashSet<String> = ["src/lib.rs".to_string()].into();
+    assert_eq!(sidebar_chat_summary(&status, &edited), (1, 3, 1, None));
+}
+
+#[gpui_kit::test]
+fn chats_sharing_a_folder_show_their_own_diff_not_the_folders(cx: &mut gpui_kit::TestAppContext) {
+    use aether_core::{Step, ToolCall, ToolDetail, ToolStatus};
+    use aether_git::{Change, ChangeKind, Stat, Status};
+
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        let folder = "/tmp/shared-proj";
+        let edited = |path: &str| {
+            let detail =
+                ToolDetail::Edit { path: path.into(), diff: String::new(), added: 0, removed: 0 };
+            let mut call = ToolCall::new("e", "Edit file", detail);
+            call.status = ToolStatus::Done;
+            Step::Tool(call)
+        };
+        let mut chats = Vec::new();
+        for (id, title, file) in [
+            (1, "writes a", Some("src/a.rs")),
+            (2, "writes b", Some("src/b.rs")),
+            (3, "idle", None),
+        ] {
+            let mut chat = crate::app::chat_with(title, &["hi", "hello"]);
+            chat.id = id;
+            chat.provider = Provider::Claude;
+            chat.cwd = folder.into();
+            if let Some(file) = file {
+                chat.messages[1].steps.push(edited(&format!("{folder}/{file}")));
+            }
+            chats.push(chat);
+        }
+        app.chats = chats;
+        let change = |path: &str, add: u32| Change {
+            path: path.into(),
+            from: None,
+            kind: ChangeKind::Modified,
+            staged: false,
+            stat: Stat::Lines(add, 0),
+        };
+        let status = Status {
+            changes: vec![change("src/a.rs", 10), change("src/b.rs", 5), change("docs/x.md", 100)],
+            ..Default::default()
+        };
+        app.git.insert_sidebar_status(PathBuf::from(folder), Ok(status));
+        app
+    });
+    window
+        .update(cx, |app, _, _| {
+            let folder = Path::new("/tmp/shared-proj");
+            let rows: Vec<_> = (0..3).map(|ix| app.chat_git_summary(ix, folder)).collect();
+            assert_eq!(rows[0], (1, 10, 0, None), "writes a");
+            assert_eq!(rows[1], (1, 5, 0, None), "writes b");
+            assert_eq!(rows[2], (0, 0, 0, None), "a chat that edited nothing shows nothing");
+
+            app.chats.truncate(1);
+            assert_eq!(
+                app.chat_git_summary(0, folder),
+                (3, 115, 0, None),
+                "alone in its folder, a chat owns the folder's whole diff"
+            );
+        })
+        .unwrap();
+}
