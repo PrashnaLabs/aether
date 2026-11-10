@@ -68,6 +68,7 @@ struct SessionKey {
     cwd: PathBuf,
     access: AccessMode,
     lead: bool,
+    env: Vec<(String, String)>,
 }
 
 enum Command {
@@ -1013,6 +1014,7 @@ fn session_options(
         cwd: opts.cwd.clone(),
         access: opts.access,
         lead: chat.lead,
+        env: opts.env.clone(),
     };
     (opts, key)
 }

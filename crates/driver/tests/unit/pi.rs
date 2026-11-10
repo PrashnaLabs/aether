@@ -326,6 +326,7 @@ fn dialogs_ask_and_replies_echo_request_id() {
 fn opts_for_test() -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp".into(),
         model: String::new(),
@@ -505,6 +506,7 @@ fn live_pi_smoke() {
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: dir.clone(),
         model: std::env::var("AETHER_PI_SMOKE_MODEL").unwrap_or_default(),

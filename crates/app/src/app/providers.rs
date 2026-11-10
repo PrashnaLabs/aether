@@ -41,8 +41,8 @@ impl ChatApp {
             let found = bg
                 .spawn(async {
                     subscription_provider(
-                        read_claude_credentials().is_some(),
-                        read_codex_token().is_some(),
+                        read_claude_credentials(None).is_some(),
+                        read_codex_token(None).is_some(),
                     )
                 })
                 .await;
@@ -53,9 +53,10 @@ impl ChatApp {
 
     pub(super) fn refresh_provider_usage(&mut self, provider: Provider, cx: &mut Context<Self>) {
         let bg = cx.background_executor().clone();
+        let dir = self.settings.account_dir(provider);
         match provider {
             Provider::Claude => {
-                if let Some((tok, sub)) = read_claude_credentials() {
+                if let Some((tok, sub)) = read_claude_credentials(dir.as_deref()) {
                     cx.spawn(async move |this, cx| {
                         let usage = bg
                             .spawn(async move { fetch_claude_plan_usage(&tok, sub.as_deref()) })
@@ -72,7 +73,7 @@ impl ChatApp {
                 }
             }
             Provider::Codex => {
-                if let Some(tok) = read_codex_token() {
+                if let Some(tok) = read_codex_token(dir.as_deref()) {
                     cx.spawn(async move |this, cx| {
                         let usage = bg.spawn(async move { fetch_codex_plan_usage(&tok) }).await;
                         if let Some(usage) = usage {
@@ -131,6 +132,22 @@ impl ChatApp {
     fn store_plan_usage(&mut self, provider: Provider, usage: PlanUsage) {
         self.plan_usage_at.insert(provider, chrono::Utc::now().timestamp_millis());
         self.provider_plan_usages.insert(provider, usage);
+    }
+
+    /// Makes `name` (None: the CLI's own login) the account new runs of `provider` use.
+    pub(crate) fn switch_account(
+        &mut self,
+        provider: Provider,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_settings(cx, |s| match name {
+            Some(name) => drop(s.default_accounts.insert(provider.key().into(), name)),
+            None => drop(s.default_accounts.remove(provider.key())),
+        });
+        // another login's numbers must not linger under this one
+        self.provider_plan_usages.remove(&provider);
+        self.refresh_provider_usage(provider, cx);
     }
 
     pub(super) fn refresh_stale_usage(&mut self, cx: &mut Context<Self>) {

@@ -14,6 +14,7 @@ pub fn command(opts: &DriverStartOptions, name: &str) -> Option<Command> {
     let mut cmd = aether_core::command(bin);
     cmd.current_dir(&opts.cwd);
     cmd.env("PATH", repaired_path());
+    cmd.envs(opts.env.iter().cloned());
     for key in
         ["AETHER_ORCH_SOCK", "AETHER_ORCH_TOKEN", "AETHER_ORCH_SPECS", "OPENCODE_CONFIG_CONTENT"]
     {

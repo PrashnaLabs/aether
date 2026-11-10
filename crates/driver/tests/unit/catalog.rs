@@ -42,6 +42,7 @@ fn fake_binary() -> String {
 fn sh_opts() -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: "/bin/sh".into(),
         cwd: "/".into(),
         model: String::new(),
