@@ -29,7 +29,7 @@ pub use composer_chip::{composer_chip, control_chip, icon_chip, overlay, overlay
 pub use field::{field, field_area, field_fill};
 pub use file_icon::{file_icon, file_icon_color};
 pub use glow_card::GlowCard;
-pub use provider_icon::{provider_icon, provider_icon_path};
+pub use provider_icon::{provider_icon, provider_icon_path, provider_tint};
 pub use segmented::Segmented;
 pub use tabs::{InlineRename, Tab, TabBar, window_controls_gap};
 pub use workspace_select::{

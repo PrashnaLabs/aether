@@ -498,7 +498,7 @@ impl ChatApp {
                 div()
                     .when(picking, |d| d.opacity(0.))
                     .when(!picking, |d| d.group_hover(group.clone(), |s| s.opacity(0.)))
-                    .child(provider_icon(card.provider).size(px(14.)).text_color(muted)),
+                    .child(provider_icon(card.provider).size(px(14.))),
             )
             .child(
                 div()

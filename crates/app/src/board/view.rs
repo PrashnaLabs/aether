@@ -608,7 +608,7 @@ impl ChatApp {
         let done = card.col == Col::Done;
         let status = self.board_pill(card, now, cx);
         let chat = self.board_chat(card);
-        let agent = chat.map(|c| provider_icon(c.provider).size(px(12.)).text_color(muted));
+        let agent = chat.map(|c| provider_icon(c.provider).size(px(12.)));
         let folder = folder_name(&card.project);
         let age = (status.is_none()).then(|| relative_time(card.updated_at, now, &chrono::Local));
         let (id, col) = (card.id, card.col);
@@ -858,7 +858,7 @@ impl ChatApp {
                     .items_center()
                     .min_h(px(26.))
                     .text_size(px(12.5))
-                    .child(provider_icon(c.provider).size(px(12.)).text_color(muted))
+                    .child(provider_icon(c.provider).size(px(12.)))
                     .child(div().flex_1().min_w_0().truncate().child(c.title.clone()))
                     .children(state)
                     .child(

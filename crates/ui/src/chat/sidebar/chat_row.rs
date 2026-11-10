@@ -13,7 +13,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Anchor, AnyElement, App, ClickEvent, Div, Entity, FocusHandle, Hsla, KeyDownEvent, MouseButton,
-    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, relative, rems, rgb,
+    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, relative, rems,
 };
 
 use super::chrome::{reveal_on_hover, row_style, swallow_click, tabular, tooltip};
@@ -21,7 +21,7 @@ use super::crew::{Bucket, CrewSummary, Tier};
 use super::menu::chat_menu;
 use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowHandler, RowPlace};
 use crate::arrow_count;
-use crate::components::provider_icon;
+use crate::components::{provider_icon, provider_tint};
 use crate::theme::{danger_text, info_text, mango_text};
 use aether_core::{Provider, SidebarStyle};
 
@@ -112,17 +112,6 @@ fn mark(name: &str, cx: &App) -> Div {
         .bg(tint.opacity(0.18))
         .text_color(tint)
         .font_bold()
-}
-
-fn provider_tint(provider: Provider) -> Hsla {
-    rgb(match provider {
-        Provider::Claude => 0xe08a5f,
-        Provider::Pi => 0xa78bfa,
-        Provider::Antigravity => 0x5eead4,
-        Provider::OpenCode => 0x93a9ff,
-        Provider::Codex | Provider::OpenRouter => 0xc9ccd6,
-    })
-    .into()
 }
 
 /// Provider icon on a rounded square tinted with the provider's colour.

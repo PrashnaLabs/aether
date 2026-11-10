@@ -31,9 +31,7 @@ impl ChatApp {
         let view = self.session_handle(cx);
         let chat = &self.chats[self.active];
         let title = chat.title.clone();
-        let provider = aether_ui::provider_icon(chat.provider)
-            .size(px(12.))
-            .text_color(cx.theme().muted_foreground);
+        let provider = aether_ui::provider_icon(chat.provider).size(px(12.));
         let busy = chat.busy();
         let pinned = chat.pinned;
         let has_messages = !chat.messages.is_empty();
