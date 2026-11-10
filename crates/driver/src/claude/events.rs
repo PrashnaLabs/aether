@@ -503,7 +503,14 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                 return vec![];
             }
             buf.push_str(delta);
-            let text = buf.clone();
+            let text: String = buf
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or_default()
+                .chars()
+                .take(ACTIVITY_CHARS)
+                .collect();
             set_activity(s, parent, &text)
         }
         Some("stream_event") => {

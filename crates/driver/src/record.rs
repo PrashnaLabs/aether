@@ -27,12 +27,17 @@ pub fn from_env(provider: &str, cwd: &Path) -> Option<Arc<Recorder>> {
 
 impl Recorder {
     pub fn create(dir: &Path, provider: &str, cwd: &Path) -> std::io::Result<Self> {
-        std::fs::create_dir_all(dir)?;
+        let mut dirs = std::fs::DirBuilder::new();
+        dirs.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut dirs, 0o700);
+        dirs.create(dir)?;
         let ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join(format!("{provider}-{ms}.jsonl")))?;
+        let mut opts = OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        let file = opts.open(dir.join(format!("{provider}-{ms}.jsonl")))?;
         let mut cwds: Vec<String> =
             aether_core::canonicalize(cwd).into_iter().map(|p| p.display().to_string()).collect();
         if cwd.is_absolute() {

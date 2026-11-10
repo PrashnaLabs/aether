@@ -1306,7 +1306,11 @@ fn message_update(s: &mut State, e: &Value) -> Vec<Update> {
         Some("toolcall_delta") => {
             let Some((id, json)) = s.args.get_mut(&index) else { return vec![] };
             json.push_str(e["delta"].as_str().unwrap_or_default());
-            // ponytail: re-parses the whole buffer per delta, quadratic in argument size
+            // ponytail: re-parses the whole buffer whenever it could be complete, still quadratic
+            // for args with many `}`-ending deltas
+            if !json.trim_end().ends_with('}') {
+                return vec![];
+            }
             let Ok(input) = serde_json::from_str::<Value>(json) else { return vec![] };
             let id = id.clone();
             reclassify(s, &id, &input)
