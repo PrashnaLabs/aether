@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -14,6 +14,7 @@ use aether_core::{
 };
 use futures::channel::mpsc::UnboundedSender;
 
+use crate::lines::{MAX_LINE, capped_lines};
 use crate::spawn::{StderrTail, command, spawn_logged};
 use crate::version::gate;
 use crate::{DriverStartOptions, LeadTools};
@@ -280,13 +281,8 @@ pub(super) fn mcp_ready(mut list: impl FnMut() -> Option<Value>, timeout: Durati
 
 fn scan_stdout(out: impl Read, found: &std::sync::mpsc::Sender<String>) {
     let mut out = BufReader::new(out);
-    let mut line = Vec::new();
-    while out.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
-        if let Some(url) = listening_url(&String::from_utf8_lossy(&line)) {
-            let _ = found.send(url);
-            break;
-        }
-        line.clear();
+    if let Some(url) = capped_lines(&mut out, MAX_LINE).flatten().find_map(|l| listening_url(&l)) {
+        let _ = found.send(url);
     }
     let _ = std::io::copy(&mut out, &mut std::io::sink());
 }

@@ -110,6 +110,16 @@ fn stdout_scan_survives_non_utf8_and_drains() {
     assert_eq!(out.position() as usize, out.get_ref().len());
 }
 
+#[test]
+fn stdout_scan_skips_oversized_lines() {
+    let mut text = vec![b'x'; crate::lines::MAX_LINE + 1];
+    text.extend_from_slice(b"\nserver listening on http://127.0.0.1:7\n");
+    let mut out = std::io::Cursor::new(text);
+    let (found, url) = std::sync::mpsc::channel();
+    scan_stdout(&mut out, &found);
+    assert_eq!(url.try_recv().as_deref(), Ok("http://127.0.0.1:7"));
+}
+
 fn sleeper() -> LeadServer {
     LeadServer::new(std::process::Command::new("sleep").arg("60").spawn().unwrap())
 }
