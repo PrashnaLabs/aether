@@ -632,6 +632,7 @@ pub(crate) struct ChatApp {
     pub(crate) inventory: crate::context_panel::InventoryCache,
     pub(crate) context_expanded: HashSet<&'static str>,
     pub(crate) connectors_all: bool,
+    pub(crate) subagents_all: bool,
     /// Provider and folder whose CLI is being asked for its context report.
     pub(crate) probing: Option<(aether_core::Provider, Option<PathBuf>)>,
     /// Window controls ride the main window's top-right tab bar instead of a title bar row.

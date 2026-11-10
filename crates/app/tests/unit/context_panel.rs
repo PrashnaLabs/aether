@@ -66,7 +66,7 @@ fn sign_in_clears_after_success() {
 }
 
 #[test]
-fn running_agents_are_live_task_rows_only() {
+fn subagents_list_live_first_and_restored_rows_as_finished() {
     let task = |id: &str, status| {
         let detail = ToolDetail::Task {
             description: id.into(),
@@ -81,16 +81,18 @@ fn running_agents_are_live_task_rows_only() {
         call.status = status;
         Step::Tool(call)
     };
+    let mut old = Message::assistant();
+    old.steps.push(task("old-bg", ToolStatus::Background));
+    old.restored = true;
     let mut reply = Message::assistant();
+    reply.steps.push(task("done", ToolStatus::Done));
     reply.steps.push(task("bg", ToolStatus::Background));
-    reply.steps.push(task("run", ToolStatus::Running));
-    reply.steps.push(task("done", ToolStatus::Stopped));
     let mut shell = ToolCall::new("sh", "sh", ToolDetail::default());
     shell.status = ToolStatus::Background;
     reply.steps.push(Step::Tool(shell));
-    let mut old = reply.clone();
-    old.restored = true;
+    reply.steps.push(task("stopped", ToolStatus::Stopped));
     let messages = [old, reply];
-    let ids: Vec<&str> = running_agents(&messages).iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids, ["bg", "run"]);
+    let rows: Vec<(&str, bool)> =
+        subagents(&messages).iter().map(|(c, live)| (c.id.as_str(), *live)).collect();
+    assert_eq!(rows, [("bg", true), ("stopped", false), ("done", false), ("old-bg", false)]);
 }

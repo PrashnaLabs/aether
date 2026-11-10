@@ -19,6 +19,7 @@ use crate::app::ChatApp;
 use crate::side_panel::Surface;
 
 const SHOWN_CONNECTORS: usize = 3;
+const SHOWN_AGENTS: usize = 5;
 
 /// Cached scan, keyed by the provider and folder it was read for.
 pub(crate) type InventoryCache = Option<((Provider, Option<PathBuf>), Inventory)>;
@@ -111,25 +112,41 @@ pub(crate) fn needs_sign_in(messages: &[Message]) -> HashSet<String> {
     names
 }
 
-/// Subagents still working in this app run: running, waiting or sent to the background.
-pub(crate) fn running_agents(messages: &[Message]) -> Vec<&ToolCall> {
-    messages
+/// Every subagent the chat spawned, live ones first, then newest first. Rows restored from a
+/// past run can't still be working, whatever status they were saved with.
+pub(crate) fn subagents(messages: &[Message]) -> Vec<(&ToolCall, bool)> {
+    let mut rows: Vec<(&ToolCall, bool)> = messages
         .iter()
-        .filter(|m| !m.restored)
-        .flat_map(|m| &m.steps)
-        .filter_map(|s| match s {
-            Step::Tool(call)
-                if matches!(call.detail, ToolDetail::Task { .. })
-                    && matches!(
-                        call.status,
-                        ToolStatus::Running | ToolStatus::Waiting | ToolStatus::Background
-                    ) =>
-            {
-                Some(call)
+        .rev()
+        .flat_map(|m| m.steps.iter().rev().map(move |s| (m.restored, s)))
+        .filter_map(|(restored, s)| match s {
+            Step::Tool(call) if matches!(call.detail, ToolDetail::Task { .. }) => {
+                Some((call, is_live(call.status) && !restored))
             }
             _ => None,
         })
-        .collect()
+        .collect();
+    rows.sort_by_key(|(_, live)| !live);
+    rows
+}
+
+fn is_live(status: ToolStatus) -> bool {
+    matches!(status, ToolStatus::Running | ToolStatus::Waiting | ToolStatus::Background)
+}
+
+fn status_text(status: ToolStatus) -> &'static str {
+    match status {
+        ToolStatus::Running | ToolStatus::Waiting => "Running",
+        ToolStatus::Background => "Background",
+        ToolStatus::Done => "Done",
+        ToolStatus::Failed => "Failed",
+        ToolStatus::Stopped | ToolStatus::Denied | ToolStatus::Unknown => "Stopped",
+    }
+}
+
+fn agent_state(label: &'static str, live: bool, cx: &App) -> impl IntoElement {
+    let color = if live { theme::info_text(cx) } else { cx.theme().muted_foreground };
+    div().text_xs().text_color(color).child(label)
 }
 
 fn heading(title: &'static str, cx: &App) -> impl IntoElement {
@@ -333,41 +350,80 @@ impl ChatApp {
             .children(lists);
 
         let chat_id = self.chats[self.active].id;
-        let agents = running_agents(&self.chats[self.active].messages);
+        let messages = &self.chats[self.active].messages;
+        let crew: Vec<(usize, bool)> = self
+            .chats
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.parent == Some(chat_id) && !c.archived)
+            .map(|(ix, c)| (ix, c.busy()))
+            .collect();
+        let mut rows: Vec<(bool, AnyElement)> = crew
+            .into_iter()
+            .map(|(ix, busy)| {
+                let child = &self.chats[ix];
+                let row = line(Lucide::Bot, child.title.clone(), cx)
+                    .id(SharedString::from(format!("crew-agent-{}", child.id)))
+                    .cursor_pointer()
+                    .child(div().text_xs().text_color(muted).child(child.provider.label()))
+                    .child(agent_state(if busy { "Running" } else { "Chat" }, busy, cx))
+                    .on_click(cx.listener(move |this, _, window, cx| this.select(ix, window, cx)));
+                (busy, row.into_any_element())
+            })
+            .collect();
+        rows.extend(subagents(messages).into_iter().filter_map(|(call, live)| {
+            let ToolDetail::Task { description, agent, tools, .. } = &call.detail else {
+                return None;
+            };
+            let detail = match (agent.is_empty(), *tools) {
+                (true, n) => format!("{n} tools"),
+                (false, n) => format!("{agent} · {n} tools"),
+            };
+            let status =
+                if !live && is_live(call.status) { "Stopped" } else { status_text(call.status) };
+            let background = live && call.status == ToolStatus::Background;
+            let row = line(Lucide::Bot, description.clone(), cx)
+                .id(SharedString::from(format!("subagent-{}", call.id)))
+                .debug_selector({
+                    let id = format!("subagent-{}", call.id);
+                    move || id
+                })
+                .child(div().text_xs().text_color(muted).child(detail))
+                .child(agent_state(status, live, cx))
+                .when(background, |row| {
+                    row.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                        this.background_hidden.remove(&chat_id);
+                        cx.notify();
+                    }))
+                });
+            Some((live, row.into_any_element()))
+        }));
+        rows.sort_by_key(|(live, _)| !live);
+        let total_agents = rows.len();
+        let more = self.subagents_all;
         let running = v_flex()
             .gap_2()
-            .child(heading("Running agents", cx))
-            .when(agents.is_empty(), |list| {
-                list.child(div().text_xs().text_color(muted).child("No agents running"))
+            .child(heading("Subagents", cx))
+            .when(rows.is_empty(), |list| {
+                list.child(div().text_xs().text_color(muted).child("No subagents yet"))
             })
-            .children(agents.into_iter().filter_map(|call| {
-                let ToolDetail::Task { description, agent, tools, .. } = &call.detail else {
-                    return None;
-                };
-                let background = call.status == ToolStatus::Background;
-                let detail = match (agent.is_empty(), *tools) {
-                    (true, n) => format!("{n} tools"),
-                    (false, n) => format!("{agent} · {n} tools"),
-                };
-                Some(
-                    line(Lucide::Bot, description.clone(), cx)
-                        .id(SharedString::from(format!("running-agent-{}", call.id)))
-                        .child(div().text_xs().text_color(muted).child(detail))
-                        .child(
-                            div().text_xs().text_color(theme::info_text(cx)).child(if background {
-                                "Background"
-                            } else {
-                                "Running"
-                            }),
-                        )
-                        .when(background, |row| {
-                            row.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                                this.background_hidden.remove(&chat_id);
-                                cx.notify();
-                            }))
-                        }),
+            .children(
+                rows.into_iter()
+                    .take(if more { usize::MAX } else { SHOWN_AGENTS })
+                    .map(|(_, row)| row),
+            )
+            .when(total_agents > SHOWN_AGENTS, |list| {
+                list.child(
+                    aether_ui::button("subagents-more")
+                        .ghost()
+                        .xsmall()
+                        .label(if more { "Show less" } else { "Show more" })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.subagents_all = !this.subagents_all;
+                            cx.notify();
+                        })),
                 )
-            }));
+            });
 
         let all = self.connectors_all;
         let connectors = v_flex()

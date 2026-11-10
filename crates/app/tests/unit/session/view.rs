@@ -930,3 +930,56 @@ fn assert_session_menu(cx: &mut TestAppContext, target: SessionMenuTarget) {
         }
     });
 }
+
+#[gpui_kit::test]
+fn workspace_panel_lists_a_running_subagent(cx: &mut TestAppContext) {
+    use aether_core::{Message, Step, ToolCall, ToolDetail, ToolStatus};
+    use gpui_kit::VisualTestContext;
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    cx.update(crate::actions::bind_keys);
+    let (main, app) = cx.update(|cx| {
+        gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| {
+                ChatApp::with_state(
+                    Agent::new().unwrap(),
+                    Settings::default(),
+                    None,
+                    None,
+                    false,
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap()
+    });
+    cx.update_window(main, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
+            let chat = &mut app.chats[app.active];
+            chat.provider = aether_core::Provider::Codex;
+            let detail = ToolDetail::Task {
+                description: "Map the parser".into(),
+                output: String::new(),
+                agent: "explorer".into(),
+                prompt: String::new(),
+                tools: 3,
+                tokens: 0,
+                activity: String::new(),
+            };
+            let mut call = ToolCall::new("sub-1", "Run agent", detail);
+            call.status = ToolStatus::Background;
+            let mut reply = Message::assistant();
+            reply.steps.push(Step::Tool(call));
+            chat.messages.push(reply);
+            app.workspace_open = true;
+            cx.notify();
+        });
+        let _ = window.draw(cx);
+    })
+    .unwrap();
+    let mut visual = VisualTestContext::from_window(main, cx);
+    visual.read(|cx| assert!(app.read(cx).workspace_shown()));
+    assert!(visual.debug_bounds("subagent-sub-1").is_some(), "subagent row must render");
+}
