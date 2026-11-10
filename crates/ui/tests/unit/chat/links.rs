@@ -119,6 +119,24 @@ fn inline_code_in_fences_links_or_with_spaces_stays() {
     }
 }
 
+#[test]
+fn only_web_and_mail_schemes_reach_the_os() {
+    for href in ["https://example.com", "http://example.com", "mailto:a@b.c", "HTTPS://example.com"]
+    {
+        assert!(openable(href), "{href}");
+    }
+    for href in [
+        "javascript:alert(1)",
+        "data:text/html,hi",
+        "vscode://file/tmp",
+        "file:///tmp/x",
+        "ftp://example.com",
+        "src/a.rs",
+    ] {
+        assert!(!openable(href), "{href}");
+    }
+}
+
 #[gpui_kit::test]
 fn markdown_routes_web_links_to_the_app_and_keeps_file_links_separate(
     cx: &mut gpui_kit::TestAppContext,

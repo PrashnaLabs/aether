@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use aether_core::{Attachment, create_private_dir, mime_for};
+use aether_core::{Attachment, MAX_ATTACHMENT_BYTES, create_private_dir, mime_for};
 use image::{ImageDecoder, ImageReader};
 
 const MAX_CONVERTED_PIXELS: u64 = 32 * 1024 * 1024;
@@ -24,6 +24,9 @@ pub(crate) fn store_bytes(
     name: &str,
     bytes: &[u8],
 ) -> io::Result<Attachment> {
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(io::Error::other("attachment exceeds the size limit"));
+    }
     let mut name = name.to_string();
     let mut mime = mime_for(Path::new(&name));
     let mut png = Vec::new();
@@ -51,6 +54,9 @@ pub(crate) fn store_bytes(
         let img = image::DynamicImage::from_decoder(decoder).map_err(io::Error::other)?;
         img.write_to(&mut io::Cursor::new(&mut png), image::ImageFormat::Png)
             .map_err(io::Error::other)?;
+        if png.len() as u64 > MAX_ATTACHMENT_BYTES {
+            return Err(io::Error::other("attachment exceeds the size limit"));
+        }
         bytes = &png;
         name = Path::new(&name).with_extension("png").to_string_lossy().into_owned();
         mime = "image/png";

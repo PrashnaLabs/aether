@@ -46,8 +46,9 @@ enum AddressTarget {
     Search(String),
 }
 
-/// Browser-style omnibox: explicit schemes pass through, host-like text gets a
-/// scheme guessed for it, anything else becomes a web search.
+/// Browser-style omnibox: `http(s)` and `about:blank` pass through, host-like text
+/// gets a scheme guessed for it, anything else (including `file:`, `data:`,
+/// `mailto:`, `javascript:`) becomes a web search so the webview never loads it.
 fn resolve_address(raw: &str) -> Option<AddressTarget> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -57,7 +58,10 @@ fn resolve_address(raw: &str) -> Option<AddressTarget> {
     let has_scheme = trimmed.split_once(':').is_some_and(|(scheme, rest)| {
         scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
             && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-            && (rest.starts_with("//") || matches!(scheme, "about" | "data" | "mailto" | "file"))
+            && (scheme.eq_ignore_ascii_case("http")
+                || scheme.eq_ignore_ascii_case("https")
+                || scheme.eq_ignore_ascii_case("about"))
+            && (rest.starts_with("//") || scheme.eq_ignore_ascii_case("about"))
     });
     if has_scheme {
         return Some(AddressTarget::Url(trimmed.to_owned()));
@@ -115,6 +119,11 @@ fn search_url(query: &str) -> String {
 /// The address bar hides `https://`; everything else, `http://` included, stays visible.
 fn display_url(url: &str) -> &str {
     url.strip_prefix("https://").unwrap_or(url)
+}
+
+/// Urls the webview may load: web pages and the blank document only.
+pub(crate) fn navigable(url: &str) -> bool {
+    open_in::web_url(url) || url.eq_ignore_ascii_case("about:blank")
 }
 
 /// What the page told us, queued by native callbacks.
@@ -544,6 +553,11 @@ impl Browser {
     }
 
     fn open_url(&mut self, url: String, cx: &mut Context<Self>) {
+        if !navigable(&url) {
+            self.open_error = Some("Only http and https pages can open here".into());
+            cx.notify();
+            return;
+        }
         self.url = url.clone();
         self.loading = true;
         self.open_error = None;

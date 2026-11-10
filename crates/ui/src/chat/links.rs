@@ -43,7 +43,18 @@ pub fn parse_file_link(href: &str, cwd: Option<&Path>) -> Option<FileLink> {
     resolve(path, cwd).map(|path| FileLink { path, line: Some(line), col })
 }
 
-/// Opens files in Explorer and web links in the app browser, with an OS fallback.
+/// Only these schemes may reach the OS opener from a reply link.
+pub(crate) fn openable(href: &str) -> bool {
+    let scheme = href.trim().split_once(':').map(|(s, _)| s);
+    scheme.is_some_and(|s| {
+        s.eq_ignore_ascii_case("http")
+            || s.eq_ignore_ascii_case("https")
+            || s.eq_ignore_ascii_case("mailto")
+    })
+}
+
+/// Opens files in Explorer and web links in the app browser, with an OS fallback
+/// for `http(s)`/`mailto` only; other schemes never reach the OS.
 pub(crate) fn open_link(href: &str, cwd: Option<&Path>, window: &mut Window, cx: &mut App) {
     let open = cx.try_global::<OpenFileLink>().map(|open| open.0.clone());
     let opened = match (open, parse_file_link(href, cwd)) {
@@ -59,7 +70,9 @@ pub(crate) fn open_link(href: &str, cwd: Option<&Path>, window: &mut Window, cx:
     {
         return;
     }
-    cx.open_url(href);
+    if openable(href) {
+        cx.open_url(href);
+    }
 }
 
 /// Opens `link` through the app's [`OpenFileLink`], if one is installed.
