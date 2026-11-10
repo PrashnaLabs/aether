@@ -147,6 +147,7 @@ pub(crate) struct Chat {
     worktree_branch: String,
     /// Lead chat that spawned this one.
     pub(crate) parent: Option<i64>,
+    pub(crate) compaction_threshold_percent: Option<aether_core::CompactionThreshold>,
     pub(crate) lead: bool,
     /// Newest reply of this child its lead has read with read_agent.
     pub(crate) lead_seen: Option<usize>,
@@ -881,6 +882,7 @@ pub(super) fn chat_with(title: &str, texts: &[&str]) -> Chat {
         restarted_ms: 0,
         bg_live: Cell::new(None),
         parent: None,
+        compaction_threshold_percent: None,
         lead: false,
         lead_seen: None,
         handoff_from: None,

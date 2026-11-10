@@ -120,7 +120,8 @@ pub fn tool_specs() -> Value {
                     "effort": {"type": "string", "description": "Optional reasoning effort"},
                     "worktree": {"type": "boolean", "description": "Own git branch + folder off the lead's current branch; lead's uncommitted changes aren't included"},
                     "nonce": {"type": "string", "description": "Idempotency key for this spawn; retrying with the same key returns the existing child instead of creating a second"},
-                    "card": {"type": "integer", "description": "Optional board card id to link; omitted adds a card for this agent"}
+                    "card": {"type": "integer", "description": "Optional board card id to link; omitted adds a card for this agent"},
+                    "compaction_threshold_percent": {"type": "integer", "minimum": 30, "maximum": 90, "description": "Claude children: auto-compact at 30–90% (global default 45%); omitted uses the global setting. Ignored when disabled or unsupported. Applies at launch only."}
                 },
                 "required": ["provider", "model", "title", "task"]
             }

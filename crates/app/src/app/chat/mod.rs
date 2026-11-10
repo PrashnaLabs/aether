@@ -516,6 +516,7 @@ impl ChatApp {
                 worktree_path: chat.worktree_path.clone(),
                 worktree_branch: chat.worktree_branch.clone(),
                 parent: chat.parent,
+                compaction_threshold_percent: chat.compaction_threshold_percent,
                 lead: chat.lead,
                 lead_seen: chat.lead_seen,
                 handoff_from: chat.handoff_from,

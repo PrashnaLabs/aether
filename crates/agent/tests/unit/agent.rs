@@ -164,6 +164,8 @@ fn cli_settings() -> Settings {
 fn chat(effort: &str) -> ChatSession {
     ChatSession {
         ephemeral: false,
+        child: false,
+        compaction_threshold_percent: None,
         key: "1".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,
@@ -171,6 +173,50 @@ fn chat(effort: &str) -> ChatSession {
         resume: String::new(),
         lead: false,
     }
+}
+
+#[test]
+fn compaction_is_only_configured_for_claude_children_including_resume() {
+    let mut settings = cli_settings();
+    settings.provider_models.insert("claude".into(), "sonnet".into());
+    assert_eq!(session_options(&settings, &chat(""), None).0.compaction_window, None);
+    let mut child = ChatSession { child: true, resume: "existing".into(), ..chat("") };
+    let (opts, key) = session_options(&settings, &child, None);
+    assert_eq!(opts.compaction_window, Some(435_150));
+    assert_eq!(opts.resume, "existing");
+    child.compaction_threshold_percent = Some(aether_core::CompactionThreshold::new(60).unwrap());
+    assert_eq!(session_options(&settings, &child, None).0.compaction_window, Some(580_200));
+    settings.agent_compaction.enabled = false;
+    let (off, off_key) = session_options(&settings, &child, None);
+    assert_eq!(off.compaction_window, None);
+    // A settings edit must not restart an already-running CLI.
+    assert_eq!(key, off_key);
+    settings.agent_compaction.enabled = true;
+    for provider in Provider::ALL.into_iter().filter(|p| *p != Provider::Claude) {
+        settings.provider = Some(provider);
+        settings.provider_models.insert(provider.key().into(), "sonnet".into());
+        assert_eq!(session_options(&settings, &child, None).0.compaction_window, None);
+    }
+}
+
+#[test]
+fn compaction_settings_keep_live_agents_and_apply_on_the_next_launch() {
+    let windows = Arc::new(StdMutex::new(Vec::new()));
+    let captured = windows.clone();
+    let factory: Factory = Arc::new(move |_, opts, tx| {
+        captured.lock().unwrap().push(opts.compaction_window);
+        Box::new(Fake { tx, log: Arc::default(), resumed: true, dead: false, reports: false })
+    });
+    let agent = Agent::with_factory(factory, Duration::from_secs(600)).unwrap();
+    let mut settings = cli_settings();
+    settings.provider_models.insert("claude".into(), "sonnet".into());
+    let child = ChatSession { child: true, ..chat("") };
+    drain(&agent, agent.send("x", "a".into(), vec![], &settings, "", vec![], &[], &child));
+    settings.agent_compaction.enabled = false;
+    drain(&agent, agent.send("x", "die".into(), vec![], &settings, "", vec![], &[], &child));
+    assert_eq!(*windows.lock().unwrap(), [Some(435_150)]);
+    drain(&agent, agent.send("x", "again".into(), vec![], &settings, "", vec![], &[], &child));
+    assert_eq!(*windows.lock().unwrap(), [Some(435_150), None]);
 }
 
 fn drain(agent: &Agent, mut reply: Reply) -> Vec<Update> {
@@ -629,6 +675,8 @@ fn forked_sessions_start_with_their_history() {
 fn missing_chat() -> ChatSession {
     ChatSession {
         ephemeral: false,
+        child: false,
+        compaction_threshold_percent: None,
         key: "m".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,

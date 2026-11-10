@@ -75,6 +75,7 @@ const INTERRUPTED: &str = r#"{"event":"result","result":{"conversation_id":"86d4
 fn opts(model: &str, effort: &str, access: AccessMode) -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        compaction_window: None,
         binary: String::new(),
         cwd: "/tmp".into(),
         model: model.into(),

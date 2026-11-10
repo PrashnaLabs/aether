@@ -398,6 +398,8 @@ impl ChatApp {
             effort: chat.effort.clone(),
             resume: chat.cli_session.clone(),
             lead: chat.lead,
+            child: chat.parent.is_some(),
+            compaction_threshold_percent: chat.compaction_threshold_percent,
         };
         (effective, session)
     }

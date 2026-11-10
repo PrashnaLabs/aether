@@ -102,6 +102,7 @@ fn opencode_and_saved_chats_convert_into_usage_records() {
         worktree_path: String::new(),
         worktree_branch: String::new(),
         parent: None,
+        compaction_threshold_percent: None,
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],

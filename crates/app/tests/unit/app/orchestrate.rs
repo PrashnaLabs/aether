@@ -75,6 +75,40 @@ fn spawn_args(provider: &str, model: &str) -> Value {
     json!({"provider": provider, "model": model, "title": "Fix tests", "task": "make it green"})
 }
 
+#[test]
+fn spawn_compaction_override_is_optional_and_strictly_validated() {
+    let probes = codex_probes(&[]);
+    let mut args = spawn_args("codex", "gpt-5");
+    assert!(SpawnArgs::parse(&args, &probes).unwrap().compaction_threshold_percent.is_none());
+    for percent in [30, 45, 90] {
+        args["compaction_threshold_percent"] = json!(percent);
+        let parsed = SpawnArgs::parse(&args, &probes).unwrap();
+        assert_eq!(parsed.compaction_threshold_percent.unwrap().percent(), percent);
+    }
+    for value in [json!(29), json!(91), json!(45.5), json!("45"), json!(null)] {
+        args["compaction_threshold_percent"] = value;
+        let error = SpawnArgs::parse(&args, &probes).unwrap_err();
+        assert!(error.contains("compaction_threshold_percent"), "{error}");
+        assert!(error.contains("integer from 30 to 90"), "{error}");
+    }
+}
+
+#[gpui_kit::test]
+fn child_compaction_override_reaches_the_session_request(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let mut args = spawn_args("codex", "gpt-5");
+            args["compaction_threshold_percent"] = json!(60);
+            let parsed = SpawnArgs::parse(&args, &app.probes).unwrap();
+            let ix = app.create_child(1, &parsed).unwrap();
+            let session = app.cli_request(ix).1;
+            assert!(session.child);
+            assert_eq!(session.compaction_threshold_percent.unwrap().percent(), 60);
+        })
+        .unwrap();
+}
+
 fn lead_chat(id: i64) -> Chat {
     let mut lead = chat_with("lead", &[]);
     lead.id = id;

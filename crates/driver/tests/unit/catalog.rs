@@ -42,6 +42,7 @@ fn fake_binary() -> String {
 fn sh_opts() -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        compaction_window: None,
         binary: "/bin/sh".into(),
         cwd: "/".into(),
         model: String::new(),

@@ -1,6 +1,20 @@
 use super::*;
 use crate::orchestrator::forward;
 
+#[test]
+fn spawn_agent_compaction_override_is_optional_and_bounded() {
+    let specs = crate::orchestrator::tool_specs();
+    let spawn = specs.as_array().unwrap().iter().find(|t| t["name"] == "spawn_agent").unwrap();
+    let schema = &spawn["inputSchema"];
+    let property = &schema["properties"]["compaction_threshold_percent"];
+    assert_eq!(property["type"], "integer");
+    assert_eq!(property["minimum"], 30);
+    assert_eq!(property["maximum"], 90);
+    assert!(
+        !schema["required"].as_array().unwrap().contains(&"compaction_threshold_percent".into())
+    );
+}
+
 fn rpc(
     line: &str,
     token: Option<&str>,

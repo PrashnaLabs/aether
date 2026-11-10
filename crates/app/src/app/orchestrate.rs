@@ -51,6 +51,7 @@ pub(super) struct SpawnArgs {
     pub(super) worktree: bool,
     pub(super) nonce: String,
     pub(super) card: Option<i64>,
+    pub(super) compaction_threshold_percent: Option<aether_core::CompactionThreshold>,
 }
 
 impl SpawnArgs {
@@ -89,6 +90,13 @@ impl SpawnArgs {
             worktree,
             nonce: text("nonce"),
             card: args["card"].as_i64(),
+            compaction_threshold_percent: args
+                .get("compaction_threshold_percent")
+                .map(|value| {
+                    serde_json::from_value(value.clone())
+                        .map_err(|e| format!("compaction_threshold_percent: {e}"))
+                })
+                .transpose()?,
         })
     }
 }
@@ -840,6 +848,7 @@ impl ChatApp {
             restarted_ms: 0,
             bg_live: std::cell::Cell::new(None),
             parent: Some(parent),
+            compaction_threshold_percent: a.compaction_threshold_percent,
             lead: false,
             lead_seen: None,
             handoff_from: None,

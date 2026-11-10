@@ -40,6 +40,8 @@ pub struct DriverStartOptions {
     pub lead: Option<LeadTools>,
     /// A `/btw` side run: the CLI shouldn't save its session.
     pub ephemeral: bool,
+    /// Token window for a lead-spawned Claude child; other drivers ignore it.
+    pub compaction_window: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +82,7 @@ impl DriverStartOptions {
                     background: Vec::new(),
                     lead: None,
                     ephemeral: false,
+                    compaction_window: None,
                 };
             }
         };
@@ -95,6 +98,7 @@ impl DriverStartOptions {
             background: Vec::new(),
             lead: None,
             ephemeral: false,
+            compaction_window: None,
         }
     }
 }

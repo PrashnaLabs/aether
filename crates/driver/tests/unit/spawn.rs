@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn other_provider_commands_add_no_compaction_env() {
+    for provider in
+        aether_core::Provider::ALL.into_iter().filter(|p| *p != aether_core::Provider::Claude)
+    {
+        let mut opts =
+            DriverStartOptions::for_provider(&aether_core::Settings::default(), provider, "/tmp");
+        opts.binary = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        opts.compaction_window = Some(435_150);
+        let cmd = command(&opts, provider.key()).unwrap();
+        assert!(!cmd.get_envs().any(|(key, _)| key == "CLAUDE_CODE_AUTO_COMPACT_WINDOW"));
+    }
+}
+
+#[test]
 fn stderr_filter_hides_transport_noise() {
     assert!(!visible_stderr("transport closed"));
     assert!(visible_stderr("error: connection refused"));
@@ -44,6 +58,7 @@ fn describe_hides_env() {
 fn command_strips_lead_env() {
     let opts = DriverStartOptions {
         ephemeral: false,
+        compaction_window: None,
         binary: std::env::current_exe().unwrap().to_string_lossy().into_owned(),
         cwd: "/tmp".into(),
         model: String::new(),

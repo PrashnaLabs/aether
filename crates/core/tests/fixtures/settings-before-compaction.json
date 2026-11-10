@@ -1,0 +1,6 @@
+{
+  "appearance": "dark",
+  "provider": "claude",
+  "claude_binary": "/custom/claude",
+  "max_children": 4
+}

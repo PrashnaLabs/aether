@@ -58,6 +58,8 @@ pub struct ChatSession {
     pub resume: String,
     pub lead: bool,
     pub ephemeral: bool,
+    pub child: bool,
+    pub compaction_threshold_percent: Option<aether_core::CompactionThreshold>,
 }
 
 /// What a live CLI session can't change without a restart; model and effort ride on each prompt.
@@ -79,10 +81,11 @@ enum Command {
         resume: String,
         model: String,
         effort: String,
+        compaction_window: Option<u32>,
     },
     /// Text and files for the running turn, the reply a prompt streams into if the
     /// turn already ended, and the resume id.
-    Steer(String, Vec<Attachment>, UnboundedSender<Update>, String),
+    Steer(String, Vec<Attachment>, UnboundedSender<Update>, String, Option<u32>),
     Cancel,
     Answer(u64, Answer),
     /// Stops a background task or terminal by tool row id.
@@ -624,6 +627,7 @@ impl Agent {
             resume: chat.resume.clone(),
             model: opts.model.clone(),
             effort: opts.effort.clone(),
+            compaction_window: opts.compaction_window,
         };
         if let Some(session) = live.get(&chat.key).filter(|s| s.key == key) {
             let mut turn = session.turn.guard();
@@ -695,9 +699,19 @@ impl Agent {
             let mut seeded = driver.resumed();
             for command in rx {
                 match command {
-                    Command::Prompt { text, attachments, history, resume, model, effort } => {
+                    Command::Prompt {
+                        text,
+                        attachments,
+                        history,
+                        resume,
+                        model,
+                        effort,
+                        compaction_window,
+                    } => {
                         let switch = model != opts.model || effort != opts.effort;
                         (opts.model, opts.effort) = (model, effort);
+                        // Only a future process launch reads this; a live CLI keeps its env.
+                        opts.compaction_window = compaction_window;
                         if !driver.alive()
                             || switch && !driver.set_options(&opts.model, &opts.effort)
                         {
@@ -723,7 +737,8 @@ impl Agent {
                         orphan.store(false, Ordering::SeqCst);
                         driver.prompt(text, native);
                     }
-                    Command::Steer(text, attachments, reply, resume) => {
+                    Command::Steer(text, attachments, reply, resume, compaction_window) => {
+                        opts.compaction_window = compaction_window;
                         seeded = true;
                         let (native, by_path) = native_image_split(provider, &attachments);
                         let full = text.clone() + &attached_files_block(&by_path);
@@ -921,11 +936,16 @@ impl Agent {
         chat: &ChatSession,
     ) -> Reply {
         let (tx, updates) = mpsc::unbounded();
-        let (_, key) = session_options(settings, chat, self.lead_tools(chat, false));
+        let (opts, key) = session_options(settings, chat, self.lead_tools(chat, false));
         if let Some(session) = self.live.guard().get(&chat.key).filter(|s| s.key == key) {
             let turn = session.turn.guard();
-            let steer =
-                Command::Steer(text.clone(), attachments.clone(), tx.clone(), chat.resume.clone());
+            let steer = Command::Steer(
+                text.clone(),
+                attachments.clone(),
+                tx.clone(),
+                chat.resume.clone(),
+                opts.compaction_window,
+            );
             if turn.is_some() && session.commands.send(steer).is_ok() {
                 *session.last_active.guard() = Instant::now();
                 return Reply {
@@ -998,7 +1018,7 @@ fn session_options(
     chat: &ChatSession,
     lead: Option<LeadTools>,
 ) -> (DriverStartOptions, SessionKey) {
-    let opts = DriverStartOptions {
+    let mut opts = DriverStartOptions {
         effort: chat.effort.clone(),
         access: chat.access,
         resume: chat.resume.clone(),
@@ -1007,6 +1027,13 @@ fn session_options(
         ephemeral: chat.ephemeral,
         ..DriverStartOptions::for_provider(settings, settings.provider(), chat.cwd.clone())
     };
+    if chat.child {
+        opts.compaction_window = settings.agent_compaction.window_tokens(
+            settings.provider(),
+            &opts.model,
+            chat.compaction_threshold_percent,
+        );
+    }
     let key = SessionKey {
         provider: settings.provider(),
         binary: opts.binary.clone(),

@@ -45,6 +45,7 @@ struct Args {
 fn parse(argv: Vec<String>) -> Result<Args, String> {
     let mut opts = DriverStartOptions {
         ephemeral: false,
+        compaction_window: None,
         binary: String::new(),
         cwd: PathBuf::from("."),
         model: String::new(),

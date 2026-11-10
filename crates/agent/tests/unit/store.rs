@@ -32,6 +32,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         lead_seen: None,
         pending_deliveries: vec![],
         handoff_from: Some(3),
+        compaction_threshold_percent: Some(aether_core::CompactionThreshold::new(60).unwrap()),
     };
     let older = SavedChat {
         id: 3,
@@ -49,6 +50,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         worktree_path: String::new(),
         worktree_branch: String::new(),
         parent: None,
+        compaction_threshold_percent: None,
         lead: false,
         lead_seen: None,
         pending_deliveries: vec![],
@@ -75,6 +77,8 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
     assert_eq!(chats[1].worktree_path, "/w/p-1/fix");
     assert_eq!(chats[1].worktree_branch, "aether/fix");
     assert_eq!(chats[1].handoff_from, Some(3));
+    assert_eq!(chats[1].compaction_threshold_percent.unwrap().percent(), 60);
+    assert_eq!(chats[0].compaction_threshold_percent, None);
     assert_eq!(chats[0].handoff_from, None);
     assert!(chats[0].project.is_empty() && chats[0].worktree_path.is_empty());
     let reply = &chats[1].messages[1];
@@ -139,6 +143,7 @@ fn old_db_loads_as_openrouter() {
     assert_eq!(chats.len(), 1);
     assert_eq!(chats[0].provider, Provider::OpenRouter);
     assert_eq!(chats[0].provider_model, "");
+    assert_eq!(chats[0].compaction_threshold_percent, None);
     assert!(
         chats[0].access == AccessMode::Ask
             && chats[0].cli_session.is_empty()
@@ -174,6 +179,7 @@ fn ids_include_every_row() {
             worktree_path: String::new(),
             worktree_branch: String::new(),
             parent: None,
+            compaction_threshold_percent: None,
             lead: false,
             lead_seen: None,
             pending_deliveries: vec![],
@@ -209,6 +215,7 @@ fn flush_returns_once_queued_saves_are_written() {
             worktree_path: String::new(),
             worktree_branch: String::new(),
             parent: None,
+            compaction_threshold_percent: None,
             lead: false,
             lead_seen: None,
             pending_deliveries: vec![],
@@ -254,6 +261,7 @@ fn parent_and_lead_round_trip() {
         worktree_path: String::new(),
         worktree_branch: String::new(),
         parent: Some(5),
+        compaction_threshold_percent: None,
         lead: true,
         lead_seen: None,
         pending_deliveries: vec![],
@@ -316,6 +324,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         worktree_path: String::new(),
         worktree_branch: String::new(),
         parent: Some(5),
+        compaction_threshold_percent: None,
         lead: false,
         lead_seen: Some(3),
         pending_deliveries: vec![],
@@ -337,6 +346,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         worktree_path: String::new(),
         worktree_branch: String::new(),
         parent: None,
+        compaction_threshold_percent: None,
         lead: true,
         lead_seen: None,
         pending_deliveries: vec![SavedDelivery {

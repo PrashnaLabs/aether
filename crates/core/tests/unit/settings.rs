@@ -1,6 +1,84 @@
 use super::*;
 
 #[test]
+fn compaction_percent_requires_an_integer_in_range() {
+    for percent in [30, 45, 90] {
+        let value = serde_json::json!(percent);
+        let parsed: CompactionThreshold = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.percent(), percent);
+    }
+    for value in [
+        serde_json::json!(29),
+        serde_json::json!(91),
+        serde_json::json!(-1),
+        serde_json::json!(45.5),
+        serde_json::json!("45"),
+        serde_json::Value::Null,
+    ] {
+        let error = serde_json::from_value::<CompactionThreshold>(value).unwrap_err();
+        assert!(error.to_string().contains("integer from 30 to 90"), "{error}");
+    }
+}
+
+#[test]
+fn compaction_converts_percent_to_tokens_without_rounding_to_thousands() {
+    for (percent, tokens) in [(30, 290_100), (45, 435_150), (90, 870_300)] {
+        assert_eq!(CompactionThreshold::new(percent).unwrap().tokens(967_000), tokens);
+    }
+    assert_eq!(CompactionThreshold::default().tokens(967_001), 435_150);
+    assert_eq!(CompactionThreshold::default().tokens(967_003), 435_151);
+}
+
+#[test]
+fn compaction_only_affects_supported_claude_models() {
+    let guard = AgentCompaction::default();
+    for model in ["sonnet", "opus", "opus[1m]", "claude-sonnet-5-5", "claude-opus-5.5"] {
+        assert_eq!(guard.window_tokens(Provider::Claude, model, None), Some(435_150), "{model}");
+    }
+    for model in ["", "haiku", "claude-haiku-5-5", "claude-sonnet-4-5", "claude-opus-50", "unknown"]
+    {
+        assert_eq!(guard.window_tokens(Provider::Claude, model, None), None, "{model}");
+    }
+    for provider in Provider::ALL.into_iter().filter(|p| *p != Provider::Claude) {
+        assert_eq!(guard.window_tokens(provider, "sonnet", None), None, "{provider:?}");
+    }
+    let custom =
+        AgentCompaction { threshold_percent: CompactionThreshold::new(60).unwrap(), ..guard };
+    assert_eq!(custom.window_tokens(Provider::Claude, "sonnet", None), Some(580_200));
+    let override_percent = Some(CompactionThreshold::new(60).unwrap());
+    assert_eq!(guard.window_tokens(Provider::Claude, "sonnet", override_percent), Some(580_200));
+    let off = AgentCompaction { enabled: false, ..guard };
+    assert_eq!(off.window_tokens(Provider::Claude, "sonnet", override_percent), None);
+}
+
+#[test]
+fn compaction_settings_default_and_round_trip_old_settings() {
+    let old = include_str!("../fixtures/settings-before-compaction.json");
+    let mut settings: Settings = serde_json::from_str(old).unwrap();
+    assert_eq!(settings.agent_compaction, AgentCompaction::default());
+    assert!(settings.agent_compaction.enabled);
+    assert_eq!(settings.agent_compaction.threshold_percent.percent(), 45);
+    for fragment in [r#"{}"#, r#"{"unknown":true}"#, r#"{"enabled":false}"#] {
+        let json = format!(r#"{{"agent_compaction":{fragment}}}"#);
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.agent_compaction.threshold_percent.percent(), 45);
+        assert_eq!(parsed.agent_compaction.enabled, !fragment.contains("false"));
+    }
+    settings.agent_compaction.enabled = false;
+    settings.agent_compaction.threshold_percent = CompactionThreshold::new(90).unwrap();
+    let saved = serde_json::to_string_pretty(&settings).unwrap();
+    let loaded: Settings = serde_json::from_str(&saved).unwrap();
+    assert_eq!(loaded, settings);
+    assert_eq!(loaded.claude_binary, "/custom/claude");
+    assert_eq!(loaded.max_children, 4);
+    for value in ["29", "91", "45.5", "\"45\""] {
+        let json = format!(r#"{{"agent_compaction":{{"threshold_percent":{value}}}}}"#);
+        let error = serde_json::from_str::<Settings>(&json).unwrap_err();
+        assert!(error.to_string().contains("integer from 30 to 90"));
+    }
+}
+
+#[test]
 fn missing_fields_fall_back_to_defaults() {
     let settings: Settings =
         serde_json::from_str(r#"{ "appearance": "dark", "reasoning": "off" }"#).unwrap();

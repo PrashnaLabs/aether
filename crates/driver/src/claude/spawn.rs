@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ExitStatus, Stdio};
+use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -51,11 +51,10 @@ impl ClaudeDriver {
                 state: NoticeState::Running,
                 ..Notice::new("startup-session", NoticeKind::Startup, session)
             });
-            let Some(mut cmd) = command(&opts, "claude") else {
+            let Some(mut cmd) = launch_command(&opts, &args) else {
                 me.die("claude is not installed; install it or set an explicit binary path".into());
                 return me;
             };
-            cmd.args(&args).stdin(Stdio::piped()).stdout(Stdio::piped());
             let child = match spawn_logged(&mut cmd) {
                 Ok(child) => child,
                 Err(e) => {
@@ -218,6 +217,15 @@ impl ClaudeDriver {
             rec.line(&v.to_string());
         }
     }
+}
+
+fn launch_command(opts: &DriverStartOptions, args: &[String]) -> Option<Command> {
+    let mut cmd = command(opts, "claude")?;
+    cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped());
+    if let Some(tokens) = opts.compaction_window {
+        cmd.env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", tokens.to_string());
+    }
+    Some(cmd)
 }
 
 pub(crate) fn send(stdin: &Mutex<Option<ChildStdin>>, v: &Value) {
@@ -416,3 +424,7 @@ pub(crate) fn user_message(text: &str, images: &[Attachment]) -> Value {
         "parent_tool_use_id": null,
     })
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/claude/spawn.rs"]
+mod tests;

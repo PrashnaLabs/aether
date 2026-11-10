@@ -202,6 +202,7 @@ impl ChatApp {
                 worktree_path: c.worktree_path_str().to_owned(),
                 worktree_branch: c.worktree_branch_str().to_owned(),
                 parent: c.parent,
+                compaction_threshold_percent: c.compaction_threshold_percent,
                 lead: c.lead,
                 lead_seen: c.lead_seen,
                 pending_deliveries: vec![],

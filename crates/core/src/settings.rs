@@ -503,6 +503,86 @@ const fn default_max_children() -> usize {
     8
 }
 
+/// A validated percentage shared by settings and the optional spawn tool argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct CompactionThreshold(u8);
+
+impl CompactionThreshold {
+    const ERROR: &str = "compaction threshold_percent must be an integer from 30 to 90";
+
+    pub fn new(percent: u8) -> Result<Self, &'static str> {
+        if (30..=90).contains(&percent) { Ok(Self(percent)) } else { Err(Self::ERROR) }
+    }
+
+    pub fn percent(self) -> u8 {
+        self.0
+    }
+
+    pub fn tokens(self, window: u32) -> u32 {
+        ((u64::from(window) * u64::from(self.0) + 50) / 100) as u32
+    }
+}
+
+impl Default for CompactionThreshold {
+    fn default() -> Self {
+        Self(45)
+    }
+}
+
+impl<'de> Deserialize<'de> for CompactionThreshold {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let percent =
+            u8::deserialize(deserializer).map_err(|_| serde::de::Error::custom(Self::ERROR))?;
+        Self::new(percent).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentCompaction {
+    pub enabled: bool,
+    pub threshold_percent: CompactionThreshold,
+}
+
+impl Default for AgentCompaction {
+    fn default() -> Self {
+        Self { enabled: true, threshold_percent: CompactionThreshold::default() }
+    }
+}
+
+impl AgentCompaction {
+    /// Claude Code 2.1.286's observed auto-compaction window for the 1M model class.
+    /// Bare Sonnet/Opus aliases select that class; unknown and older models keep CLI defaults.
+    pub fn window_tokens(
+        self,
+        provider: Provider,
+        model: &str,
+        threshold: Option<CompactionThreshold>,
+    ) -> Option<u32> {
+        if !self.enabled || provider != Provider::Claude {
+            return None;
+        }
+        let lower = model.to_ascii_lowercase();
+        let model = lower.strip_suffix("[1m]").unwrap_or(&lower);
+        let window = match model {
+            "sonnet" | "opus" => 967_000,
+            _ if ["claude-sonnet-5", "claude-opus-5", "sonnet-5", "opus-5"].iter().any(
+                |prefix| {
+                    model
+                        .strip_prefix(prefix)
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '.']))
+                },
+            ) =>
+            {
+                967_000
+            }
+            _ => return None,
+        };
+        Some(threshold.unwrap_or(self.threshold_percent).tokens(window))
+    }
+}
+
 fn max_children_in_range<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
     Ok(match OrBad::<usize>::deserialize(deserializer)? {
         OrBad::Good(n) => n.clamp(1, 50),
@@ -837,6 +917,8 @@ pub struct Settings {
     /// Max running child agents per lead chat.
     #[serde(default = "default_max_children", deserialize_with = "max_children_in_range")]
     pub max_children: usize,
+    /// Auto-compaction for Claude children created by a lead; applied at process launch.
+    pub agent_compaction: AgentCompaction,
     #[serde(default = "default_font_size")]
     pub font_size: f32,
     pub model: String,
@@ -1074,6 +1156,7 @@ impl Default for Settings {
             window_opacity: default_window_opacity(),
             window_blur: false,
             max_children: default_max_children(),
+            agent_compaction: AgentCompaction::default(),
             font_size: default_font_size(),
             model: "openrouter/auto".into(),
             reasoning: Reasoning::default(),
