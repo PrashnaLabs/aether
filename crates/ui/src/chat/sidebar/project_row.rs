@@ -41,6 +41,18 @@ pub fn project_aria(
     aria
 }
 
+const LONG_PATH: usize = 32;
+
+/// `path` with the home folder shortened to `~`, for the no-git line.
+pub fn tilde_path(path: &str) -> String {
+    let home = aether_core::home_dir();
+    match std::path::Path::new(path).strip_prefix(&home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.to_string(),
+    }
+}
+
 pub fn project_chevron_icon(collapsed: bool) -> IconName {
     if collapsed { IconName::ChevronRight } else { IconName::ChevronDown }
 }
@@ -165,8 +177,16 @@ impl ProjectRow {
                 .items_center()
                 .text_size(px(10.5))
                 .text_color(muted.opacity(0.7))
-                .child(Icon::new(Lucide::CircleSlash).size(px(12.)).flex_none())
-                .child("No git")
+                .child(
+                    div().size(px(6.)).mx(px(3.)).rounded_full().bg(muted.opacity(0.7)).flex_none(),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(middle_truncate(&tilde_path(&path), LONG_PATH)),
+                )
         });
         let git = branch.map(|branch| {
             h_flex()
