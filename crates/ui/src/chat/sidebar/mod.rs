@@ -399,14 +399,7 @@ pub const SIDEBAR_MAX_WIDTH: f32 = 480.;
 
 type WatchHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 type HandoffHandler = Rc<dyn Fn(i64, Provider, &mut Window, &mut App)>;
-type CleanupHandler = Rc<dyn Fn(i64, CrewCleanup, &mut Window, &mut App)>;
 
-/// What a lead's menu does to its agents that aren't running.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CrewCleanup {
-    Archive,
-    Delete,
-}
 type PickHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 
 /// A row's bulk-select state: picked, any row picked, toggle.
@@ -437,8 +430,6 @@ struct ChatItem {
     lead: bool,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, HandoffHandler)>,
-    /// A lead's count of agents that aren't running, and what clears them.
-    cleanup: Option<(usize, CleanupHandler)>,
     line: Option<ChatLine>,
     on_click: RowHandler,
     on_rename: RowHandler,
@@ -548,7 +539,6 @@ pub struct ChatSidebar {
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
-    cleanup: Option<(std::collections::HashMap<i64, usize>, CleanupHandler)>,
     picks: Option<(Vec<i64>, PickHandler)>,
     bulk_bar: Option<AnyElement>,
 }
@@ -596,7 +586,6 @@ impl ChatSidebar {
             leads: Vec::new(),
             on_watch: None,
             handoff: None,
-            cleanup: None,
             picks: None,
             bulk_bar: None,
         }
@@ -621,16 +610,6 @@ impl ChatSidebar {
         on_pick: impl Fn(i64, Provider, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.handoff = Some((targets, chats, Rc::new(on_pick)));
-        self
-    }
-
-    /// Adds Archive/Delete "N finished agents…" to the menus of leads in `finished`.
-    pub fn crew_cleanup(
-        mut self,
-        finished: std::collections::HashMap<i64, usize>,
-        on: impl Fn(i64, CrewCleanup, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.cleanup = Some((finished, Rc::new(on)));
         self
     }
 
@@ -814,7 +793,6 @@ impl ChatSidebar {
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
-            cleanup: self.cleanup_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),
@@ -967,11 +945,6 @@ impl ChatSidebar {
         (!targets.is_empty()).then(|| (targets, pick.clone()))
     }
 
-    fn cleanup_for(&self, id: i64) -> Option<(usize, CleanupHandler)> {
-        let (finished, on) = self.cleanup.as_ref()?;
-        finished.get(&id).filter(|&&n| n > 0).map(|&n| (n, on.clone()))
-    }
-
     fn pick_for(&self, id: i64) -> Option<Pick> {
         let (picked, on_toggle) = self.picks.as_ref()?;
         Some(Pick {
@@ -1058,7 +1031,6 @@ impl ChatSidebar {
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
-            cleanup: self.cleanup_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),

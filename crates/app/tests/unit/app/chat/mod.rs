@@ -316,3 +316,23 @@ fn growing_the_open_thought_keeps_the_rows_and_a_new_one_rebuilds(
         })
         .unwrap();
 }
+
+#[test]
+fn crew_options_offer_lead_all_and_finished() {
+    use super::manage::crew_options;
+    let labels = |o: &[(String, Vec<i64>)]| o.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
+    let all = crew_options(1, Some(&[2, 3]), &[2]);
+    assert_eq!(
+        labels(&all),
+        [
+            "Only this chat",
+            "This chat and all its 2 agents",
+            "Only its 1 finished agent (done or failed); this chat stays"
+        ]
+    );
+    assert_eq!(all[1].1, [2, 3, 1]);
+    assert_eq!(all[2].1, [2]);
+    let busy = crew_options(1, None, &[2]);
+    assert_eq!(busy.len(), 1, "with agents running, only the finished ones can go");
+    assert_eq!(crew_options(1, Some(&[]), &[]).len(), 1);
+}

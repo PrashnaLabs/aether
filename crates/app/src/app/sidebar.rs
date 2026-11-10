@@ -858,32 +858,13 @@ impl ChatApp {
             .collect()
     }
 
-    fn finished_crews(&self) -> HashMap<i64, usize> {
-        self.chats
-            .iter()
-            .filter(|c| c.lead && !c.archived)
-            .map(|c| (c.id, self.finished_crew(c.id).len()))
-            .filter(|&(_, n)| n > 0)
-            .collect()
-    }
-
     /// Header and resizable edge shared by every sidebar view.
     fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
-        let (resize, resize_end, watch, handoff, cleanup) =
-            (cx.entity(), cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let (resize, resize_end, watch, handoff) =
+            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)
             .width(self.settings.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
             .now(now_ms())
-            .crew_cleanup(self.finished_crews(), move |id, kind, window, cx| {
-                cleanup.update(cx, |this, cx| {
-                    let bulk = match kind {
-                        aether_ui::CrewCleanup::Archive => Bulk::Archive,
-                        aether_ui::CrewCleanup::Delete => Bulk::Delete,
-                    };
-                    let ids = this.finished_crew(id);
-                    this.confirm_bulk(bulk, ids, window, cx);
-                })
-            })
             .handoff(
                 self.handoff_targets(None),
                 self.chats

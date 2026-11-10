@@ -7,7 +7,7 @@ use gpui_kit::component::{
 use gpui_kit::{App, ClipboardItem, Context, Entity, SharedString, Window, div, prelude::*};
 
 use super::state::SidebarState;
-use super::{ChatItem, ChatLine, CrewCleanup, RowHandler};
+use super::{ChatItem, ChatLine, RowHandler};
 
 fn reveal_label() -> &'static str {
     if cfg!(target_os = "macos") { "Reveal in Finder" } else { "Show in folder" }
@@ -208,18 +208,6 @@ pub(super) fn chat_menu(
         ),
         None => menu,
     };
-    let cleanup = chat.cleanup.clone().filter(|_| !chat.archived);
-    let cleanup_item = |verb: &str, kind: CrewCleanup, icon: Icon| {
-        cleanup.clone().map(|(n, on)| {
-            let id = chat.id;
-            let agents = if n == 1 { "agent" } else { "agents" };
-            PopupMenuItem::new(format!("{verb} {n} finished {agents}…"))
-                .icon(icon)
-                .on_click(move |_, window, cx| on(id, kind, window, cx))
-        })
-    };
-    let archive_crew = cleanup_item("Archive", CrewCleanup::Archive, Icon::new(IconName::Inbox));
-    let delete_crew = cleanup_item("Delete", CrewCleanup::Delete, Icon::new(Lucide::Trash));
     menu.separator()
         .item(
             PopupMenuItem::new(if chat.archived { "Unarchive" } else { "Archive" })
@@ -230,13 +218,11 @@ pub(super) fn chat_menu(
                 })
                 .on_click(move |ev, window, cx| archive(ev, window, cx)),
         )
-        .when_some(archive_crew, |menu, item| menu.item(item))
         .item(
             PopupMenuItem::new("Delete")
                 .icon(Lucide::Trash)
                 .on_click(move |ev, window, cx| delete(ev, window, cx)),
         )
-        .when_some(delete_crew, |menu, item| menu.item(item))
 }
 
 #[cfg(test)]
