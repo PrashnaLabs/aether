@@ -165,8 +165,8 @@ impl ProjectRow {
                 .items_center()
                 .text_size(px(10.5))
                 .text_color(muted.opacity(0.7))
-                .child(Icon::new(Lucide::Folder).size(px(12.)).flex_none())
-                .child("Not a git repository")
+                .child(Icon::new(Lucide::CircleSlash).size(px(12.)).flex_none())
+                .child("No git")
         });
         let git = branch.map(|branch| {
             h_flex()

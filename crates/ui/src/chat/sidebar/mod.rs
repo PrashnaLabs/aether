@@ -299,7 +299,8 @@ impl RowPlace {
             Self::Branch { worktree: true, .. } => Lucide::GitFork,
             Self::Branch { detached: true, .. } => Lucide::GitCommitHorizontal,
             Self::Branch { .. } => Lucide::GitBranch,
-            Self::Folder(_) | Self::NoGit => Lucide::Folder,
+            Self::Folder(_) => Lucide::Folder,
+            Self::NoGit => Lucide::CircleSlash,
         }
     }
 
