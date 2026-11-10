@@ -352,7 +352,8 @@ pub fn remove_worktree_with_branch(
     if delete_branch && branch.as_deref().is_some_and(|b| b.starts_with(BRANCH_PREFIX)) {
         let branch = branch.unwrap_or_default();
         let flag = if force { "-D" } else { "-d" };
-        let out = run(project, &["branch", flag, &branch], QUICK).map_err(RemoveError::Failed)?;
+        let out =
+            run(project, &["branch", flag, "--", &branch], QUICK).map_err(RemoveError::Failed)?;
         if !out.ok {
             return Err(RemoveError::BranchDeleteFailed(git_error(&out)));
         }

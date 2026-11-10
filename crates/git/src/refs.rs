@@ -211,6 +211,9 @@ pub(crate) fn create_branch(top: &Path, name: &str, base: Option<&str>) -> Resul
     }
     let mut args = vec!["switch", "--no-track", "-c", name];
     if let Some(base) = base {
+        if base.starts_with('-') {
+            return Err("Invalid base ref.".into());
+        }
         let branch = base.starts_with("refs/heads/") || base.starts_with("refs/remotes/");
         let known = match branch {
             true => {
@@ -225,7 +228,7 @@ pub(crate) fn create_branch(top: &Path, name: &str, base: Option<&str>) -> Resul
                 false => "That commit isn't here anymore; refresh and try again.".into(),
             });
         }
-        args.push(base);
+        args.extend(["--", base]);
     }
     let out = run_args(top, &args, SLOW)?;
     if out.ok { Ok(format!("Switched to new branch {name}")) } else { Err(git_error(&out)) }
@@ -237,7 +240,7 @@ pub(crate) fn detach(top: &Path, sha: &str) -> Result<String, String> {
     if !has_commit(top, sha)? {
         return Err("That commit isn't here anymore; refresh and try again.".into());
     }
-    let out = run_args(top, &["switch", "--detach", sha], SLOW)?;
+    let out = run_args(top, &["switch", "--detach", "--", sha], SLOW)?;
     if out.ok { Ok(format!("HEAD detached at {}", &sha[..7])) } else { Err(git_error(&out)) }
 }
 
