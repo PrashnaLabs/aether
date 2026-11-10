@@ -16,7 +16,10 @@ use gpui_kit::{Context, SharedString, Window};
 use super::{Chat, ChatApp, apply_font_size, apply_look, chat_cwd, now_ms};
 
 // ponytail: fixed 10 min usage poll, agy spawns a process per fetch; make it a setting if users want fresher
-const USAGE_STALE_MS: i64 = 10 * 60_000;
+pub(super) const USAGE_STALE_MS: i64 = 10 * 60_000;
+// auto-spawn wants numbers under a minute old, but fetches are costly: one burst per 10 s
+const SPAWN_USAGE_TTL_MS: i64 = 60_000;
+const SPAWN_USAGE_RETRY_MS: i64 = 10_000;
 
 // gated on last attempt too: a failing fetch would otherwise respawn agy every tick
 pub(super) fn usage_due(newest: Option<i64>, attempted: i64, configured: bool, now: i64) -> bool {
@@ -114,6 +117,18 @@ impl ChatApp {
                 .iter()
                 .any(|p| self.probes.get(p).is_some_and(|probe| probe.installed));
         if usage_due(newest, self.usage_attempt_at, configured, now_ms()) {
+            self.refresh_all_provider_usages(cx);
+        }
+    }
+
+    /// Fire and forget: the spawn in progress ranks the snapshot it has, the next one gets fresh numbers.
+    pub(super) fn refresh_usage_for_spawn(&mut self, cx: &mut Context<Self>) {
+        let now = now_ms();
+        let stale = [Provider::Claude, Provider::Codex, Provider::Antigravity, Provider::OpenCode]
+            .iter()
+            .filter(|p| self.probes.get(p).is_some_and(|probe| probe.installed))
+            .any(|p| self.plan_usage_at.get(p).is_none_or(|&at| now - at >= SPAWN_USAGE_TTL_MS));
+        if stale && now - self.usage_attempt_at >= SPAWN_USAGE_RETRY_MS {
             self.refresh_all_provider_usages(cx);
         }
     }
