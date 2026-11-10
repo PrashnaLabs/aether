@@ -72,7 +72,8 @@ fn markdown_preview_preserves_edits_and_line_links_open_source(cx: &mut gpui_kit
 fn huge_or_long_lined_markdown_skips_the_preview() {
     assert!(!too_big_to_preview("# Title\n\nshort paragraph\n"));
     assert!(too_big_to_preview(&"x".repeat(10_001)));
-    assert!(too_big_to_preview(&"line\n".repeat(300_000)));
+    assert!(!too_big_to_preview(&"line\n".repeat(50_000)));
+    assert!(too_big_to_preview(&"line\n".repeat(60_000)));
 }
 
 #[gpui_kit::test]

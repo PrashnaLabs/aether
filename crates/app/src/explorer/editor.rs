@@ -622,9 +622,9 @@ impl ChatApp {
     }
 }
 
-// preview's inline text layout hangs on huge paragraphs (a 140k-char line froze it)
+// preview layout grows ~quadratically: 256 KB ≈ 0.6 s, 1 MB ≈ 13 s, 2.8 MB froze
 pub(super) fn too_big_to_preview(text: &str) -> bool {
-    text.len() > 1024 * 1024 || text.lines().any(|line| line.len() > 10_000)
+    text.len() > 256 * 1024 || text.lines().any(|line| line.len() > 10_000)
 }
 
 pub(super) fn is_markdown_file(path: &Path) -> bool {
