@@ -701,9 +701,51 @@ pub(super) fn render_chat(
                 .child(actions);
             return row.py_0p5().child(one).context_menu(context).into_any_element();
         }
-        let trailing = match status {
-            ChatStatus::Idle | ChatStatus::Background(_) => time_text(time).into_any_element(),
-            _ => status.badge(("chat-status-badge", ix), Some(now), cx),
+        let idle = matches!(status, ChatStatus::Idle | ChatStatus::Background(_));
+        if style == SidebarStyle::Minimal {
+            let top = h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(title_cell(title.clone()))
+                .children((!idle).then(|| status.badge(("chat-status-badge", ix), Some(now), cx)))
+                .children(approve_action)
+                .child(actions);
+            let folder = Icon::new(Lucide::Folder)
+                .size(rems(0.75))
+                .flex_none()
+                .when_some(line.as_ref().and_then(|l| l.project.as_ref()), |icon, name| {
+                    icon.text_color(project_color(name, cx))
+                })
+                .into_any_element();
+            let meta = h_flex()
+                .w_full()
+                .gap_1p5()
+                .items_center()
+                .text_xs()
+                .text_color(muted)
+                .child(slot(swap(folder, chevron)))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(project_label(line.as_ref().and_then(|l| l.project.as_ref()))),
+                )
+                .when(!chat.providers.is_empty(), |el| el.child(avatars(&chat.providers, cx)))
+                .child(rollup(summary, tier, cx))
+                .child(div().flex_1())
+                .child(Icon::new(Lucide::Users).size(rems(0.75)).flex_none())
+                .when(idle && !time.is_empty(), |el| {
+                    el.child(div().flex_none().font_features(tabular()).child(time.clone()))
+                })
+                .children(
+                    line.as_ref().map(|l| provider_icon(l.provider).size(rems(0.8125)).flex_none()),
+                );
+            return row.gap_0p5().child(top).child(meta).context_menu(context).into_any_element();
+        }
+        let trailing = match idle {
+            true => time_text(time).into_any_element(),
+            false => status.badge(("chat-status-badge", ix), Some(now), cx),
         };
         let top = h_flex()
             .w_full()
@@ -715,32 +757,13 @@ pub(super) fn render_chat(
             .child(trailing)
             .children(approve_action)
             .child(actions);
-        let minimal = style == SidebarStyle::Minimal;
-        if !big && !minimal {
+        if !big {
             return with_card(row.child(top).context_menu(context), ix, title, card_line);
         }
-        let folder = line.as_ref().filter(|_| minimal).map(|line| {
-            h_flex()
-                .min_w_0()
-                .gap_1()
-                .items_center()
-                .text_xs()
-                .text_color(muted)
-                .child(
-                    Icon::new(Lucide::Folder)
-                        .size(rems(0.75))
-                        .flex_none()
-                        .when_some(line.project.as_ref(), |icon, name| {
-                            icon.text_color(project_color(name, cx))
-                        }),
-                )
-                .child(div().min_w_0().truncate().child(project_label(line.project.as_ref())))
-        });
         let second = h_flex()
             .pl(rems(1.5))
             .gap_1p5()
             .items_center()
-            .children(folder)
             .when(!chat.providers.is_empty(), |el| el.child(avatars(&chat.providers, cx)))
             .child(rollup(summary, tier, cx));
         let row = row
