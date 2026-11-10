@@ -5,8 +5,8 @@ use crate::settings::{self, KeySource};
 use aether_agent::ModelInfo;
 use aether_agent::usage::{
     PlanUsage, fetch_antigravity_plan_usage, fetch_claude_plan_usage, fetch_codex_plan_usage,
-    fetch_opencode_plan_usage, fetch_openrouter_plan_usage, read_claude_credentials,
-    read_codex_token, read_openrouter_key,
+    fetch_opencode_plan_usage, fetch_openrouter_plan_usage, forget_claude_credentials,
+    read_claude_credentials, read_codex_token, read_openrouter_key,
 };
 use aether_core::{Appearance, CornerStyle, Provider, Role, Settings, Skill, effort_levels};
 use aether_driver::{CliModel, catalog::provider_label};
@@ -55,35 +55,39 @@ impl ChatApp {
         let bg = cx.background_executor().clone();
         match provider {
             Provider::Claude => {
-                if let Some((tok, sub)) = read_claude_credentials() {
-                    cx.spawn(async move |this, cx| {
-                        let usage = bg
-                            .spawn(async move { fetch_claude_plan_usage(&tok, sub.as_deref()) })
-                            .await;
-                        if let Some(usage) = usage {
-                            let _ = this.update(cx, |this, cx| {
-                                this.claude_plan_usage = Some(usage.clone());
-                                this.store_plan_usage(Provider::Claude, usage);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .detach();
-                }
+                cx.spawn(async move |this, cx| {
+                    let usage = bg
+                        .spawn(async move {
+                            let (tok, sub) = read_claude_credentials()?;
+                            let usage = fetch_claude_plan_usage(&tok, sub.as_deref());
+                            if usage.is_none() {
+                                forget_claude_credentials();
+                            }
+                            usage
+                        })
+                        .await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.claude_plan_usage = Some(usage.clone());
+                            this.store_plan_usage(Provider::Claude, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
             }
             Provider::Codex => {
-                if let Some(tok) = read_codex_token() {
-                    cx.spawn(async move |this, cx| {
-                        let usage = bg.spawn(async move { fetch_codex_plan_usage(&tok) }).await;
-                        if let Some(usage) = usage {
-                            let _ = this.update(cx, |this, cx| {
-                                this.store_plan_usage(Provider::Codex, usage);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .detach();
-                }
+                cx.spawn(async move |this, cx| {
+                    let usage =
+                        bg.spawn(async move { fetch_codex_plan_usage(&read_codex_token()?) }).await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.store_plan_usage(Provider::Codex, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
             }
             Provider::Antigravity => {
                 cx.spawn(async move |this, cx| {
@@ -98,19 +102,18 @@ impl ChatApp {
                 .detach();
             }
             Provider::OpenRouter => {
-                if let Some(key) = read_openrouter_key() {
-                    cx.spawn(async move |this, cx| {
-                        let usage =
-                            bg.spawn(async move { fetch_openrouter_plan_usage(&key) }).await;
-                        if let Some(usage) = usage {
-                            let _ = this.update(cx, |this, cx| {
-                                this.store_plan_usage(Provider::OpenRouter, usage);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .detach();
-                }
+                cx.spawn(async move |this, cx| {
+                    let usage = bg
+                        .spawn(async move { fetch_openrouter_plan_usage(&read_openrouter_key()?) })
+                        .await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.store_plan_usage(Provider::OpenRouter, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
             }
             Provider::OpenCode => {
                 cx.spawn(async move |this, cx| {
