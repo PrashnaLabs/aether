@@ -983,3 +983,53 @@ fn workspace_panel_lists_a_running_subagent(cx: &mut TestAppContext) {
     visual.read(|cx| assert!(app.read(cx).workspace_shown()));
     assert!(visual.debug_bounds("subagent-sub-1").is_some(), "subagent row must render");
 }
+
+#[gpui_kit::test]
+fn workspace_browse_files_shows_the_files(cx: &mut TestAppContext) {
+    use crate::side_panel::{SideTab, Surface};
+    use gpui_kit::VisualTestContext;
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    cx.update(crate::actions::bind_keys);
+    for layout in aether_core::ChatLayout::ALL {
+        let (main, app) = cx.update(|cx| {
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| {
+                    ChatApp::with_state(
+                        Agent::new().unwrap(),
+                        Settings { chat_layout: layout, ..Settings::default() },
+                        None,
+                        None,
+                        false,
+                        window,
+                        cx,
+                    )
+                })
+            })
+            .unwrap()
+        });
+        cx.update_window(main, |_, window, cx| {
+            app.update(cx, |app, cx| {
+                app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
+                app.chats[app.active].provider = aether_core::Provider::Codex;
+                app.workspace_pop.machine = Some("Test machine".into());
+                app.toggle_workspace_pop(window, cx);
+                cx.notify();
+            });
+            let _ = window.draw(cx);
+        })
+        .unwrap();
+        let mut visual = VisualTestContext::from_window(main, cx);
+        let bounds = visual.debug_bounds("pop-browse").expect("Browse files row");
+        visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
+        visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+        visual.update(|window, cx| {
+            let app = app.read(cx);
+            let shown = match layout {
+                aether_core::ChatLayout::Tabbed => app.side_tab_in(window) == SideTab::Explorer,
+                _ => app.right_surface == Some(Surface::Files),
+            };
+            assert!(shown, "{layout:?}: Browse files must show the files");
+        });
+    }
+}
