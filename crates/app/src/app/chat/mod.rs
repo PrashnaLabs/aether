@@ -562,6 +562,15 @@ impl ChatApp {
                 lead: chat.lead,
                 lead_seen: chat.lead_seen,
                 handoff_from: chat.handoff_from,
+                pending_queue: chat
+                    .queue
+                    .iter()
+                    .filter(|q| !q.from_children)
+                    .map(|q| aether_agent::SavedQueued {
+                        text: q.text.clone(),
+                        attachments: q.attachments.clone(),
+                    })
+                    .collect(),
                 pending_deliveries: chat
                     .queue
                     .iter()

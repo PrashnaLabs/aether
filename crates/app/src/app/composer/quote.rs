@@ -81,7 +81,8 @@ impl ChatApp {
                 from_children: false,
                 deliveries: vec![],
             };
-            return self.chats[ix].queue.push(queued);
+            self.chats[ix].queue.push(queued);
+            return self.persist(ix);
         }
         self.begin_setup_or_submit(ix, text, Vec::new(), window, cx);
     }

@@ -551,6 +551,7 @@ impl ChatApp {
             lead,
             lead_seen,
             pending_deliveries,
+            pending_queue,
             handoff_from,
         } in saved
         {
@@ -611,9 +612,16 @@ impl ChatApp {
                 lead,
                 lead_seen,
                 handoff_from,
-                queue: pending_deliveries
+                queue: pending_queue
                     .into_iter()
-                    .map(|d| Queued {
+                    .map(|q| Queued {
+                        text: q.text,
+                        attachments: q.attachments,
+                        delivering: false,
+                        from_children: false,
+                        deliveries: vec![],
+                    })
+                    .chain(pending_deliveries.into_iter().map(|d| Queued {
                         text: d.text.clone(),
                         attachments: vec![],
                         delivering: false,
@@ -623,7 +631,7 @@ impl ChatApp {
                             reply_ix: d.reply_ix,
                             text: d.text,
                         }],
-                    })
+                    }))
                     .collect(),
             });
         }

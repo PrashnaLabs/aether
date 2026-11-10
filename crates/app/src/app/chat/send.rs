@@ -190,6 +190,7 @@ impl ChatApp {
                 from_children: false,
                 deliveries: vec![],
             });
+            self.persist(self.active);
             return cx.notify();
         }
         self.begin_setup_or_submit(self.active, text, attachments, window, cx);

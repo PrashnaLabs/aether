@@ -30,6 +30,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         parent: None,
         lead: false,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: Some(3),
     };
@@ -51,6 +52,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         parent: None,
         lead: false,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     };
@@ -176,6 +178,7 @@ fn ids_include_every_row() {
             parent: None,
             lead: false,
             lead_seen: None,
+            pending_queue: vec![],
             pending_deliveries: vec![],
             handoff_from: None,
         };
@@ -211,6 +214,7 @@ fn flush_returns_once_queued_saves_are_written() {
             parent: None,
             lead: false,
             lead_seen: None,
+            pending_queue: vec![],
             pending_deliveries: vec![],
             handoff_from: None,
         });
@@ -256,6 +260,7 @@ fn parent_and_lead_round_trip() {
         parent: Some(5),
         lead: true,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     });
@@ -292,6 +297,7 @@ fn old_file_gains_parent_and_lead_as_none_false() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(chats[0].parent, None);
     assert!(!chats[0].lead);
+    assert!(chats[0].pending_queue.is_empty());
 }
 
 #[test]
@@ -318,6 +324,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         parent: Some(5),
         lead: false,
         lead_seen: Some(3),
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     });
@@ -339,6 +346,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         parent: None,
         lead: true,
         lead_seen: None,
+        pending_queue: vec![SavedQueued { text: "also run the tests".into(), attachments: vec![] }],
         pending_deliveries: vec![SavedDelivery {
             child: 9,
             reply_ix: Some(3),
@@ -354,6 +362,8 @@ fn lead_seen_and_pending_deliveries_round_trip() {
     let child = chats.iter().find(|c| c.id == 9).unwrap();
     let lead = chats.iter().find(|c| c.id == 5).unwrap();
     assert_eq!(child.lead_seen, Some(3));
+    assert_eq!(lead.pending_queue[0].text, "also run the tests");
+    assert!(child.pending_queue.is_empty());
     assert_eq!(lead.pending_deliveries.len(), 1);
     assert_eq!(lead.pending_deliveries[0].child, 9);
     assert_eq!(lead.pending_deliveries[0].reply_ix, Some(3));

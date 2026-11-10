@@ -84,6 +84,7 @@ impl ChatApp {
         }
         let queued = chat.queue.remove(i);
         chat.pending.extend(queued.attachments);
+        self.persist(self.active);
         self.composer.update(cx, |input, cx| input.set_value(queued.text, window, cx));
         cx.notify();
     }

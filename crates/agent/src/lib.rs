@@ -17,4 +17,4 @@ pub use agent::{
 };
 pub use external::{ExternalAgent, ExternalState, Turn};
 pub use models::ModelInfo;
-pub use store::{SavedCard, SavedChat, SavedDelivery, Store};
+pub use store::{SavedCard, SavedChat, SavedDelivery, SavedQueued, Store};

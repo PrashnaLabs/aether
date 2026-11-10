@@ -471,7 +471,7 @@ impl ChatApp {
                 this.flush_workspace(cx);
             }
             for ix in 0..this.chats.len() {
-                if this.chats[ix].cancel.is_some() {
+                if this.chats[ix].cancel.is_some() || !this.chats[ix].queue.is_empty() {
                     this.persist(ix);
                 }
             }

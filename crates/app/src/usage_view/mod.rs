@@ -204,6 +204,7 @@ impl ChatApp {
                 parent: c.parent,
                 lead: c.lead,
                 lead_seen: c.lead_seen,
+                pending_queue: vec![],
                 pending_deliveries: vec![],
                 handoff_from: c.handoff_from,
             })

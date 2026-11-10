@@ -104,6 +104,7 @@ fn opencode_and_saved_chats_convert_into_usage_records() {
         parent: None,
         lead: false,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     };
