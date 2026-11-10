@@ -631,6 +631,7 @@ impl ChatApp {
             inventory: None,
             context_expanded: HashSet::new(),
             connectors_all: false,
+            probing: None,
             tab_bar_controls: false,
             btw_input,
             file_selection_bar: None,

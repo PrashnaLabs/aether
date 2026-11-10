@@ -22,7 +22,7 @@ fn scans_claude_home_and_project() {
     write(&home.join(".claude/CLAUDE.md"), "12345678");
     write(&repo.join("CLAUDE.md"), "1234");
     write(&cwd.join("CLAUDE.md"), "1234");
-    write(&root.join("CLAUDE.md"), "above the repo, ignored");
+    write(&root.join("CLAUDE.md"), "above the repo, Claude still reads it");
     let projects = format!(
         r#"{{"mcpServers":{{"postman":{{}}}},"projects":{{"{}":{{"mcpServers":{{"supabase":{{}}}}}}}}}}"#,
         cwd.display()
@@ -46,7 +46,7 @@ fn scans_claude_home_and_project() {
     let inv = scan(Provider::Claude, Some(&cwd), &home, &[skill, codex_skill]);
 
     let memory: Vec<&str> = inv.memory.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(memory.len(), 3, "{memory:?}");
+    assert_eq!(memory.len(), 4, "{memory:?}");
     assert_eq!(memory[0], "~/.claude/CLAUDE.md");
     assert_eq!(inv.memory[0].tokens, 2);
     let mcp: Vec<&str> = inv.mcp.iter().map(|i| i.name.as_str()).collect();
@@ -61,4 +61,36 @@ fn scans_claude_home_and_project() {
 fn open_router_lists_only_aether_skills() {
     let inv = scan(Provider::OpenRouter, None, Path::new("/nonexistent"), &[]);
     assert_eq!(inv, Inventory::default());
+}
+
+#[test]
+fn strips_jsonc_comments_and_trailing_commas() {
+    let text = "{\n  // note\n  \"mcp\": { \"a\": {\"url\": \"https://x//y\"}, /* off */ },\n}";
+    let v: Value = serde_json::from_str(&strip_jsonc(text)).unwrap();
+    assert_eq!(v["mcp"]["a"]["url"], "https://x//y");
+}
+
+#[test]
+fn reads_codex_override_and_antigravity_agent_folders() {
+    let root = std::env::temp_dir().join(format!("aether-inventory-b-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let home = root.join("home");
+    let repo = root.join("repo");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    write(&repo.join("AGENTS.md"), "plain");
+    write(&repo.join("AGENTS.override.md"), "override");
+    write(&repo.join(".agents/agents/helper/agent.md"), "---\ndescription: Helps.\n---\n");
+    write(
+        &home.join(".gemini/config/mcp_config.json"),
+        r#"{"mcpServers":{"off":{"disabled":true}}}"#,
+    );
+    if std::env::var_os("CODEX_HOME").is_none() {
+        let codex = scan(Provider::Codex, Some(&repo), &home, &[]);
+        assert_eq!(codex.memory.len(), 1);
+        assert!(codex.memory[0].name.ends_with("AGENTS.override.md"));
+    }
+    let agy = scan(Provider::Antigravity, Some(&repo), &home, &[]);
+    assert_eq!(agy.agents[0].name, "helper");
+    assert_eq!(agy.mcp[0].status, Some(Status::Disabled));
+    fs::remove_dir_all(&root).unwrap();
 }

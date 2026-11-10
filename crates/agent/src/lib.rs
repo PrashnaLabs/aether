@@ -5,6 +5,7 @@ mod gate;
 pub mod inventory;
 mod models;
 pub mod orchestrator;
+pub mod probe;
 pub mod skills;
 mod store;
 mod tools;

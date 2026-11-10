@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use aether_agent::inventory::{self, Inventory, Item};
+use aether_agent::inventory::{self, Inventory, Item, Status};
 use aether_core::{ChatLayout, Message, NoticeKind, Provider, Step, home_dir};
 use aether_ui::{format_tokens, icon_chip, theme};
 use gpui_kit::assets::IconName as Lucide;
@@ -21,53 +21,74 @@ const SHOWN_CONNECTORS: usize = 3;
 /// Cached scan, keyed by the provider and folder it was read for.
 pub(crate) type InventoryCache = Option<((Provider, Option<PathBuf>), Inventory)>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Part {
-    Messages,
-    Memory,
-    Skills,
-    Agents,
-    Free,
-}
-
-impl Part {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Messages => "Messages & system",
-            Self::Memory => "Memory files",
-            Self::Skills => "Skills",
-            Self::Agents => "Custom agents",
-            Self::Free => "Free space",
-        }
-    }
-
-    fn color(self, cx: &App) -> Hsla {
-        match self {
-            Self::Messages => theme::info_text(cx),
-            Self::Memory => theme::mango_text(cx),
-            Self::Skills => theme::success_text(cx),
-            Self::Agents => theme::warning_text(cx),
-            Self::Free => cx.theme().muted,
-        }
-    }
-}
+pub(crate) const MESSAGES: &str = "Messages";
+pub(crate) const BUFFER: &str = "Autocompact buffer";
+pub(crate) const FREE: &str = "Free space";
 
 fn tokens(items: &[Item]) -> u64 {
     items.iter().map(|i| i.tokens).sum()
 }
 
-/// Splits the window into parts. Before the first reply `used` is 0, so the loaded files'
-/// estimate stands in; after it, messages get whatever the estimates don't cover.
-pub(crate) fn breakdown(used: u64, total: u64, inv: &Inventory) -> Vec<(Part, u64)> {
-    let (memory, skills, agents) = (tokens(&inv.memory), tokens(&inv.skills), tokens(&inv.agents));
-    let used = used.max(memory + skills + agents);
-    vec![
-        (Part::Messages, used - memory - skills - agents),
-        (Part::Memory, memory),
-        (Part::Skills, skills),
-        (Part::Agents, agents),
-        (Part::Free, total.saturating_sub(used)),
-    ]
+/// Splits the window into parts: the CLI's exact fixed parts when it reported them, else
+/// estimates from config files. Messages get what the fixed parts don't cover; before the
+/// first reply `used` is 0, so the fixed parts stand in.
+pub(crate) fn breakdown(used: u64, total: u64, inv: &Inventory) -> Vec<(String, u64)> {
+    let fixed: Vec<(String, u64)> = if inv.exact() {
+        inv.parts.clone()
+    } else {
+        [
+            ("MCP tools", tokens(&inv.mcp)),
+            ("Memory files", tokens(&inv.memory)),
+            ("Skills", tokens(&inv.skills)),
+            ("Custom agents", tokens(&inv.agents)),
+        ]
+        .into_iter()
+        .map(|(name, n)| (name.to_string(), n))
+        .collect()
+    };
+    let sum: u64 = fixed.iter().map(|p| p.1).sum();
+    let used = used.max(sum);
+    let messages = if inv.exact() { MESSAGES } else { "Messages & system" };
+    let mut parts = vec![(messages.to_string(), used - sum)];
+    parts.extend(fixed);
+    if inv.buffer > 0 {
+        parts.push((BUFFER.into(), inv.buffer));
+    }
+    parts.push((FREE.into(), total.saturating_sub(used + inv.buffer)));
+    parts
+}
+
+fn part_color(ix: usize, name: &str, cx: &App) -> Hsla {
+    if name == FREE || name == BUFFER {
+        return cx.theme().muted;
+    }
+    let palette = [
+        theme::info_text(cx),
+        theme::mango_text(cx),
+        theme::success_text(cx),
+        theme::warning_text(cx),
+        theme::danger_text(cx),
+        cx.theme().primary,
+        cx.theme().muted_foreground,
+    ];
+    palette[ix % palette.len()]
+}
+
+/// The connector row's state label and color, if it isn't plainly connected.
+fn status_label(
+    status: Option<Status>,
+    signed_out: bool,
+    cx: &App,
+) -> Option<(&'static str, Hsla)> {
+    let muted = cx.theme().muted_foreground;
+    match status {
+        _ if signed_out => Some(("Sign in needed", theme::mango_text(cx))),
+        Some(Status::NeedsAuth) => Some(("Sign in needed", theme::mango_text(cx))),
+        Some(Status::Failed) => Some(("Failed", theme::danger_text(cx))),
+        Some(Status::Pending) => Some(("Connecting…", muted)),
+        Some(Status::Disabled) => Some(("Off", muted)),
+        Some(Status::Connected) | None => None,
+    }
 }
 
 /// MCP servers the chat was told need a sign-in, by name; a later success clears one.
@@ -109,12 +130,39 @@ fn tip(text: String) -> impl Fn(&mut gpui_kit::Window, &mut App) -> gpui_kit::An
 
 impl ChatApp {
     /// The active chat's inventory, rescanned when its provider or folder changed or `fresh`.
-    pub(crate) fn context_inventory(&mut self, fresh: bool) -> &Inventory {
+    /// Shows the disk scan at once, then asks the CLI in the background and swaps its answer in.
+    pub(crate) fn context_inventory(&mut self, fresh: bool, cx: &mut Context<Self>) -> &Inventory {
         let chat = &self.chats[self.active];
         let key = (chat.provider, chat.folder(&self.settings.workspace_root));
         if fresh || self.inventory.as_ref().is_none_or(|(k, _)| *k != key) {
             let inv = inventory::scan(key.0, key.1.as_deref(), &home_dir(), &self.skills);
-            self.inventory = Some((key, inv));
+            self.inventory = Some((key.clone(), inv.clone()));
+            let live = !cfg!(test)
+                && matches!(key.0, Provider::Claude | Provider::Codex | Provider::OpenCode);
+            if let (true, Some(cwd)) = (live, key.1.clone()) {
+                self.probing = Some(key.clone());
+                let settings = self.settings.clone();
+                let provider = key.0;
+                let task = cx.background_executor().spawn(async move {
+                    let mut inv = inv;
+                    aether_agent::probe::probe(provider, &settings, &cwd, &mut inv);
+                    inv
+                });
+                cx.spawn(async move |this, cx| {
+                    let inv = task.await;
+                    this.update(cx, |this, cx| {
+                        if this.inventory.as_ref().is_some_and(|(k, _)| *k == key) {
+                            this.inventory = Some((key.clone(), inv));
+                        }
+                        if this.probing.as_ref() == Some(&key) {
+                            this.probing = None;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
         }
         &self.inventory.as_ref().expect("just filled").1
     }
@@ -134,7 +182,7 @@ impl ChatApp {
     pub(crate) fn open_workspace_panel(&mut self, cx: &mut Context<Self>) {
         self.workspace_pop.dismiss();
         self.load_workspace_info(cx);
-        self.context_inventory(true);
+        self.context_inventory(true, cx);
     }
 
     pub(crate) fn toggle_workspace_pop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -180,12 +228,22 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let environment = self.render_workspace_section(window, cx);
-        let inv = self.context_inventory(false).clone();
+        let inv = self.context_inventory(false, cx).clone();
+        let provider = self.chats[self.active].provider;
+        let note = if self.probing.is_some() {
+            format!("Asking {}…", provider.label())
+        } else if inv.exact() {
+            format!("Reported by {}.", provider.label())
+        } else {
+            "Estimated from config files.".to_string()
+        };
         let chat = &self.chats[self.active];
         let used = chat.context_used();
         let total = self.context_limit(chat).max(1);
         let parts = breakdown(used, total, &inv);
-        let shown_used = total - parts.last().map_or(0, |p| p.1).min(total);
+        let shown_used = total.saturating_sub(
+            parts.iter().filter(|p| p.0 == FREE || p.0 == BUFFER).map(|p| p.1).sum(),
+        );
         let percent = shown_used as f32 / total as f32 * 100.;
         let sign_in = needs_sign_in(&chat.messages);
         let muted = cx.theme().muted_foreground;
@@ -196,18 +254,28 @@ impl ChatApp {
             .rounded(px(3.))
             .overflow_hidden()
             .bg(cx.theme().muted)
-            .children(parts.iter().filter(|(part, n)| *part != Part::Free && *n > 0).map(
-                |(part, n)| div().h_full().w(relative(*n as f32 / total as f32)).bg(part.color(cx)),
-            ));
+            .children(
+                parts.iter().enumerate().filter(|(_, (name, n))| name != FREE && *n > 0).map(
+                    |(ix, (name, n))| {
+                        div()
+                            .h_full()
+                            .w(relative(*n as f32 / total as f32))
+                            .bg(part_color(ix, name, cx))
+                    },
+                ),
+            );
         let rows = parts
             .iter()
-            .map(|(part, n)| {
+            .enumerate()
+            .map(|(ix, (name, n))| {
                 h_flex()
                     .gap_2()
                     .items_center()
                     .text_xs()
-                    .child(div().size(px(8.)).rounded(px(2.)).flex_none().bg(part.color(cx)))
-                    .child(div().flex_1().text_color(muted).child(part.label()))
+                    .child(
+                        div().size(px(8.)).rounded(px(2.)).flex_none().bg(part_color(ix, name, cx)),
+                    )
+                    .child(div().flex_1().text_color(muted).child(name.clone()))
                     .child(div().child(format_tokens(*n)))
                     .child(
                         div()
@@ -238,11 +306,7 @@ impl ChatApp {
             ))
             .child(bar)
             .children(rows)
-            .child(
-                div().text_xs().text_color(muted).child(
-                    "Files and skills are estimates. MCP tool schemas count under messages.",
-                ),
-            )
+            .child(div().text_xs().text_color(muted).child(note))
             .children(lists);
 
         let all = self.connectors_all;
@@ -257,14 +321,20 @@ impl ChatApp {
                     line(Lucide::Plug, server.name.clone(), cx)
                         .id(SharedString::from(format!("connector-{}", server.name)))
                         .tooltip(tip(server.path.display().to_string()))
-                        .when(sign_in.contains(&server.name), |row| {
+                        .when(server.tokens > 0, |row| {
                             row.child(
                                 div()
                                     .text_xs()
-                                    .text_color(theme::mango_text(cx))
-                                    .child("Sign in needed"),
+                                    .text_color(muted)
+                                    .child(format_tokens(server.tokens)),
                             )
                         })
+                        .when_some(
+                            status_label(server.status, sign_in.contains(&server.name), cx),
+                            |row, (label, color)| {
+                                row.child(div().text_xs().text_color(color).child(label))
+                            },
+                        )
                 },
             ))
             .when(inv.mcp.len() > SHOWN_CONNECTORS, |list| {

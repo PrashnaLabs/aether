@@ -578,7 +578,7 @@ fn recent_messages(api: &Api, session: &str) -> Value {
     api.call(Method::GET, &path, None).unwrap_or_default()
 }
 
-pub(super) fn located(path: &str, dir: &str) -> String {
+pub fn located(path: &str, dir: &str) -> String {
     format!("{path}?location%5Bdirectory%5D={}", encode(dir))
 }
 

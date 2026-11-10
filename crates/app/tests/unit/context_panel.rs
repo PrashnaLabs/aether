@@ -2,31 +2,51 @@ use super::*;
 use aether_core::{Message, Notice, NoticeState};
 
 fn item(tokens: u64) -> Item {
-    Item { name: String::new(), path: PathBuf::new(), tokens }
+    Item { tokens, ..Item::default() }
 }
 
 #[test]
-fn breakdown_fills_messages_with_the_rest() {
-    let inv = Inventory { memory: vec![item(100)], skills: vec![item(50)], ..Inventory::default() };
+fn estimated_breakdown_fills_messages_with_the_rest() {
+    let inv = Inventory {
+        memory: vec![item(100)],
+        skills: vec![item(50)],
+        mcp: vec![item(25)],
+        ..Inventory::default()
+    };
     let parts = breakdown(1_000, 10_000, &inv);
+    let named: Vec<(&str, u64)> = parts.iter().map(|(n, t)| (n.as_str(), *t)).collect();
     assert_eq!(
-        parts,
+        named,
         [
-            (Part::Messages, 850),
-            (Part::Memory, 100),
-            (Part::Skills, 50),
-            (Part::Agents, 0),
-            (Part::Free, 9_000)
+            ("Messages & system", 825),
+            ("MCP tools", 25),
+            ("Memory files", 100),
+            ("Skills", 50),
+            ("Custom agents", 0),
+            (FREE, 9_000)
         ]
     );
 }
 
 #[test]
-fn breakdown_before_first_reply_counts_estimates() {
+fn exact_breakdown_uses_reported_parts_and_buffer() {
+    let inv = Inventory {
+        parts: vec![("System prompt".into(), 2_000), ("Skills".into(), 1_000)],
+        buffer: 500,
+        ..Inventory::default()
+    };
+    let parts = breakdown(5_000, 10_000, &inv);
+    assert_eq!(parts[0], (MESSAGES.to_string(), 2_000));
+    assert_eq!(parts[3], (BUFFER.to_string(), 500));
+    assert_eq!(parts[4], (FREE.to_string(), 4_500));
+}
+
+#[test]
+fn breakdown_before_first_reply_counts_fixed_parts() {
     let inv = Inventory { memory: vec![item(300)], ..Inventory::default() };
     let parts = breakdown(0, 1_000, &inv);
-    assert_eq!(parts[0], (Part::Messages, 0));
-    assert_eq!(parts[4], (Part::Free, 700));
+    assert_eq!(parts[0].1, 0);
+    assert_eq!(parts.last().unwrap(), &(FREE.to_string(), 700));
 }
 
 #[test]

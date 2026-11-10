@@ -17,6 +17,7 @@ use super::{Driver, DriverStartOptions};
 mod events;
 mod service;
 mod session;
+pub use session::located;
 
 pub use events::is_placeholder_title;
 pub use service::{Api, kill_lead_servers, service_api, service_reachable};
