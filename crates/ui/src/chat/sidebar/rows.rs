@@ -436,7 +436,7 @@ impl ChatRow {
                 let menu_open = state.read(cx).open_menu.as_ref() == Some(&key);
                 let keyboard = focus.as_ref().is_some_and(|f| f.contains_focused(window, cx))
                     && window.last_input_was_keyboard();
-                let show = chat.active || keyboard || menu_open;
+                let show = keyboard || menu_open;
                 let depth = chat.depth.min(2);
                 let lead = chat.id;
                 let toggle = open.map(|_| {
