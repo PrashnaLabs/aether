@@ -8,7 +8,7 @@ Reviewed crates/driver and crates/app/src/app/chat plus providers.rs against SEC
 
 | ID | Severity | Finding | Status |
 | --- | --- | --- | --- |
-| C-PERF-1 | Medium | Stream framing has no memory limit | Documented only: requires coordinated protocol failure handling |
+| C-PERF-1 | Medium | Stream framing has no memory limit | Fixed |
 | C-SEC-2 | Low | Optional recordings retain credential-bearing tool content | Fixed permissions; secret-redaction policy documented |
 
 | C-PERF-3 | Medium | Pi reparses growing tool arguments per delta | Documented only |
@@ -27,7 +27,7 @@ Impact: local application memory exhaustion and delayed UI response from unexpec
 
 Proposed fix: establish maximum JSON/SSE record sizes with provider-specific allowances for images and tool results, use bounded framing, and terminate/reap the affected session with a visible error on overflow. Add fragmented-input, oversized-record and EOF tests. Bound or coalesce pending updates without dropping approval events.
 
-Status: Documented only. A safe fix requires coordinated error propagation, process shutdown and compatibility decisions across the five protocols. Silently truncating a JSON record or stopping a reader could leave an approval/session pending and is not a safe local fix.
+Status: Fixed. Two caps, neither of which stops the session. (1) Tool output in Aether's copy keeps only its last 64 KB behind one `… N bytes earlier output hidden` line (`cap_output` in crates/driver/src/tool.rs). Claude's and Pi's appended output go through the shared `append_output`, and Codex's live buffer uses the same helper in place of its own cap. The marker is read back on each recap, so repeated appends keep one marker and an exact count. Results set through `set_output` were already cut to about 16k characters by `head_tail`, and the CLI keeps its full output. (2) Every stdout and stderr reader (Claude, Codex, Pi, Antigravity) reads through `capped_lines` (crates/driver/src/lines.rs, 16 MB per line). An oversized line is discarded without being buffered, a warning is shown in the chat, and the next line is read normally. OpenCode's SSE `frames` applies the same 16 MB cap to one frame and drops it with the same warning, including a frame that spans several chunks. Pending updates are still unbounded channels; only record size is capped.
 
 ## C-SEC-2
 

@@ -76,9 +76,37 @@ fn minted_ids_match_opencode_format() {
 fn sse_frames_split_on_blank_lines() {
     let mut buf =
         b"data: {\"type\":\"a\"}\n\n: heartbeat\n\ndata: {\"type\":\"b\"}\n\ndata: {\"ty".to_vec();
-    let types: Vec<Value> = frames(&mut buf).into_iter().map(|v| v["type"].clone()).collect();
+    let (events, dropped) = frames(&mut buf, &mut false, 1000);
+    let types: Vec<Value> = events.into_iter().map(|v| v["type"].clone()).collect();
     assert_eq!(types, ["a", "b"]);
+    assert!(!dropped);
     assert_eq!(buf, b"data: {\"ty");
+}
+
+#[test]
+fn an_oversized_sse_frame_is_dropped_and_the_next_one_still_parses() {
+    let mut skipping = false;
+    let mut buf = b"data: {\"type\":\"a\"}\n\ndata: ".to_vec();
+    buf.extend(vec![b'x'; 100]);
+    let (events, dropped) = frames(&mut buf, &mut skipping, 50);
+    assert_eq!((events.len(), dropped, skipping), (1, true, true));
+    assert!(buf.len() <= 1);
+
+    buf.extend(vec![b'y'; 100]);
+    assert_eq!(frames(&mut buf, &mut skipping, 50), (vec![], false));
+    assert!(skipping && buf.len() <= 1);
+
+    buf.extend(b"\n\ndata: {\"type\":\"b\"}\n\n");
+    let (events, dropped) = frames(&mut buf, &mut skipping, 50);
+    assert_eq!((events[0]["type"].clone(), dropped, skipping), ("b".into(), false, false));
+    assert!(buf.is_empty());
+}
+
+#[test]
+fn an_oversized_sse_frame_that_arrives_whole_is_dropped() {
+    let mut buf = format!("data: {}\n\ndata: {{\"type\":\"b\"}}\n\n", "x".repeat(100)).into_bytes();
+    let (events, dropped) = frames(&mut buf, &mut false, 50);
+    assert_eq!((events.len(), dropped), (1, true));
 }
 
 #[test]

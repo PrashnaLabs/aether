@@ -1361,3 +1361,25 @@ fn forget_conversation_removes_only_that_conversation() {
     assert!(root.join(format!("conversations/{keep}.db")).exists());
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn an_oversized_stream_line_warns_and_the_next_event_still_maps() {
+    let script = format!(
+        "echo '{INIT}'; head -c {} /dev/zero | tr '\\0' x; echo; \
+         echo '{{\"event\":\"step_update\",\"step_update\":{{\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"text_delta\":\"after\"}}}}'",
+        crate::lines::MAX_LINE + 1000
+    );
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", &script])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let state = Arc::new(Mutex::new(State { active: true, ..State::default() }));
+    read(child.stdout.take().unwrap(), 0, &state, &tx, None, None);
+    child.wait().unwrap();
+    let out = drain(&mut rx);
+    assert!(out.iter().any(|u| matches!(u, Update::Warning(w) if w.contains("16 MB"))), "{out:?}");
+    assert!(delta(&out).contains("after"), "{out:?}");
+}

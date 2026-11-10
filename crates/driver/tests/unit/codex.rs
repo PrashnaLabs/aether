@@ -859,7 +859,7 @@ fn live_output_without_newlines_stays_capped() {
     for _ in 0..100 {
         live.push(&"x".repeat(4096));
     }
-    assert!(live.partial.len() <= LIVE_OUTPUT_CAP);
+    assert!(live.partial.len() <= OUTPUT_CAP);
 }
 
 #[test]
@@ -1472,7 +1472,10 @@ fn live_output_cleans_split_escapes_and_stays_bounded() {
     for _ in 0..100 {
         out.push(&big);
     }
-    assert!(out.push("").len() <= LIVE_OUTPUT_CAP + 1100);
+    let kept = out.push("");
+    assert!(kept.len() <= OUTPUT_CAP + 1100);
+    assert_eq!(kept.matches(" bytes earlier output hidden\n").count(), 1);
+    assert!(kept.starts_with("… "));
 }
 
 #[test]

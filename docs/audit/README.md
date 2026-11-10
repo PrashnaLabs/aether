@@ -82,10 +82,10 @@ Ordered by priority. Each one is a backlog card on the board.
 2. **D-PERF-2, Medium: fixed in follow-up.** The save step compares the
    current layout and drafts with the last saved ones, and serializes only when
    they differ.
-3. **C-PERF-1, Medium.** CLI stdout/stderr readers use `BufReader::lines` with no
-   cap on line length, and update channels are unbounded. Fixing it needs a
-   per-protocol decision on what to do on overflow: kill the session and show an
-   error, without losing a pending approval.
+3. **C-PERF-1, Medium: fixed in follow-up.** Tool output in Aether's copy keeps
+   its last 64 KB behind one "earlier output hidden" line. Stdout and stderr
+   readers and OpenCode's SSE frames cap one line or frame at 16 MB; an
+   oversized one is skipped with a chat warning and the session keeps running.
 4. **Lead token left on disk: won't fix.** `claude/spawn.rs` `write_mcp_config`
    leaves `aether-mcp-<hash>.json` in the temp dir. The token is random, minted
    per run (`agent.rs` `lead_token`), and held only in memory, so it stops

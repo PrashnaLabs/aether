@@ -453,3 +453,68 @@ fn a_cloned_throttle_flushes_the_held_snapshot_before_its_own_update() {
         ]
     );
 }
+
+fn marker_count(text: &str) -> usize {
+    text.matches(" bytes earlier output hidden\n").count()
+}
+
+fn hidden(text: &str) -> usize {
+    text.strip_prefix("… ").unwrap().split(' ').next().unwrap().parse().unwrap()
+}
+
+#[test]
+fn output_under_the_cap_is_left_alone() {
+    let mut text = "x".repeat(OUTPUT_CAP);
+    cap_output(&mut text);
+    assert_eq!(text.len(), OUTPUT_CAP);
+    assert_eq!(marker_count(&text), 0);
+}
+
+#[test]
+fn output_over_the_cap_keeps_the_tail_behind_one_marker() {
+    let mut text: String = (0..20_000).map(|i| format!("line {i}\n")).collect();
+    let total = text.len();
+    let last = text.lines().last().unwrap().to_string();
+    cap_output(&mut text);
+    let (marker, body) = text.split_once('\n').unwrap();
+    assert_eq!(marker_count(&text), 1);
+    assert!(body.len() <= OUTPUT_CAP && body.len() > OUTPUT_CAP - 2048, "{}", body.len());
+    assert!(body.starts_with("line "), "cut on a line boundary: {body:.20}");
+    assert!(body.ends_with(&format!("{last}\n")));
+    assert_eq!(hidden(marker), total - body.len());
+}
+
+#[test]
+fn repeated_appends_keep_one_marker_and_an_exact_count() {
+    let mut detail = ToolDetail::Command {
+        command: "yes".into(),
+        cwd: None,
+        output: String::new(),
+        exit_code: None,
+    };
+    let chunk = "0123456789abcdef\n".repeat(1000);
+    for _ in 0..50 {
+        append_output(&mut detail, &chunk);
+    }
+    let ToolDetail::Command { output, .. } = &detail else { panic!() };
+    let (marker, body) = output.split_once('\n').unwrap();
+    assert_eq!(marker_count(output), 1);
+    assert!(body.len() <= OUTPUT_CAP);
+    assert_eq!(hidden(marker) + body.len(), 50 * chunk.len());
+}
+
+#[test]
+fn output_is_cut_on_a_char_boundary() {
+    let mut text = "é".repeat(OUTPUT_CAP);
+    cap_output(&mut text);
+    let (marker, body) = text.split_once('\n').unwrap();
+    assert!(body.chars().all(|c| c == 'é'));
+    assert_eq!(hidden(marker) + body.len(), 2 * OUTPUT_CAP);
+}
+
+#[test]
+fn append_output_ignores_details_without_output() {
+    let mut detail = ToolDetail::Read { path: "a".into(), range: None };
+    append_output(&mut detail, "more");
+    assert_eq!(detail, ToolDetail::Read { path: "a".into(), range: None });
+}

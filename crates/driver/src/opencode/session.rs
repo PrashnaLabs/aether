@@ -19,6 +19,7 @@ use super::service::{
 };
 use super::{Child, Conn, State};
 use crate::DriverStartOptions;
+use crate::lines::{MAX_LINE, oversized};
 use crate::record::Recorder;
 use crate::tool::{Throttle, start as start_call};
 
@@ -233,6 +234,7 @@ fn listen(
     let handle = |ty: &str, data: &Value| apply(&api, &state, &send, &rec, ty, data);
     loop {
         let mut buf = Vec::new();
+        let mut skipping = false;
         loop {
             let chunk = match api.rt.block_on(select(&mut stop, Box::pin(res.chunk()))) {
                 Either::Left(_) => return,
@@ -240,7 +242,11 @@ fn listen(
                 Either::Right(_) => break,
             };
             buf.extend_from_slice(&chunk);
-            for v in frames(&mut buf) {
+            let (events, dropped) = frames(&mut buf, &mut skipping, MAX_LINE);
+            if dropped {
+                send(oversized("opencode"));
+            }
+            for v in events {
                 let data = &v["data"];
                 let ty = v["type"].as_str().unwrap_or_default();
                 // form.created carries its session only inside the form
@@ -674,11 +680,28 @@ fn is_family(api: &Api, root: &str, sid: &str, cache: &mut HashMap<String, bool>
     found
 }
 
-/// Complete SSE frames drained from `buf`, as parsed `data:` payloads.
-fn frames(buf: &mut Vec<u8>) -> Vec<Value> {
-    let mut out = Vec::new();
-    while let Some(end) = buf.windows(2).position(|w| w == b"\n\n") {
+/// Complete SSE frames drained from `buf`, as parsed `data:` payloads, and whether a frame over
+/// `cap` bytes was dropped. `skipping` carries a dropped frame's unread rest into the next chunk.
+fn frames(buf: &mut Vec<u8>, skipping: &mut bool, cap: usize) -> (Vec<Value>, bool) {
+    let (mut out, mut dropped) = (Vec::new(), false);
+    loop {
+        let Some(end) = buf.windows(2).position(|w| w == b"\n\n") else {
+            if !*skipping && buf.len() > cap {
+                (*skipping, dropped) = (true, true);
+            }
+            if *skipping {
+                buf.drain(..buf.len().saturating_sub(1));
+            }
+            return (out, dropped);
+        };
         let frame: Vec<u8> = buf.drain(..end + 2).collect();
+        if std::mem::take(skipping) {
+            continue;
+        }
+        if frame.len() > cap {
+            dropped = true;
+            continue;
+        }
         let frame = String::from_utf8_lossy(&frame);
         let data: Vec<&str> =
             frame.lines().filter_map(|l| l.strip_prefix("data:")).map(str::trim_start).collect();
@@ -686,7 +709,6 @@ fn frames(buf: &mut Vec<u8>) -> Vec<Value> {
             out.push(v);
         }
     }
-    out
 }
 
 pub(super) fn reply(

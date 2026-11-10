@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -15,6 +15,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::DriverStartOptions;
+use crate::lines::{MAX_LINE, capped_lines, oversized};
 use crate::record::{self};
 use crate::spawn::{StderrTail, command, spawn_logged};
 use crate::version::gate_binary;
@@ -138,7 +139,7 @@ impl ClaudeDriver {
         if let Some(stderr) = child.stderr.take() {
             let state = self.state.clone();
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     state.guard().stderr.push(&line);
                 }
                 drop(stderr_done);
@@ -150,7 +151,11 @@ impl ClaudeDriver {
             let (stdin, child, rec) = (self.stdin.clone(), self.child.clone(), self.rec.clone());
             let mut init_tx: Option<Sender<Result<(), String>>> = Some(init_tx);
             std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+                    let Some(line) = line else {
+                        let _ = tx.unbounded_send(oversized("claude"));
+                        continue;
+                    };
                     if let Some(rec) = &rec {
                         rec.line(&line);
                     }

@@ -9,7 +9,8 @@ use aether_core::{
 
 use crate::spawn::log_unknown;
 use crate::tool::{
-    apply_hunks, child_activity, finish, halted, now_ms, result_text, save_images, start,
+    append_output, apply_hunks, child_activity, finish, halted, now_ms, result_text, save_images,
+    start,
 };
 
 use super::approve::{DENIED, control_request};
@@ -163,20 +164,6 @@ pub(crate) fn set_activity(s: &mut State, parent: &str, text: &str) -> Vec<Updat
         }
         _ => false,
     })
-}
-
-pub(crate) fn append_output(detail: &mut ToolDetail, extra: &str) {
-    if let ToolDetail::Command { output, .. }
-    | ToolDetail::Search { output, .. }
-    | ToolDetail::Web { output, .. }
-    | ToolDetail::Task { output, .. }
-    | ToolDetail::Other { output, .. } = detail
-    {
-        output.push_str(extra);
-        if output.starts_with('\n') {
-            *output = output.trim_start().to_string();
-        }
-    }
 }
 
 pub(crate) fn task_line(s: &mut State, subtype: &str, v: &Value) -> Vec<Update> {

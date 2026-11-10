@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::process::{ChildStdin, Stdio};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -13,6 +13,7 @@ use aether_core::{
 };
 
 use crate::DriverStartOptions;
+use crate::lines::{MAX_LINE, capped_lines, oversized};
 use crate::record::{self};
 use crate::spawn::{command, spawn_logged};
 use crate::tool::{Throttle, start};
@@ -89,7 +90,7 @@ impl CodexDriver {
         if let Some(stderr) = child.stderr.take() {
             let state = me.state.clone();
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     state.guard().stderr.push(&line);
                 }
                 drop(stderr_done);
@@ -99,7 +100,11 @@ impl CodexDriver {
             let (throttle, state, stdin, rec) =
                 (me.throttle.clone(), me.state.clone(), me.stdin.clone(), me.rec.clone());
             std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+                    let Some(line) = line else {
+                        throttle.send(oversized("codex"));
+                        continue;
+                    };
                     if let Some(rec) = &rec {
                         rec.line(&line);
                     }

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{Sender, channel};
@@ -17,13 +17,14 @@ use aether_core::{
     without_attached_files,
 };
 
+use super::lines::{MAX_LINE, capped_lines, oversized};
 use super::record::{self, Recorder};
 use super::spawn::{
     StderrTail, command as spawn_command, log_unknown, spawn_logged, visible_stderr,
 };
 use super::tool::{
-    Throttle, apply_patch_text, clean, finish, halted, now_ms, result_text, save_images,
-    set_output, start,
+    Throttle, append_output, apply_patch_text, clean, finish, halted, now_ms, result_text,
+    save_images, set_output, start,
 };
 use super::version::gate_binary;
 use super::{Driver, DriverStartOptions};
@@ -144,7 +145,11 @@ impl PiDriver {
             let stdin = me.stdin.clone();
             std::thread::spawn(move || {
                 let throttle = Throttle::new(tx.clone());
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+                    let Some(line) = line else {
+                        throttle.send(oversized("pi"));
+                        continue;
+                    };
                     if let Some(rec) = &rec {
                         rec.line(&line);
                     }
@@ -204,7 +209,7 @@ impl PiDriver {
         if let Some(stderr) = child.stderr.take() {
             let (tx, state) = (me.tx.clone(), me.state.clone());
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     state.guard().stderr.push(&line);
                     if let Some(u) = stderr_update(&line)
                         && tx.unbounded_send(u).is_err()
@@ -1102,12 +1107,7 @@ fn map_event(s: &mut State, v: &Value) -> Vec<Update> {
                 {
                     note.push_str(&format!(" Full output: {path}"));
                 }
-                if let ToolDetail::Command { output, .. }
-                | ToolDetail::Search { output, .. }
-                | ToolDetail::Other { output, .. } = &mut call.detail
-                {
-                    output.push_str(&note);
-                }
+                append_output(&mut call.detail, &note);
             }
             call.images = save_images(&result["content"], s.attachments.as_deref());
             vec![Update::Tool(call)]
