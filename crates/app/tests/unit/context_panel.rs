@@ -1,5 +1,5 @@
 use super::*;
-use aether_core::{Message, Notice, NoticeState};
+use aether_core::{Message, Notice, NoticeState, ToolCall, ToolDetail, ToolStatus};
 
 fn item(tokens: u64) -> Item {
     Item { tokens, ..Item::default() }
@@ -63,4 +63,34 @@ fn sign_in_clears_after_success() {
     }));
     let names = needs_sign_in(&[reply]);
     assert_eq!(names, HashSet::from(["postman".to_string()]));
+}
+
+#[test]
+fn running_agents_are_live_task_rows_only() {
+    let task = |id: &str, status| {
+        let detail = ToolDetail::Task {
+            description: id.into(),
+            output: String::new(),
+            agent: "general-purpose".into(),
+            prompt: String::new(),
+            tools: 2,
+            tokens: 0,
+            activity: String::new(),
+        };
+        let mut call = ToolCall::new(id, id, detail);
+        call.status = status;
+        Step::Tool(call)
+    };
+    let mut reply = Message::assistant();
+    reply.steps.push(task("bg", ToolStatus::Background));
+    reply.steps.push(task("run", ToolStatus::Running));
+    reply.steps.push(task("done", ToolStatus::Stopped));
+    let mut shell = ToolCall::new("sh", "sh", ToolDetail::default());
+    shell.status = ToolStatus::Background;
+    reply.steps.push(Step::Tool(shell));
+    let mut old = reply.clone();
+    old.restored = true;
+    let messages = [old, reply];
+    let ids: Vec<&str> = running_agents(&messages).iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["bg", "run"]);
 }
