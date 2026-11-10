@@ -11,14 +11,18 @@ fn card(id: i64, activity_ms: i64) -> Card {
         title: String::new(),
         provider: Provider::Claude,
         model: String::new(),
+        effort: String::new(),
         status: CardStatus::Idle,
         since_ms: 0,
         place: String::new(),
         added: 0,
         removed: 0,
+        ahead: 0,
         activity_ms,
         text: String::new(),
         cwd: PathBuf::new(),
+        worktree: false,
+        gone: false,
     }
 }
 

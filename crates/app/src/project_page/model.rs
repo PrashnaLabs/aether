@@ -17,8 +17,8 @@ pub(crate) enum Filter {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum GroupBy {
-    None,
     #[default]
+    None,
     Worktree,
     Status,
     Provider,
@@ -114,14 +114,22 @@ pub(crate) struct Card {
     pub title: String,
     pub provider: Provider,
     pub model: String,
+    /// Thinking level; empty means the CLI default.
+    pub effort: String,
     pub status: CardStatus,
     pub since_ms: i64,
     pub place: String,
     pub added: u32,
     pub removed: u32,
+    /// Commits its branch is ahead of upstream.
+    pub ahead: u32,
     pub activity_ms: i64,
     pub text: String,
     pub cwd: PathBuf,
+    /// Runs in its own worktree; `place` is that worktree's branch.
+    pub worktree: bool,
+    /// Its worktree was removed or can't be found.
+    pub gone: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

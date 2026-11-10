@@ -1077,14 +1077,22 @@ impl ChatApp {
                     title: chat.title.to_string(),
                     provider: chat.provider,
                     model: model_label(models, &chat.model(&self.settings)),
+                    effort: chat.effort_level().to_string(),
                     status,
                     since_ms: chat.turn_at,
                     place,
                     added,
                     removed,
+                    ahead: self
+                        .sidebar_git_summary(&cwd)
+                        .and_then(|(.., ahead_behind)| ahead_behind)
+                        .map_or(0, |(ahead, _)| ahead),
                     activity_ms: chat.activity(),
                     text: last_text(last, status),
                     cwd,
+                    worktree: !chat.worktree_branch.is_empty(),
+                    gone: !chat.worktree_branch.is_empty()
+                        && (chat.worktree_removed() || self.worktree_missing(ix)),
                 }
             })
             .collect()

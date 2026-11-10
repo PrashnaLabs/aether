@@ -419,14 +419,20 @@ impl ChatApp {
                         .text_xs()
                         .text_color(muted)
                         .when(by_tree, |h| h.child(Icon::new(Lucide::GitBranch).size(px(13.))))
-                        .child(key)
+                        .child(
+                            div()
+                                .when(by_tree && list.iter().all(|c| c.gone), |d| d.line_through())
+                                .child(key),
+                        )
                         .child(list.len().to_string())
                 });
                 v_flex().children(cap).child(
                     h_flex()
                         .flex_wrap()
                         .gap(px(10.))
-                        .children(list.iter().map(|card| self.project_card(card, now, cx)))
+                        .children(list.iter().map(|card| {
+                            div().flex_1().min_w(px(290.)).child(self.project_card(card, now, cx))
+                        }))
                         .children((0..2).map(|_| div().flex_1().min_w(px(290.)).h_0())),
                 )
             }))
@@ -445,8 +451,7 @@ impl ChatApp {
         let age = relative_time(card.activity_ms, now, &chrono::Local);
         let tint = status_tint(card.status, cx);
         let badge = badge(card.status, card.since_ms, now).map(|text| pill(text, tint.0, tint.1));
-        let meta = h_flex()
-            .mt_auto()
+        let place = h_flex()
             .gap(px(10.))
             .items_center()
             .whitespace_nowrap()
@@ -457,8 +462,16 @@ impl ChatApp {
                     .gap(px(4.))
                     .items_center()
                     .min_w_0()
-                    .child(Icon::new(Lucide::GitBranch).size(px(12.)))
-                    .child(div().truncate().child(card.place.clone())),
+                    .child(
+                        Icon::new(if card.worktree { Lucide::GitFork } else { Lucide::GitBranch })
+                            .size(px(12.)),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .when(card.gone, |d| d.line_through())
+                            .child(card.place.clone()),
+                    ),
             )
             .when(card.added > 0, |m| {
                 m.child(
@@ -476,9 +489,26 @@ impl ChatApp {
                         .child(format!("\u{2212}{}", card.removed)),
                 )
             })
+            .when(card.ahead > 0, |m| m.child(aether_ui::arrow_count(Lucide::ArrowUp, card.ahead)));
+        let thinking = (!card.effort.is_empty()).then(|| {
+            let mut chars = card.effort.chars();
+            let word: String =
+                chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
+            format!("{word} thinking")
+        });
+        let meta = h_flex()
+            .gap(px(6.))
+            .items_center()
+            .whitespace_nowrap()
+            .text_xs()
+            .text_color(muted)
             .when(!card.model.is_empty(), |m| {
                 m.child(div().min_w_0().truncate().child(card.model.clone()))
             })
+            .when_some(thinking, |m, text| {
+                m.child(div().flex_none().child("•")).child(div().flex_none().child(text))
+            })
+            .child(div().flex_1())
             .when(card.status != CardStatus::Working, |m| {
                 m.child(div().flex_none().child(age.clone()))
             });
@@ -529,9 +559,8 @@ impl ChatApp {
             .role(Role::Button)
             .tab_index(0)
             .aria_label(card_aria(card, &age))
-            .flex_1()
-            .min_w(px(290.))
-            .h(px(120.))
+            .w_full()
+            .h(px(138.))
             .overflow_hidden()
             .p(px(12.))
             .gap(px(8.))
@@ -567,7 +596,7 @@ impl ChatApp {
                     .line_clamp(2)
                     .child(card.text.clone()),
             )
-            .child(meta)
+            .child(v_flex().mt_auto().gap(px(4.)).child(place).child(meta))
             .on_click(cx.listener(move |this, _, window, cx| this.select(ix, window, cx)))
     }
 
@@ -656,6 +685,7 @@ impl ChatApp {
                             .min_w_0()
                             .gap(px(6.))
                             .items_center()
+                            .when(tree.missing, |h| h.line_through())
                             .child(div().min_w_0().truncate().child(branch))
                             .child(
                                 div().min_w_0().truncate().text_xs().text_color(muted).child(short),

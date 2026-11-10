@@ -19,6 +19,7 @@ pub struct RecentRow {
     icon: Icon,
     title: SharedString,
     detail: Option<(Icon, SharedString)>,
+    struck: bool,
     when: SharedString,
     label: SharedString,
     on_click: Option<Handler>,
@@ -34,7 +35,22 @@ impl RecentRow {
         let title = title.into();
         let when = when.into();
         let label = format!("{title}, {when}").into();
-        Self { id: id.into(), icon, title, detail: None, when, label, on_click: None }
+        Self {
+            id: id.into(),
+            icon,
+            title,
+            detail: None,
+            struck: false,
+            when,
+            label,
+            on_click: None,
+        }
+    }
+
+    /// Strikes the detail through, e.g. a removed worktree.
+    pub fn struck(mut self, struck: bool) -> Self {
+        self.struck = struck;
+        self
     }
 
     pub fn detail(mut self, icon: Icon, text: impl Into<SharedString>) -> Self {
@@ -83,7 +99,7 @@ impl RenderOnce for RecentRow {
                         .text_size(px(12.))
                         .font_family(mono)
                         .child(icon.size(px(11.)))
-                        .child(text),
+                        .child(div().when(self.struck, |d| d.line_through()).child(text)),
                 )
             })
             .child(div().w(px(64.)).flex_none().text_right().text_size(px(12.)).child(self.when))
@@ -102,6 +118,7 @@ struct Row {
     icon: Icon,
     title: SharedString,
     branch: SharedString,
+    gone: bool,
     when: SharedString,
     on_click: Handler,
 }
@@ -133,6 +150,7 @@ impl RecentChats {
         icon: Icon,
         title: impl Into<SharedString>,
         branch: impl Into<SharedString>,
+        gone: bool,
         when: impl Into<SharedString>,
         on_click: impl Fn(&mut Window, &mut App) + 'static,
     ) -> Self {
@@ -140,6 +158,7 @@ impl RecentChats {
             icon,
             title: title.into(),
             branch: branch.into(),
+            gone,
             when: when.into(),
             on_click: Rc::new(on_click),
         });
@@ -161,6 +180,7 @@ impl RenderOnce for RecentChats {
             let label = recent_row_label(&row.title, &row.branch, &row.when);
             RecentRow::new(("recent", ix), row.icon, row.title, row.when)
                 .detail(Icon::new(Lucide::GitBranch), row.branch)
+                .struck(row.gone)
                 .accessibility_label(label)
                 .on_click(move |window, cx| on_click(window, cx))
                 .into_any_element()
