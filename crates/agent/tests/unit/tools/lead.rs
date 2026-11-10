@@ -45,16 +45,22 @@ fn lead_tools_cover_all_specs() {
 #[test]
 fn lead_tool_call_round_trips() {
     let (tx, mut rx) = mpsc::unbounded::<OrchCall>();
+    let pending = pend();
+    pending.store(1, std::sync::atomic::Ordering::SeqCst);
+    let app_pending = pending.clone();
     let answer = std::thread::spawn(move || {
         let call = futures::executor::block_on(rx.next()).unwrap();
         assert_eq!((call.lead.as_str(), call.tool.as_str()), ("chat", "read_agent"));
         assert_eq!(call.args, json!({"id": 3}));
         call.reply.send(Ok(json!({"x": 1}))).unwrap();
+        crate::orchestrator::done_pending(&app_pending);
     });
     let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-    let out = rt.block_on(ask("chat".into(), tx, pend(), "read_agent".into(), json!({"id": 3})));
+    let out =
+        rt.block_on(ask("chat".into(), tx, pending.clone(), "read_agent".into(), json!({"id": 3})));
     answer.join().unwrap();
     assert_eq!(out, Ok(json!({"x": 1})));
+    assert_eq!(pending.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[test]

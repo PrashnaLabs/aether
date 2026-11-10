@@ -10,7 +10,10 @@ fn pend() -> crate::orchestrator::OrchPending {
 }
 
 fn sock(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("ao-{name}-{}.sock", std::process::id()))
+    let path = std::env::temp_dir().join(format!("ao-{name}-{}", std::process::id()));
+    #[cfg(unix)]
+    let path = path.join("o.sock");
+    path
 }
 
 #[test]
@@ -49,6 +52,7 @@ fn unknown_token_is_refused_without_reaching_app() {
 fn stale_socket_file_is_replaced_and_mode_is_0600() {
     use std::os::unix::fs::PermissionsExt;
     let p = sock("stale");
+    aether_core::create_private_dir(p.parent().unwrap()).unwrap();
     std::fs::write(&p, b"").unwrap();
     let (tx, _rx) = futures::channel::mpsc::unbounded();
     listen(&p, Default::default(), tx, pend()).unwrap();
@@ -123,4 +127,69 @@ fn full_pending_queue_is_busy_not_queued() {
         crate::orchestrator::BUSY
     );
     assert!(rx.try_recv().is_err(), "nothing queued");
+}
+
+#[cfg(unix)]
+#[test]
+fn socket_directory_is_private_and_shared_parent_is_unchanged() {
+    use std::os::unix::fs::PermissionsExt;
+    let shared = std::env::temp_dir();
+    let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
+    let p = sock("private");
+    let (tx, _rx) = futures::channel::mpsc::unbounded();
+    listen(&p, Default::default(), tx, pend()).unwrap();
+    assert_eq!(std::fs::metadata(p.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::metadata(shared).unwrap().permissions().mode(), mode);
+}
+
+#[cfg(unix)]
+#[test]
+fn unsafe_existing_socket_directory_is_rejected_without_chmod() {
+    use std::os::unix::fs::PermissionsExt;
+    let p = sock("public");
+    let dir = p.parent().unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (tx, _rx) = futures::channel::mpsc::unbounded();
+    assert!(listen(&p, Default::default(), tx, pend()).is_err());
+    assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o755);
+    assert!(!p.exists());
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn trickling_request_cannot_extend_total_read_deadline() {
+    let (server, mut client) = Stream::pair().unwrap();
+    let start = Instant::now();
+    let writer = std::thread::spawn(move || {
+        for _ in 0..20 {
+            if client.write_all(b"x").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    });
+    assert!(read_request(&server, start + Duration::from_millis(150)).is_err());
+    assert!(start.elapsed() < Duration::from_millis(500));
+    drop(server);
+    writer.join().unwrap();
+}
+
+#[test]
+fn timed_out_call_keeps_pending_slot_until_ui_consumes_it() {
+    let leads: Leads = Default::default();
+    leads.lock().unwrap().insert("tok".into(), "1".into());
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let pending = pend();
+    pending.store(crate::orchestrator::MAX_PENDING - 1, Ordering::SeqCst);
+    let request = r#"{"token":"tok","tool":"list_agents","args":{}}"#;
+    assert_eq!(answer(request, &leads, &tx, &pending).unwrap_err(), "Aether didn't answer");
+    assert_eq!(pending.load(Ordering::SeqCst), crate::orchestrator::MAX_PENDING);
+    assert_eq!(answer(request, &leads, &tx, &pending).unwrap_err(), crate::orchestrator::BUSY);
+    let call = rx.try_recv().unwrap();
+    assert!(call.deadline <= Instant::now());
+    assert!(call.reply.send(Ok(serde_json::json!({}))).is_err());
+    crate::orchestrator::done_pending(&pending);
+    assert_eq!(pending.load(Ordering::SeqCst), crate::orchestrator::MAX_PENDING - 1);
 }

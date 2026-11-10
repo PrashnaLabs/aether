@@ -253,6 +253,9 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if std::time::Instant::now() >= call.deadline {
+            return;
+        }
         let result = match self.chats.iter().position(|c| c.id.to_string() == call.lead) {
             None => Err("lead chat not found".to_string()),
             Some(_) if let Err(e) = check_args(&call.tool, &call.args) => Err(e),

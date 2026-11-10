@@ -239,6 +239,7 @@ fn call_for_missing_lead_replies_error(cx: &mut TestAppContext) {
         .update(cx, |app, window, cx| {
             let (reply, answer) = std::sync::mpsc::channel();
             let call = OrchCall {
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
                 lead: "999".into(),
                 tool: "spawn_agent".into(),
                 args: spawn_args("codex", "gpt-5"),
@@ -258,7 +259,13 @@ fn unknown_tool_replies_error(cx: &mut TestAppContext) {
     window
         .update(cx, |app, window, cx| {
             let (reply, answer) = std::sync::mpsc::channel();
-            let call = OrchCall { lead: "10".into(), tool: "x".into(), args: json!({}), reply };
+            let call = OrchCall {
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                lead: "10".into(),
+                tool: "x".into(),
+                args: json!({}),
+                reply,
+            };
             app.orchestrate(call, window, cx);
             assert_eq!(answer.try_recv().unwrap(), Err(r#"unknown tool "x""#.into()));
         })
@@ -272,8 +279,13 @@ fn call_for_non_lead_chat_replies_error(cx: &mut TestAppContext) {
         .update(cx, |app, window, cx| {
             app.chats[1].lead = false;
             let (reply, answer) = std::sync::mpsc::channel();
-            let call =
-                OrchCall { lead: "10".into(), tool: "list_agents".into(), args: json!({}), reply };
+            let call = OrchCall {
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                lead: "10".into(),
+                tool: "list_agents".into(),
+                args: json!({}),
+                reply,
+            };
             app.orchestrate(call, window, cx);
             assert_eq!(answer.try_recv().unwrap(), Err("lead chat not found".into()));
         })
@@ -288,6 +300,7 @@ fn blocked_spawn_replies_error_and_leaves_no_chat(cx: &mut TestAppContext) {
             app.chats[1].worktree_job = Some(crate::app::WorktreeJob::Switching);
             let (reply, answer) = std::sync::mpsc::channel();
             let call = OrchCall {
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
                 lead: "10".into(),
                 tool: "spawn_agent".into(),
                 args: spawn_args("codex", "gpt-5"),
@@ -1753,7 +1766,13 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
             let mut call = |tool: &str, args: Value| {
                 let (reply, answer) = std::sync::mpsc::channel();
                 app.orchestrate(
-                    OrchCall { lead: "10".into(), tool: tool.into(), args, reply },
+                    OrchCall {
+                        deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                        lead: "10".into(),
+                        tool: tool.into(),
+                        args,
+                        reply,
+                    },
                     window,
                     cx,
                 );
@@ -1845,7 +1864,7 @@ fn cards_take_labels_blockers_notes_and_read_back_in_full(cx: &mut TestAppContex
             let mut call = |tool: &str, args: Value| {
                 let (reply, answer) = std::sync::mpsc::channel();
                 app.orchestrate(
-                    OrchCall { lead: "10".into(), tool: tool.into(), args, reply },
+                    OrchCall { deadline: std::time::Instant::now() + std::time::Duration::from_secs(30), lead: "10".into(), tool: tool.into(), args, reply },
                     window,
                     cx,
                 );
@@ -1964,6 +1983,27 @@ fn crew_ids_cover_children_and_grandchildren(cx: &mut TestAppContext) {
             assert_eq!(crew, [kid, grandkid]);
             assert!(!crew.contains(&other));
             assert!(app.crew_ids(grandkid).is_empty());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn expired_call_is_skipped_before_mutating_chat(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let title = app.chats[1].title.clone();
+            let (reply, answer) = std::sync::mpsc::channel();
+            let call = OrchCall {
+                lead: "10".into(),
+                tool: "update_chat".into(),
+                args: json!({"id": 10, "title": "late rename"}),
+                reply,
+                deadline: std::time::Instant::now() - std::time::Duration::from_secs(1),
+            };
+            app.orchestrate(call, window, cx);
+            assert_eq!(app.chats[1].title, title);
+            assert_eq!(answer.try_recv(), Err(std::sync::mpsc::TryRecvError::Disconnected));
         })
         .unwrap();
 }

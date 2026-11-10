@@ -21,7 +21,11 @@ pub(crate) struct Tools {
 
 impl Tools {
     pub(crate) fn new() -> Self {
-        Self { http: reqwest::Client::new() }
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
+        Self { http }
     }
 
     pub(crate) fn enabled(

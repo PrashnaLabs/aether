@@ -34,7 +34,7 @@ always the Aether binary with the `mcp` argument:
       "command": "/usr/local/bin/aether",
       "args": ["mcp"],
       "env": {
-        "AETHER_ORCH_SOCK": "<config dir>/orchestrator.sock",
+        "AETHER_ORCH_SOCK": "<config dir>/orch/orchestrator.sock",
         "AETHER_ORCH_TOKEN": "<lead token>"
       }
     }
@@ -47,9 +47,12 @@ always the Aether binary with the `mcp` argument:
   `which aether` points). A symlink is fine; it is resolved to the real
   binary.
 - `AETHER_ORCH_SOCK`: the socket of the running Aether window.
-  `$XDG_CONFIG_HOME/aether/orchestrator.sock` on Linux, or
-  `~/.config/aether/orchestrator.sock` without XDG. If unset, the server
-  defaults to that path.
+  On Unix it lives in a private 0700 `orch` directory under the config dir.
+  On Windows the loopback address file remains `<config dir>/orchestrator.sock`.
+  `$XDG_CONFIG_HOME/aether/orch/orchestrator.sock` on Linux, or
+  `~/.config/aether/orch/orchestrator.sock` without XDG. On macOS the default
+  config dir is `~/Library/Application Support/aether`, with an existing XDG
+  installation still honored. If unset, the server uses the platform default.
 - `AETHER_ORCH_TOKEN`: minted per lead chat by the running Aether, stable
   for the app's lifetime. There is no standalone token: without a valid
   token, `tools/list` returns an empty list by design, and `tools/call`
@@ -103,13 +106,13 @@ If orchestration does not work on Linux, check in this order:
    resumed without a restart, has no `aether` tools. Start a new chat
    after toggling, or toggle before the first message.
 2. **Only one Aether owns the socket.** The socket file is
-   `~/.config/aether/orchestrator.sock` (or under `$XDG_CONFIG_HOME`).
+   `~/.config/aether/orch/orchestrator.sock` (or under `$XDG_CONFIG_HOME`).
    A second Aether instance (another user, another `$HOME`, a `sudo`
    launch) fails to bind and prints `aether: orchestration off: another
    Aether owns the socket` — visible only if you launch from a terminal.
    Close the other instance, or launch Aether from a terminal to see the
    message.
-3. **The socket exists.** `ls -l ~/.config/aether/orchestrator.sock`
+3. **The socket exists.** `ls -l ~/.config/aether/orch/orchestrator.sock`
    while Aether runs. If it is missing, Aether could not create it:
    check `$HOME` is set for the desktop session and the config directory
    is writable. Launching from a terminal shows the error.

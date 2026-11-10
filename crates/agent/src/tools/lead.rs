@@ -1,12 +1,12 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use adk_rust::prelude::Tool;
 use adk_rust::serde_json::{Value, json};
 use adk_rust::{ToolContext, async_trait};
 use futures::channel::mpsc::UnboundedSender;
 
-use crate::orchestrator::{OrchCall, OrchPending, done_pending, tool_specs, try_queue};
+use crate::orchestrator::{OrchCall, OrchPending, tool_specs, try_queue};
 
 const SILENT: &str = "Aether didn't answer";
 
@@ -54,11 +54,13 @@ async fn ask(
     args: Value,
 ) -> Result<Value, String> {
     let (reply, rx) = std::sync::mpsc::channel();
-    try_queue(&calls, &pending, OrchCall { lead, tool, args, reply })?;
-    let out = tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(30)))
-        .await
-        .map_err(|_| SILENT.to_string())?;
-    done_pending(&pending);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    try_queue(&calls, &pending, OrchCall { lead, tool, args, reply, deadline })?;
+    let out = tokio::task::spawn_blocking(move || {
+        rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    })
+    .await
+    .map_err(|_| SILENT.to_string())?;
     out.map_err(|_| SILENT.to_string())?
 }
 

@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream as Stream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::channel::mpsc::UnboundedSender;
 use serde_json::{Value, json};
@@ -46,6 +46,7 @@ pub struct OrchCall {
     pub lead: String,
     pub tool: String,
     pub args: Value,
+    pub deadline: Instant,
     pub reply: std::sync::mpsc::Sender<Result<Value, String>>,
 }
 
@@ -61,7 +62,10 @@ pub(crate) fn connect(sock: &Path) -> std::io::Result<Stream> {
 }
 
 pub fn socket_path() -> Option<PathBuf> {
-    Some(aether_core::config_dir()?.join("orchestrator.sock"))
+    let dir = aether_core::config_dir()?;
+    #[cfg(unix)]
+    let dir = dir.join("orch");
+    Some(dir.join("orchestrator.sock"))
 }
 
 fn chat_filter(about: &str) -> Value {

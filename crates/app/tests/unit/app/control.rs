@@ -301,6 +301,7 @@ fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
             let mut call = |lead: &str, tool: &str| {
                 let (reply, answer) = std::sync::mpsc::channel();
                 let call = aether_agent::orchestrator::OrchCall {
+                    deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
                     lead: lead.into(),
                     tool: tool.into(),
                     args: json!({}),
