@@ -49,6 +49,7 @@ fn aria_carries_hover_card_lines() {
         provider: Provider::OpenCode,
         project: Some("auto-clicker".into()),
         model: "DeepSeek V4.1 Flash Free".into(),
+        effort: SharedString::default(),
         place: Some(RowPlace::Branch {
             name: "feat/autoclicker".into(),
             worktree: false,
@@ -87,6 +88,7 @@ fn lead_aria_reads_spawned_count_and_rollup() {
         provider: aether_core::Provider::Claude,
         project: Some("aether".into()),
         model: "Opus".into(),
+        effort: SharedString::default(),
         place: None,
         time: "2m".into(),
         path: "/repo".into(),
@@ -145,4 +147,13 @@ fn run_clock_only_for_working_chats() {
     assert_eq!(run_clock(ChatStatus::Working { since_ms: 0 }, now), Some("2m 49s".into()));
     assert_eq!(run_clock(ChatStatus::Idle, now), None);
     assert_eq!(run_clock(ChatStatus::Waiting, now), None);
+}
+
+#[test]
+fn worktree_rows_show_only_the_icon() {
+    let branch =
+        |worktree| RowPlace::Branch { name: "aether/backlog-81".into(), worktree, detached: false };
+    assert_eq!(place_label(&branch(true)), None);
+    assert_eq!(place_label(&branch(false)).as_deref(), Some("aether/backlog-81"));
+    assert_eq!(place_label(&RowPlace::NoGit).as_deref(), Some("No git"));
 }

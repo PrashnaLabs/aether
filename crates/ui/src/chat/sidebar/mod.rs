@@ -326,6 +326,8 @@ pub struct ChatLine {
     pub project: Option<SharedString>,
     /// Model display name, for the hover card.
     pub model: SharedString,
+    /// Thinking level the chat sends with; empty means the CLI default.
+    pub effort: SharedString,
     pub place: Option<RowPlace>,
     /// Relative time, or elapsed time while a turn runs; empty for a draft.
     pub time: SharedString,
@@ -397,6 +399,14 @@ pub const SIDEBAR_MAX_WIDTH: f32 = 480.;
 
 type WatchHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 type HandoffHandler = Rc<dyn Fn(i64, Provider, &mut Window, &mut App)>;
+type CleanupHandler = Rc<dyn Fn(i64, CrewCleanup, &mut Window, &mut App)>;
+
+/// What a lead's menu does to its agents that aren't running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrewCleanup {
+    Archive,
+    Delete,
+}
 type PickHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 
 /// A row's bulk-select state: picked, any row picked, toggle.
@@ -427,6 +437,8 @@ struct ChatItem {
     lead: bool,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, HandoffHandler)>,
+    /// A lead's count of agents that aren't running, and what clears them.
+    cleanup: Option<(usize, CleanupHandler)>,
     line: Option<ChatLine>,
     on_click: RowHandler,
     on_rename: RowHandler,
@@ -520,6 +532,7 @@ pub struct ChatSidebar {
     archived: bool,
     pins_only: bool,
     top: Vec<SectionButtonItem>,
+    search: Option<Entity<InputState>>,
     section_tools: Option<ToolsFactory>,
     rename_ix: Option<usize>,
     rename_input: Option<Entity<InputState>>,
@@ -532,10 +545,10 @@ pub struct ChatSidebar {
     children: std::collections::HashMap<i64, u8>,
     crew_open: std::collections::HashMap<i64, bool>,
     crew_all: std::collections::HashSet<i64>,
-    cards: std::collections::HashMap<i64, (i64, SharedString)>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
+    cleanup: Option<(std::collections::HashMap<i64, usize>, CleanupHandler)>,
     picks: Option<(Vec<i64>, PickHandler)>,
     bulk_bar: Option<AnyElement>,
 }
@@ -567,6 +580,7 @@ impl ChatSidebar {
             archived: false,
             pins_only: false,
             top: Vec::new(),
+            search: None,
             section_tools: None,
             rename_ix: None,
             rename_input: None,
@@ -579,10 +593,10 @@ impl ChatSidebar {
             children: std::collections::HashMap::new(),
             crew_open: std::collections::HashMap::new(),
             crew_all: std::collections::HashSet::new(),
-            cards: std::collections::HashMap::new(),
             leads: Vec::new(),
             on_watch: None,
             handoff: None,
+            cleanup: None,
             picks: None,
             bulk_bar: None,
         }
@@ -610,18 +624,19 @@ impl ChatSidebar {
         self
     }
 
-    /// Chat ids drawn one level deeper, under their lead.
-    pub fn child_agents(mut self, depths: Vec<(i64, u8)>) -> Self {
-        self.children = depths.into_iter().collect();
+    /// Adds Archive/Delete "N finished agents…" to the menus of leads in `finished`.
+    pub fn crew_cleanup(
+        mut self,
+        finished: std::collections::HashMap<i64, usize>,
+        on: impl Fn(i64, CrewCleanup, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.cleanup = Some((finished, Rc::new(on)));
         self
     }
 
-    /// Chat id to the (card id, title) it hangs off, for Show all headers.
-    pub fn child_cards(
-        mut self,
-        cards: std::collections::HashMap<i64, (i64, SharedString)>,
-    ) -> Self {
-        self.cards = cards;
+    /// Chat ids drawn one level deeper, under their lead.
+    pub fn child_agents(mut self, depths: Vec<(i64, u8)>) -> Self {
+        self.children = depths.into_iter().collect();
         self
     }
 
@@ -799,6 +814,7 @@ impl ChatSidebar {
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
+            cleanup: self.cleanup_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),
@@ -951,6 +967,11 @@ impl ChatSidebar {
         (!targets.is_empty()).then(|| (targets, pick.clone()))
     }
 
+    fn cleanup_for(&self, id: i64) -> Option<(usize, CleanupHandler)> {
+        let (finished, on) = self.cleanup.as_ref()?;
+        finished.get(&id).filter(|&&n| n > 0).map(|&n| (n, on.clone()))
+    }
+
     fn pick_for(&self, id: i64) -> Option<Pick> {
         let (picked, on_toggle) = self.picks.as_ref()?;
         Some(Pick {
@@ -968,6 +989,12 @@ impl ChatSidebar {
 
     pub fn style(mut self, style: SidebarStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    /// A chat search field pinned above the list.
+    pub fn search(mut self, input: &Entity<InputState>) -> Self {
+        self.search = Some(input.clone());
         self
     }
 
@@ -1031,6 +1058,7 @@ impl ChatSidebar {
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
+            cleanup: self.cleanup_for(id),
             line,
             on_click: Rc::new(on_click),
             on_rename: Rc::new(on_rename),

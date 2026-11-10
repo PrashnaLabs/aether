@@ -19,6 +19,7 @@ fn removed_row_git_chip_is_not_clickable() {
         provider: Provider::Claude,
         project: None,
         model: SharedString::from(""),
+        effort: SharedString::default(),
         place: None,
         time: SharedString::from(""),
         path: SharedString::from("/repo"),

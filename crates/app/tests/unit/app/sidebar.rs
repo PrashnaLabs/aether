@@ -263,6 +263,158 @@ fn a_project_row_outside_git_says_so_once_checked() {
 }
 
 #[gpui_kit::test]
+fn sidebar_search_fuzzy_matches_chat_titles_in_every_style(cx: &mut gpui_kit::TestAppContext) {
+    use aether_core::SidebarStyle;
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        for (id, title) in [(1, "Fix login bug"), (2, "Performance audit"), (3, "Old login notes")]
+        {
+            let mut chat = crate::app::chat_with(title, &["hi", "hello"]);
+            chat.id = id;
+            chat.provider = Provider::Claude;
+            chat.archived = id == 3;
+            app.chats.push(chat);
+        }
+        app
+    });
+    cx.update_window(*window, |_, window, cx| {
+        let app = window.root::<ChatApp>().flatten().unwrap();
+        app.update(cx, |app, cx| {
+            app.sidebar_search.update(cx, |s, cx| s.set_value("flb", window, cx));
+            let titles: Vec<_> = app
+                .chat_search_results(cx)
+                .into_iter()
+                .map(|ix| app.chats[ix].title.to_string())
+                .collect();
+            assert_eq!(titles, ["Fix login bug"]);
+            app.sidebar_search.update(cx, |s, cx| s.set_value("login", window, cx));
+            assert_eq!(app.chat_search_results(cx).len(), 1, "archived chats stay out");
+        });
+    })
+    .unwrap();
+    for style in SidebarStyle::ALL {
+        window.update(cx, |app, _, _| app.settings.sidebar_style = style).unwrap();
+        cx.update_window(*window, |_, window, cx| {
+            let _ = window.draw(cx);
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
+fn search_row_opens_the_field_and_an_empty_blur_closes_it(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        let mut chat = chat_with("t", &["hi", "hello"]);
+        chat.id = 1;
+        chat.provider = Provider::Claude;
+        app.chats.push(chat);
+        app.sidebar_view = SidebarView::Projects;
+        app
+    });
+    let app = window.root(cx).unwrap();
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    let row = visual.debug_bounds("section-btn:Search").expect("Search row");
+    visual.simulate_click(row.center(), gpui_kit::Modifiers::default());
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    assert!(app.read_with(&visual, |app, _| app.sidebar_search_open));
+    assert!(visual.debug_bounds("section-btn:Search").is_none());
+    let field = visual.debug_bounds("search-field").expect("search field");
+    assert_eq!(
+        (field.origin, field.size),
+        (row.origin, row.size),
+        "the field takes the row's slot"
+    );
+    visual.update(|window, cx| {
+        let search = gpui_kit::Focusable::focus_handle(&app.read(cx).sidebar_search, cx);
+        assert!(search.is_focused(window), "opening focuses the field");
+        app.update(cx, |app, cx| {
+            app.sidebar_search.update(cx, |s, cx| s.set_value("log", window, cx));
+            app.close_empty_search(cx);
+            assert!(app.sidebar_search_open, "a query keeps the field");
+            app.sidebar_search.update(cx, |s, cx| s.set_value("", window, cx));
+            app.close_empty_search(cx);
+        });
+        let _ = window.draw(cx);
+    });
+    assert!(!app.read_with(&visual, |app, _| app.sidebar_search_open));
+    assert!(visual.debug_bounds("section-btn:Search").is_some());
+
+    let row = visual.debug_bounds("section-btn:Search").unwrap();
+    visual.simulate_click(row.center(), gpui_kit::Modifiers::default());
+    visual.simulate_input("log");
+    assert_eq!(
+        app.read_with(&visual, |app, cx| app.sidebar_search.read(cx).value().to_string()),
+        "log"
+    );
+    visual.simulate_keystrokes("escape");
+    visual.update(|window, cx| {
+        let search = gpui_kit::Focusable::focus_handle(&app.read(cx).sidebar_search, cx);
+        assert!(!search.is_focused(window), "Esc leaves the field");
+        assert!(app.read(cx).sidebar_search.read(cx).value().is_empty(), "Esc clears the query");
+    });
+}
+
+#[gpui_kit::test]
+fn finished_crew_skips_archived_and_counts_grandchildren(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        for (id, parent, archived) in
+            [(1, None, false), (2, Some(1), false), (3, Some(1), true), (4, Some(2), false)]
+        {
+            let mut chat = chat_with("t", &["hi", "hello"]);
+            chat.id = id;
+            chat.provider = Provider::Claude;
+            chat.parent = parent;
+            chat.lead = id == 1;
+            chat.archived = archived;
+            app.chats.push(chat);
+        }
+        app
+    });
+    window
+        .update(cx, |app, _, _| {
+            let mut ids = app.finished_crew(1);
+            ids.sort();
+            assert_eq!(ids, [2, 4]);
+            assert!(app.finished_crew(4).is_empty());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn every_sidebar_style_draws(cx: &mut gpui_kit::TestAppContext) {
     use aether_core::SidebarStyle;
     cx.update(gpui_kit::init);

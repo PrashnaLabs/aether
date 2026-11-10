@@ -365,11 +365,15 @@ impl ChatApp {
         if self.sidebar_view == SidebarView::Archived {
             return self.render_archive_sidebar(cx);
         }
+        if !self.sidebar_search.read(cx).value().trim().is_empty() {
+            return self.render_search_sidebar(cx);
+        }
         if self.settings.sidebar_style != SidebarStyle::Default {
             return self.render_flat_sidebar(self.settings.sidebar_style, cx);
         }
+        let chrome = self.sidebar_chrome("Aether", cx);
         let mut sidebar = self
-            .sidebar_chrome("Aether", cx)
+            .with_search(chrome, cx)
             .on_new_chat(
                 cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
             )
@@ -511,6 +515,71 @@ impl ChatApp {
         sidebar
     }
 
+    /// Open chats whose titles fuzzy-match the sidebar search, best first.
+    pub(crate) fn chat_search_results(&self, cx: &gpui_kit::App) -> Vec<usize> {
+        let query = self.sidebar_search.read(cx).value().trim().to_lowercase();
+        let mut hits: Vec<(i64, usize)> = (0..self.chats.len())
+            .filter(|&ix| !self.chats[ix].archived)
+            .filter_map(|ix| {
+                let title = &self.chats[ix].title;
+                let score =
+                    aether_explorer::fuzzy_match_path(&query, &title.to_lowercase(), title.len())?;
+                Some((score, ix))
+            })
+            .collect();
+        hits.sort_by_key(|&(score, ix)| {
+            (std::cmp::Reverse(score), std::cmp::Reverse(self.chats[ix].activity()))
+        });
+        hits.into_iter().map(|(_, ix)| ix).collect()
+    }
+
+    /// The search field while open or holding a query, else a Search row that opens it.
+    fn with_search(&self, sidebar: ChatSidebar, cx: &mut Context<Self>) -> ChatSidebar {
+        if self.sidebar_search_open || !self.sidebar_search.read(cx).value().is_empty() {
+            return sidebar.search(&self.sidebar_search);
+        }
+        sidebar.top_action(
+            gpui_kit::assets::IconName::Search,
+            "Search",
+            cx.listener(|this, _, window, cx| {
+                this.sidebar_search_open = true;
+                this.sidebar_search.update(cx, |s, cx| s.focus(window, cx));
+                cx.notify();
+            }),
+        )
+    }
+
+    /// Leaving an empty search field folds it back into its Search row.
+    pub(crate) fn close_empty_search(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_search.read(cx).value().is_empty() {
+            self.sidebar_search_open = false;
+            cx.notify();
+        }
+    }
+
+    /// Search results as one flat section, in every sidebar style.
+    fn render_search_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
+        let style = match self.settings.sidebar_style {
+            SidebarStyle::Default => SidebarStyle::Minimal,
+            style => style,
+        };
+        let results = self.chat_search_results(cx);
+        let mut sidebar = self
+            .sidebar_chrome("Aether", cx)
+            .style(style)
+            .search(&self.sidebar_search)
+            .on_new_chat(
+                cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
+            )
+            .new_chat_action(NewChat)
+            .empty("No matching chats");
+        let now = now_ms();
+        for ix in results {
+            sidebar = self.section_chat_row(sidebar, "Results".to_string(), ix, now, cx);
+        }
+        sidebar
+    }
+
     /// Minimal and Focus: agent chats in flat sections instead of project folders.
     fn render_flat_sidebar(&self, style: SidebarStyle, cx: &mut Context<Self>) -> ChatSidebar {
         let mut sidebar = self
@@ -527,13 +596,9 @@ impl ChatApp {
                     "New chat",
                     cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
                 )
-                .top_action(
-                    gpui_kit::assets::IconName::Search,
-                    "Search",
-                    cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
-                )
                 .section_tools(self.sidebar_tools(cx));
         }
+        sidebar = self.with_search(sidebar, cx);
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }
@@ -775,24 +840,50 @@ impl ChatApp {
         )
     }
 
-    fn child_cards(&self) -> std::collections::HashMap<i64, (i64, SharedString)> {
-        let mut cards: Vec<_> =
-            self.cards.iter().filter(|c| c.col != crate::board::model::Col::Done).collect();
-        cards.sort_by_key(|c| std::cmp::Reverse(c.id));
-        cards
+    /// A lead's agents that sit in the sidebar and aren't running.
+    pub(crate) fn finished_crew(&self, lead: i64) -> Vec<i64> {
+        let now = now_ms();
+        self.crew_ids(lead)
             .into_iter()
-            .flat_map(|c| c.chats.iter().map(|&chat| (chat, (c.id, c.title.clone().into()))))
+            .filter(|&id| {
+                self.chat_ix(id).is_some_and(|ix| {
+                    let chat = &self.chats[ix];
+                    !chat.archived
+                        && matches!(
+                            chat.status(now),
+                            ChatStatus::Idle | ChatStatus::Done | ChatStatus::Failed
+                        )
+                })
+            })
+            .collect()
+    }
+
+    fn finished_crews(&self) -> HashMap<i64, usize> {
+        self.chats
+            .iter()
+            .filter(|c| c.lead && !c.archived)
+            .map(|c| (c.id, self.finished_crew(c.id).len()))
+            .filter(|&(_, n)| n > 0)
             .collect()
     }
 
     /// Header and resizable edge shared by every sidebar view.
     fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
-        let (resize, resize_end, watch, handoff) =
-            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let (resize, resize_end, watch, handoff, cleanup) =
+            (cx.entity(), cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)
             .width(self.settings.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
             .now(now_ms())
-            .child_cards(self.child_cards())
+            .crew_cleanup(self.finished_crews(), move |id, kind, window, cx| {
+                cleanup.update(cx, |this, cx| {
+                    let bulk = match kind {
+                        aether_ui::CrewCleanup::Archive => Bulk::Archive,
+                        aether_ui::CrewCleanup::Delete => Bulk::Delete,
+                    };
+                    let ids = this.finished_crew(id);
+                    this.confirm_bulk(bulk, ids, window, cx);
+                })
+            })
             .handoff(
                 self.handoff_targets(None),
                 self.chats
@@ -1029,6 +1120,7 @@ impl ChatApp {
             project: (project != home_dir())
                 .then(|| folder_label(&project.display().to_string()).into()),
             model: model_label(models, &chat.model(&self.settings)).into(),
+            effort: chat.effort_level().to_string().into(),
             place,
             time: time.into(),
             path: path.into(),

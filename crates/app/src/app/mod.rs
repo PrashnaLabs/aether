@@ -544,6 +544,9 @@ pub(crate) struct ChatApp {
     /// The rename field sits in the chat's tab instead of its sidebar row.
     pub(crate) rename_in_tab: bool,
     pub(crate) rename_input: Entity<InputState>,
+    pub(crate) sidebar_search: Entity<InputState>,
+    /// The search field shows instead of its Search row; closes on blur when empty.
+    pub(crate) sidebar_search_open: bool,
     pub(crate) worktree_name_input: Entity<InputState>,
     pub(crate) worktree_base_select: Option<Entity<BranchSelectState>>,
     pub(crate) pending_worktree_dialog: bool,

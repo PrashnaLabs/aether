@@ -73,6 +73,7 @@ impl ChatApp {
             })
         });
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("Chat name"));
+        let sidebar_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search chats"));
         let btw_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(1, 5)
@@ -259,6 +260,20 @@ impl ChatApp {
                     this.save_key(window, cx);
                 }
             }),
+            cx.subscribe_in(
+                &sidebar_search,
+                window,
+                |this, _, ev: &InputEvent, window, cx| match ev {
+                    InputEvent::Change => cx.notify(),
+                    InputEvent::PressEnter { .. } => {
+                        if let Some(&ix) = this.chat_search_results(cx).first() {
+                            this.select(ix, window, cx);
+                        }
+                    }
+                    InputEvent::Blur => this.close_empty_search(cx),
+                    _ => {}
+                },
+            ),
             cx.subscribe_in(
                 &rename_input,
                 window,
@@ -549,6 +564,8 @@ impl ChatApp {
             renaming: None,
             rename_in_tab: false,
             rename_input,
+            sidebar_search,
+            sidebar_search_open: false,
             worktree_name_input,
             worktree_base_select: None,
             pending_worktree_dialog: false,

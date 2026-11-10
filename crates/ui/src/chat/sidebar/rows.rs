@@ -29,6 +29,8 @@ use std::rc::Rc;
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 pub(super) enum ChatRow {
+    /// The open chat search field, in the slot of its Search row.
+    SearchField(Entity<InputState>),
     Header {
         title: SharedString,
         on_add: Option<RowHandler>,
@@ -91,14 +93,6 @@ pub(super) enum ChatRow {
         git: bool,
         big: bool,
     },
-    CardHeader {
-        lead: i64,
-        card: i64,
-        title: SharedString,
-        count: usize,
-        depth: u8,
-        nested: bool,
-    },
     CrewMore {
         lead: i64,
         hidden: CrewSummary,
@@ -119,6 +113,7 @@ pub(super) enum ChatRow {
 impl ChatRow {
     pub(super) fn key(&self) -> SharedString {
         match self {
+            Self::SearchField(_) => "search-field".into(),
             Self::Header { title, .. } => format!("caption:{title}").into(),
             Self::Agent { ix, .. } => format!("agent:{ix}").into(),
             Self::Outside { line, .. } => format!("outside:{}", line.id).into(),
@@ -127,7 +122,6 @@ impl ChatRow {
             Self::Worktree { header, .. } => format!("worktree:{}", header.path).into(),
             Self::Chat { chat, .. } if chat.pin => format!("pin:{}", chat.id).into(),
             Self::Chat { chat, .. } => chat_key(chat.id),
-            Self::CardHeader { lead, card, .. } => format!("card:{lead}:{card}").into(),
             Self::CrewMore { lead, .. } => format!("crew-more:{lead}").into(),
             Self::SectionButton { label, .. } => format!("section-btn:{label}").into(),
         }
@@ -137,7 +131,7 @@ impl ChatRow {
         match self {
             Self::Header { collapse, .. } => collapse.is_some(),
             Self::Chat { rename_editor, .. } => rename_editor.is_none(),
-            Self::CrewMore { .. } | Self::CardHeader { .. } => false,
+            Self::CrewMore { .. } | Self::SearchField(_) => false,
             _ => true,
         }
     }
@@ -160,6 +154,30 @@ impl ChatRow {
         };
         let ring = cx.theme().ring;
         match self {
+            // same height as the Search row it replaces, so nothing moves
+            Self::SearchField(input) => div()
+                .w_full()
+                .mb_0p5()
+                .h(px(SECTION_ROW))
+                .flex()
+                .items_center()
+                .on_key_down({
+                    let input = input.clone();
+                    move |ev: &KeyDownEvent, window, cx| {
+                        if ev.keystroke.key == "escape" {
+                            cx.stop_propagation();
+                            input.update(cx, |s, cx| s.set_value("", window, cx));
+                            window.blur(cx);
+                        }
+                    }
+                })
+                .child(
+                    crate::components::field(&input)
+                        .small()
+                        .icon(IconName::Search)
+                        .aria_label("Search chats"),
+                )
+                .into_any_element(),
             Self::Header { title, on_add, collapse, tools } => h_flex()
                 .id("sidebar-heading")
                 .flex_shrink_0()
@@ -515,25 +533,12 @@ impl ChatRow {
                 );
                 (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
             }
-            Self::CardHeader { card, title, count, depth, nested, .. } => {
-                let row = h_flex()
-                    .w_full()
-                    .px_2()
-                    .pt_1p5()
-                    .pb_0p5()
-                    .gap_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .justify_between()
-                    .child(div().min_w_0().truncate().child(format!("#{card} {title}")))
-                    .child(div().flex_none().font_features(tabular()).child(count.to_string()));
-                (0..depth).fold(nest(row, nested, cx), |row, _| nest(row, true, cx))
-            }
             Self::CrewMore { lead, hidden, all, total, depth, nested } => {
                 let state = state.clone();
                 let row = h_flex()
                     .w_full()
-                    .pl(px(31.))
+                    // agent rows: px_2 padding + a 14px tile centred in a 16px slot
+                    .pl(px(9.))
                     .pr_2()
                     .py_1()
                     .gap_2()
@@ -583,8 +588,8 @@ impl ChatRow {
                 )
                 .w_full()
                 .mb_0p5()
+                .h(px(SECTION_ROW))
                 .px_2()
-                .py_1p5()
                 .gap_2()
                 .items_center()
                 .text_sm()
@@ -611,6 +616,8 @@ impl ChatRow {
         }
     }
 }
+
+const SECTION_ROW: f32 = 36.;
 
 pub fn agent_stop_label(title: &str) -> String {
     format!("Stop {title}")
@@ -835,55 +842,9 @@ impl ChatSidebar {
         }
         out.push(row);
         let mut members: Vec<_> = members.into_iter().map(Some).collect();
-        let mut visible: Vec<usize> = crew
-            .iter()
-            .zip(&shown.visible)
-            .filter(|(_, v)| **v)
-            .map(|(member, _)| member.ix)
-            .collect();
-        let cards: Vec<Option<&(i64, SharedString)>> = visible
-            .iter()
-            .map(|&ix| {
-                let grouped = all && crew.len() > 5 && self.style == SidebarStyle::Default;
-                grouped
-                    .then(|| members[ix].as_ref())
-                    .flatten()
-                    .and_then(|(chat, _)| self.cards.get(&chat.id))
-            })
-            .collect();
-        let mut seen: Vec<i64> = Vec::new();
-        let mut paired: Vec<_> = visible.iter().copied().zip(cards).collect();
-        for (_, card) in &paired {
-            if let Some((id, _)) = card
-                && !seen.contains(id)
-            {
-                seen.push(*id);
-            }
-        }
-        paired.sort_by_key(|(_, card)| {
-            card.map_or(usize::MAX, |(id, _)| seen.iter().position(|s| s == id).unwrap_or(0))
-        });
-        let (ixs, cards): (Vec<usize>, Vec<_>) = paired.into_iter().unzip();
-        visible = ixs;
-        let run = |n: usize, id: &i64| {
-            let same = |c: &Option<&(i64, SharedString)>| c.is_some_and(|(i, _)| i == id);
-            cards[n..].iter().take_while(|c| same(c)).count()
-                + cards[..n].iter().rev().take_while(|c| same(c)).count()
-        };
-        for (n, &ix) in visible.iter().enumerate() {
-            let card = cards[n].filter(|(id, _)| run(n, id) > 1);
-            if let Some((id, title)) = card
-                && n.checked_sub(1).and_then(|p| cards[p]).is_none_or(|(prev, _)| prev != id)
-            {
-                out.push(ChatRow::CardHeader {
-                    lead,
-                    card: *id,
-                    title: title.clone(),
-                    count: run(n, id),
-                    depth,
-                    nested,
-                });
-            }
+        let visible =
+            crew.iter().zip(&shown.visible).filter(|(_, v)| **v).map(|(member, _)| member.ix);
+        for ix in visible {
             if let Some((chat, rest)) = members[ix].take() {
                 self.family(chat, rest, nested, line.as_ref(), out);
             }
@@ -966,6 +927,7 @@ impl ChatSidebar {
                 count: b.count,
                 on_click: b.on_click,
             })
+            .chain(self.search.take().map(ChatRow::SearchField))
             .collect();
         if !self.agents.is_empty() {
             let collapsed = self.agents_collapse.as_ref().is_some_and(|(folded, _)| *folded);
@@ -1109,7 +1071,8 @@ impl ChatSidebar {
                 }
             }
         }
-        if rows.is_empty() {
+        if rows.iter().all(|r| matches!(r, ChatRow::SectionButton { .. } | ChatRow::SearchField(_)))
+        {
             rows.extend(self.empty.take().map(|title| ChatRow::Header {
                 tools: None,
                 title,

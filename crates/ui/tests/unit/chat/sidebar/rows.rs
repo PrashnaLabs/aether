@@ -632,6 +632,7 @@ fn line(branch: &str, added: u32) -> ChatLine {
         provider: Provider::Claude,
         project: None,
         model: "Sonnet".into(),
+        effort: SharedString::default(),
         place: Some(RowPlace::Branch { name: branch.into(), worktree: false, detached: false }),
         time: "1m".into(),
         path: "/w".into(),
@@ -654,58 +655,6 @@ fn git_flags(sidebar: &mut ChatSidebar) -> Vec<(i64, bool)> {
             _ => None,
         })
         .collect()
-}
-
-#[test]
-fn show_all_groups_consecutive_children_by_card() {
-    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 6], None);
-    sidebar.crew_open.insert(10, true);
-    sidebar.crew_all.insert(10);
-    sidebar.cards =
-        [(100, (7, "Auth".into())), (101, (7, "Auth".into())), (102, (9, "Docs".into()))].into();
-    let rows = sidebar.rows();
-    let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
-    assert_eq!(
-        keys[3..],
-        [
-            "chat:102",
-            "card:10:7",
-            "chat:101",
-            "chat:100",
-            "chat:105",
-            "chat:104",
-            "chat:103",
-            "crew-more:10"
-        ]
-    );
-    assert!(matches!(&rows[4], ChatRow::CardHeader { count: 2, card: 7, .. }));
-    assert!(!rows[4].focusable());
-}
-
-#[test]
-fn single_card_child_gets_no_header_and_keeps_its_title() {
-    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 6], None);
-    sidebar.crew_open.insert(10, true);
-    sidebar.crew_all.insert(10);
-    sidebar.cards = [(100, (7, "Auth".into()))].into();
-    let rows = sidebar.rows();
-    assert!(!keys_of(&rows).iter().any(|k| k.starts_with("card:")));
-}
-
-#[test]
-fn card_headers_need_more_than_five_children() {
-    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 5], None);
-    sidebar.crew_open.insert(10, true);
-    sidebar.crew_all.insert(10);
-    sidebar.cards = [(100, (7, "Auth".into())), (101, (7, "Auth".into()))].into();
-    assert!(!keys(&mut sidebar).iter().any(|k| k.starts_with("card:")));
-}
-
-#[test]
-fn card_headers_need_show_all() {
-    let mut sidebar = default_crew_sidebar(&[ChatStatus::Done; 2], None);
-    sidebar.cards = [(100, (7, "Auth".into()))].into();
-    assert!(!keys(&mut sidebar).iter().any(|k| k.starts_with("card:")));
 }
 
 fn with_lines(sidebar: &mut ChatSidebar, lines: &[(&str, u32)]) {
@@ -738,42 +687,6 @@ fn sub_lead_on_own_branch_shows_git_line() {
     chats.insert(2, grandchild);
     with_lines(&mut sidebar, &[("main", 3), ("wt/x", 3), ("wt/x", 3), ("main", 3)]);
     assert!(git_flags(&mut sidebar).contains(&(100, true)));
-}
-
-#[test]
-fn show_all_groups_same_card_once_across_statuses() {
-    let statuses = [
-        ChatStatus::Working { since_ms: 0 },
-        ChatStatus::Done,
-        ChatStatus::Working { since_ms: 0 },
-        ChatStatus::Done,
-        ChatStatus::Idle,
-        ChatStatus::Idle,
-    ];
-    let mut sidebar = default_crew_sidebar(&statuses, None);
-    sidebar.crew_open.insert(10, true);
-    sidebar.crew_all.insert(10);
-    sidebar.cards = [
-        (100, (7, "Auth".into())),
-        (101, (9, "Docs".into())),
-        (102, (7, "Auth".into())),
-        (103, (7, "Auth".into())),
-    ]
-    .into();
-    let rows = sidebar.rows();
-    let headers: Vec<_> = rows
-        .iter()
-        .filter_map(|r| match r {
-            ChatRow::CardHeader { card, count, .. } => Some((r.key().to_string(), *card, *count)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(headers, [("card:10:7".into(), 7, 3)]);
-    let keys: Vec<_> = rows.iter().map(|r| r.key().to_string()).collect();
-    let mut unique = keys.clone();
-    unique.sort();
-    unique.dedup();
-    assert_eq!(unique.len(), keys.len());
 }
 
 fn pinned_in_project(chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
@@ -916,7 +829,7 @@ fn pinned_child_copy_is_top_level() {
     assert!(matches!(&rows[at], ChatRow::Chat { chat, .. } if chat.depth == 0));
     let parents = parent_rows(rows.iter().map(|row| match row {
         ChatRow::Chat { chat, .. } => Tree::Chat { depth: chat.depth, pin: chat.pin },
-        ChatRow::CrewMore { .. } | ChatRow::CardHeader { .. } => Tree::Inside,
+        ChatRow::CrewMore { .. } => Tree::Inside,
         _ => Tree::Break,
     }));
     assert_eq!(parents[at], None);

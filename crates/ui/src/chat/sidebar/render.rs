@@ -142,7 +142,7 @@ impl RenderOnce for ChatSidebar {
         let focusable: Vec<bool> = rows.iter().map(ChatRow::focusable).collect();
         let parents = parent_rows(rows.iter().map(|row| match row {
             ChatRow::Chat { chat, .. } => Tree::Chat { depth: chat.depth, pin: chat.pin },
-            ChatRow::CrewMore { .. } | ChatRow::CardHeader { .. } => Tree::Inside,
+            ChatRow::CrewMore { .. } => Tree::Inside,
             _ => Tree::Break,
         }));
         let shown = rows.iter().find_map(|row| match row {

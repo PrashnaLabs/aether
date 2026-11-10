@@ -14,7 +14,7 @@ pub struct QuickOpenItem {
 /// Fuzzy matches a pre-lowercased query against a pre-lowercased path.
 /// `candidate_len` is the original path's byte length, for the distance penalty.
 /// Returns `Some(score)` if all query chars match in order.
-pub(crate) fn fuzzy_match_path(
+pub fn fuzzy_match_path(
     query_lower: &str,
     candidate_lower: &str,
     candidate_len: usize,
@@ -58,6 +58,7 @@ pub(crate) fn fuzzy_match_path(
                 || c_chars[c_idx - 1] == '_'
                 || c_chars[c_idx - 1] == '.'
                 || c_chars[c_idx - 1] == '-'
+                || c_chars[c_idx - 1] == ' '
             {
                 score += 15;
             }
