@@ -27,7 +27,13 @@ impl Render for DetachedWorkspace {
                 None => body,
             };
             let viewer = app.image_viewer_overlay(window, cx);
-            gpui_kit::div().relative().size_full().child(body).children(viewer).into_any_element()
+            gpui_kit::div()
+                .relative()
+                .size_full()
+                .on_mouse_down(gpui_kit::MouseButton::Left, crate::app::claim_title_bar_press)
+                .child(body)
+                .children(viewer)
+                .into_any_element()
         })
     }
 }

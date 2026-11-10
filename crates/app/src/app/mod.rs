@@ -845,6 +845,18 @@ pub(crate) fn apply_font_size(size: f32, window: &mut Window) {
     window.set_rem_size(px(size.clamp(12.0, 24.0)));
 }
 
+// windows: drag area = HTCAPTION, unclaimed press lets DefWindowProc start move loop, eats click.
+// buttons prevent_default on press; stop propagation marks it handled.
+pub(crate) fn claim_title_bar_press(
+    _: &gpui_kit::MouseDownEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if cfg!(target_os = "windows") && window.default_prevented() {
+        cx.stop_propagation();
+    }
+}
+
 #[cfg(test)]
 use aether_core::Update;
 

@@ -197,6 +197,7 @@ impl Render for ChatApp {
             .relative()
             .size_full()
             .track_focus(&self.focus)
+            .on_mouse_down(gpui_kit::MouseButton::Left, crate::app::claim_title_bar_press)
             .key_context(if self.page == Page::Chat { "Aether Chat" } else { "Aether" })
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 if this.page == Page::Chat {
