@@ -72,7 +72,7 @@ struct State {
     stderr: StderrTail,
     attachments: Option<PathBuf>,
     /// Content index to (tool call id, streamed argument JSON).
-    args: HashMap<u64, (String, String)>,
+    args: HashMap<u64, (String, StreamedArgs)>,
     names: HashMap<String, String>,
     retry: Option<Notice>,
     compactions: u32,
@@ -91,6 +91,49 @@ struct State {
     outbox: Vec<Value>,
     /// The model Aether set or a `/model` switched to, as `provider/id`.
     model: String,
+}
+
+/// Tracks JSON boundaries once per byte; only a closed root is parsed.
+#[derive(Default)]
+struct StreamedArgs {
+    json: String,
+    depth: usize,
+    in_string: bool,
+    escaped: bool,
+    complete: bool,
+}
+
+impl StreamedArgs {
+    fn push(&mut self, delta: &str) -> Option<Value> {
+        if self.complete {
+            return None;
+        }
+        self.json.push_str(delta);
+        for byte in delta.bytes() {
+            if self.in_string {
+                if self.escaped {
+                    self.escaped = false;
+                } else if byte == b'\\' {
+                    self.escaped = true;
+                } else if byte == b'"' {
+                    self.in_string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => self.in_string = true,
+                b'{' | b'[' => self.depth += 1,
+                b'}' | b']' => {
+                    self.depth = self.depth.saturating_sub(1);
+                    if self.depth == 0 {
+                        self.complete = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.complete.then(|| serde_json::from_str(&self.json).ok()).flatten()
+    }
 }
 
 impl PiDriver {
@@ -1298,20 +1341,16 @@ fn message_update(s: &mut State, e: &Value) -> Vec<Update> {
         Some("toolcall_start") => {
             let (id, name) = (string_of(&e["id"]), string_of(&e["toolName"]));
             let call = start(id.clone(), &name, &Value::Null);
-            s.args.insert(index, (id.clone(), String::new()));
+            s.args.insert(index, (id.clone(), StreamedArgs::default()));
             s.names.insert(id.clone(), name);
             s.tools.insert(id, call.clone());
             vec![Update::Tool(call)]
         }
         Some("toolcall_delta") => {
             let Some((id, json)) = s.args.get_mut(&index) else { return vec![] };
-            json.push_str(e["delta"].as_str().unwrap_or_default());
-            // ponytail: re-parses the whole buffer whenever it could be complete, still quadratic
-            // for args with many `}`-ending deltas
-            if !json.trim_end().ends_with('}') {
+            let Some(input) = json.push(e["delta"].as_str().unwrap_or_default()) else {
                 return vec![];
-            }
-            let Ok(input) = serde_json::from_str::<Value>(json) else { return vec![] };
+            };
             let id = id.clone();
             reclassify(s, &id, &input)
         }

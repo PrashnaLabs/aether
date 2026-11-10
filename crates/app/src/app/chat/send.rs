@@ -799,8 +799,8 @@ impl ChatApp {
         }
         if step_done {
             let folder = chat_cwd(&self.chats[ix], &self.settings.workspace_root);
-            if let Some(explorer) = self.project_explorers.get(&folder) {
-                explorer.update(cx, |exp, _| exp.refresh_tree());
+            if let Some(explorer) = self.project_explorers.get(&folder).cloned() {
+                self.refresh_explorer_tree(&explorer, None, cx);
             }
             self.check_explorer_disk(&folder, window, cx);
             if ix == self.active {

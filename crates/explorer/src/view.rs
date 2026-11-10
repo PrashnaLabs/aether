@@ -34,6 +34,8 @@ pub struct ExplorerState {
     /// Bumped per index load; results of older loads are dropped.
     pub index_generation: u64,
     index: FileIndex,
+    tree_generation: u64,
+    tree_reveal: Option<PathBuf>,
 }
 
 impl ExplorerState {
@@ -55,12 +57,39 @@ impl ExplorerState {
             grep_running: false,
             index_generation: 0,
             index: FileIndex::default(),
+            tree_generation: 0,
+            tree_reveal: None,
         }
     }
 
-    /// Re-reads the tree's open folders from disk.
-    pub fn refresh_tree(&mut self) {
-        self.tree_state.refresh();
+    /// Captures a refresh job. Run the returned closure off the UI thread.
+    /// Revealing a newly created path happens after its folders have been read.
+    pub fn begin_tree_refresh(
+        &mut self,
+        reveal: Option<PathBuf>,
+    ) -> (u64, impl FnOnce() -> (FileTreeState, FileTreeState) + Send + use<>) {
+        self.tree_generation += 1;
+        if reveal.is_some() {
+            self.tree_reveal = reveal;
+        }
+        let reveal = self.tree_reveal.clone();
+        let before = self.tree_state.clone();
+        (self.tree_generation, move || {
+            let mut refreshed = before.clone();
+            refreshed.refresh();
+            if let Some(path) = reveal {
+                refreshed.reveal(&path);
+            }
+            (before, refreshed)
+        })
+    }
+
+    /// A newer request supersedes older disk results.
+    pub fn finish_tree_refresh(&mut self, generation: u64, result: (FileTreeState, FileTreeState)) {
+        if generation == self.tree_generation {
+            self.tree_reveal = None;
+            self.tree_state.apply_refresh(&result.0, result.1);
+        }
     }
 
     /// Takes the file index of load `generation` unless a newer load started since,

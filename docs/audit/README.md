@@ -49,7 +49,8 @@ are filed as backlog cards.
 | A-PERF-1 | Medium | The 148 MB Whisper model is hashed once per (path, size, mtime) instead of on every dictation turn. |
 | A-PERF-2 | Medium | Explorer grep skips symlinks, special files and files over 10 MB. |
 | A-PERF-3 | Medium | Terminal find stops after 1000 matches. |
-| C-PERF-3 | Medium, partial | Pi `toolcall_delta` only re-parses the argument buffer when it ends with `}`. Most deltas now skip the JSON parse. Fixed by the lead. |
+| C-PERF-3 | Medium | Pi scans JSON boundaries incrementally and parses the argument buffer once when the root closes. Final arguments still classify unconditionally. |
+| A-PERF-5 | Low | Explorer directory refresh and post-operation reveal run on the background executor; results preserve intervening tree interactions and supersede older refreshes. |
 | C-PERF-4 | Low | Claude subagent activity copies at most `ACTIVITY_CHARS` characters instead of the whole buffer. |
 
 ## Changes made in lead review
@@ -104,9 +105,8 @@ Ordered by priority. Each one is a backlog card on the board.
    files evicted from the usage cache), D-PERF-3 (GTK pump slows to 250 ms
    while hidden; Linux only, not compiled on the macOS dev machine), and the
    `opencode serve` stdout scan, which now uses the capped reader.
-   A-PERF-5 is won't fix (see the slice A report). The rest of C-PERF-3
-   (re-parsing argument chunks that end with `}`) stays as a documented
-   ceiling.
+   A-PERF-5 and the remaining C-PERF-3 work are fixed in follow-up.
+   See their slice reports for the background refresh and incremental JSON scan.
 
 ## Verification
 

@@ -621,8 +621,8 @@ impl ChatApp {
             })
             .ok()?;
         let explorer = self.active_project_explorer(cx);
-        self.refresh_explorer(&explorer, cx);
-        explorer.update(cx, |exp, _| exp.reveal(&path));
+        self.refresh_explorer_tree(&explorer, Some(path.clone()), cx);
+        self.load_explorer_index(&explorer, cx);
         cx.notify();
         Some(path)
     }

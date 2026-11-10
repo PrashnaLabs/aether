@@ -1167,3 +1167,30 @@ fn a_model_switched_by_command_is_the_model_options_compare_to() {
     ev(&mut s, model);
     assert_eq!(s.model, "openrouter/glm-5");
 }
+
+#[test]
+fn fragmented_tool_arguments_scan_boundaries_once() {
+    let mut args = StreamedArgs::default();
+    assert!(args.push(r#"{"command":""#).is_none());
+    // Every fragment ends in a brace, including escaped quotes across fragments.
+    for _ in 0..10_000 {
+        assert!(args.push(r#"abc\"}"#).is_none());
+        assert!(!args.complete);
+    }
+    let input = args.push(r#"" ,"nested":[{},{"x":{}}]}"#).unwrap();
+    assert_eq!(input["command"].as_str().unwrap().len(), 50_000);
+    assert!(args.complete);
+    // A completed root cannot trigger another whole-buffer parse.
+    let len = args.json.len();
+    assert!(args.push("}").is_none());
+    assert_eq!(args.json.len(), len);
+}
+
+#[test]
+fn streamed_argument_escapes_can_cross_delta_boundaries() {
+    let mut args = StreamedArgs::default();
+    assert!(args.push("{\"command\":\"a\\").is_none());
+    assert!(args.push("\"}").is_none());
+    assert!(!args.complete);
+    assert_eq!(args.push("\"}").unwrap()["command"], "a\"}");
+}

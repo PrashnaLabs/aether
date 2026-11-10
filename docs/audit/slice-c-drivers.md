@@ -11,7 +11,7 @@ Reviewed crates/driver and crates/app/src/app/chat plus providers.rs against SEC
 | C-PERF-1 | Medium | Stream framing has no memory limit | Fixed |
 | C-SEC-2 | Low | Optional recordings retain credential-bearing tool content | Fixed permissions; secret-redaction policy documented |
 
-| C-PERF-3 | Medium | Pi reparses growing tool arguments per delta | Documented only |
+| C-PERF-3 | Medium | Pi reparses growing tool arguments per delta | Fixed in follow-up |
 | C-PERF-4 | Low | Claude copies growing activity prefix | Copy fixed; scan documented |
 | C-PERF-5 | Medium | Active reply rows rebuilt per update | Fixed |
 
@@ -61,9 +61,9 @@ Normal text/thinking deltas are owned delta strings emitted through Update and a
 
 ### C-PERF-3
 
-Severity: Medium. Location: crates/driver/src/pi.rs:1306-1312. Status: Documented only, requires incremental parser/state redesign.
+Severity: Medium. Location: `crates/driver/src/pi.rs`, `message_update` and `StreamedArgs`. Status: Fixed in follow-up.
 
-Each toolcall_delta appends with push_str, then serde_json::from_str parses the entire accumulated argument string, including incomplete prefixes. A large JSON string arriving in small fragments repeatedly scans the growing prefix, producing quadratic aggregate parsing work. toolcall_end provides final arguments, but removing intermediate parsing would change live tool classification, which existing tests exercise. Proposed fix: incremental parsing or explicitly rate-limited intermediate classification plus unconditional final classification; preserve live classification tests and add fragmented large-argument coverage.
+The earlier trailing-`}` guard still reparsed incomplete JSON whenever fragments ended in braces inside strings or nested objects. `StreamedArgs` now tracks nesting, strings and escapes across deltas, scanning each incoming byte once. It parses the accumulated JSON once when the root closes and ignores subsequent delta data for that completed root. `toolcall_end` still classifies the authoritative final arguments unconditionally. Existing live classification coverage remains; new tests cover 10,000 brace-ending fragments, nested containers and escapes split across deltas.
 
 ### C-PERF-4
 
