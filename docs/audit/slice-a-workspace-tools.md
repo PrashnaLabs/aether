@@ -32,7 +32,7 @@
 | **A-PERF-2** | Medium | `crates/explorer/src/search.rs:167` | Explorer grep reads symlinks, special files, and huge files without bounds | Fixed |
 | **A-PERF-3** | Medium | `crates/terminal/src/grid.rs:375` | Terminal find allocates unbounded matches over 10k scrollback lines on UI thread | Fixed |
 | **A-PERF-4** | Medium | `crates/app/src/explorer/editor.rs:448` | Markdown preview re-allocates and re-parses full document per render frame | Documented only |
-| **A-PERF-5** | Low | `crates/app/src/explorer/mod.rs:161` | Explorer refresh executes synchronous directory read tree walking on UI thread | Documented only |
+| **A-PERF-5** | Low | `crates/app/src/explorer/mod.rs:161` | Explorer refresh executes synchronous directory read tree walking on UI thread | Won't fix |
 | **A-PACK-1** | Low | `scripts/build.py:222`, `test_packaging.py:102` | Linux release tarballs preserve build host UID/GID; test runner hardcoded python3 | Fixed |
 
 ---
@@ -175,7 +175,7 @@
 - **Evidence:**
   While `load_explorer_index` runs off-thread on line 177, `refresh_tree` executes synchronously on line 161. On networked filesystems or deep directory structures with dozens of open folders, directory reads block the UI thread.
 - **Proposed Approach:** Dispatch `refresh_tree()` folder scanning to `cx.background_executor()` and apply updated tree nodes back on the UI thread asynchronously.
-- **Status:** Documented only (architectural async state update).
+- **Status:** Won't fix. `refresh` only lists the folders that are open, and `tree_op_done` calls `reveal` right after refreshing to select a new file. An async refresh would break that unless the reveal step were redesigned too. The cost is small compared with that risk.
 
 ---
 

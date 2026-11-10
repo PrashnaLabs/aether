@@ -99,10 +99,14 @@ Ordered by priority. Each one is a backlog card on the board.
    pending slots. `docs/orchestration.md` is updated with the new socket path.
 6. **B-SEC-6: fixed in follow-up.** You decided chats that aren't leads only see
    board cards in their own project. Leads keep `project: "all"`.
-7. **Smaller items.** B-SEC-9 is now fixed (`web_search` has a 15 s timeout). Still open: B-PERF-1 and
-   B-PERF-2 (usage scan cache), A-PERF-5 (synchronous explorer refresh),
-   D-PERF-3 (GTK pump keeps running while the browser is hidden) and the
-   remaining part of C-PERF-3.
+7. **Smaller items.** All fixed in follow-up: B-SEC-9 (`web_search` 15 s
+   timeout), B-PERF-1 (OpenCode session map built lazily), B-PERF-2 (deleted
+   files evicted from the usage cache), D-PERF-3 (GTK pump slows to 250 ms
+   while hidden; Linux only, not compiled on the macOS dev machine), and the
+   `opencode serve` stdout scan, which now uses the capped reader.
+   A-PERF-5 is won't fix (see the slice A report). The rest of C-PERF-3
+   (re-parsing argument chunks that end with `}`) stays as a documented
+   ceiling.
 
 ## Verification
 

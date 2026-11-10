@@ -37,8 +37,8 @@ What was checked and found sound:
 | B-SEC-9 | Low | `agent/src/tools/mod.rs` | `web_search` client has no timeout, body is unbounded | Fixed (15 s total timeout) |
 | B-SEC-10 | Info | `app/src/app/orchestrate.rs` `SpawnArgs::parse` | `effort` (and `model` when the probe lists none) reach CLI argv unvalidated | Documented only |
 | B-SEC-11 | Info | `app/src/hitl.rs` `enter_submits` | Enter in an Aether-owned approval line means Allow | Documented only |
-| B-PERF-1 | Low | `agent/src/usage_history/discovery.rs` | `load_opencode_session_dirs` re-reads every OpenCode session JSON on every scan | Documented only |
-| B-PERF-2 | Low | `agent/src/usage_history/aggregate.rs` | Scan cache never evicts, and the global lock is held for the whole scan | Documented only |
+| B-PERF-1 | Low | `agent/src/usage_history/discovery.rs` | `load_opencode_session_dirs` re-reads every OpenCode session JSON on every scan | Fixed |
+| B-PERF-2 | Low | `agent/src/usage_history/aggregate.rs` | Scan cache never evicts, and the global lock is held for the whole scan | Fixed (eviction); lock Documented only |
 
 ## B-SEC-1: secret answers kept in clear (Medium, Fixed)
 
@@ -115,9 +115,13 @@ Status: Fixed in backlog follow-up. `Tools::new` builds the client with a 15 s t
 
 `scan` calls `load_opencode_session_dirs()` unconditionally, which walks `opencode/storage/session` and parses every session JSON with `since_ms = 0`. Cost grows with session count and is repeated for every scan, even when no OpenCode file changed. Proposed: keep the map in a `static` keyed on the newest mtime of the session dir, or build it lazily only when an OpenCode message file is actually (re)parsed.
 
+Status: Fixed in follow-up. The map is now a `OnceCell` that is built only when an OpenCode message file misses the cache.
+
 ## B-PERF-2: usage cache growth and lock scope (Low, Documented only)
 
 `scan_cached` keeps a process-wide `Mutex<ScanCache>` locked for the whole scan, so concurrent callers queue behind a full pass. The cache entry key is the path; entries for deleted files are never dropped, and each entry holds every parsed record. A growing active session JSONL is re-read in full each scan because the cache key includes size and mtime. Proposed: prune entries not seen in the current listing, and for append-only JSONL resume from the cached length.
+
+Status: Eviction fixed in follow-up. After each scan, cache entries are dropped when the file wasn't listed and no longer exists. Files outside the time window stay cached, so widening the window doesn't re-read them. The lock scope and append-only resume are left as they are; the scan runs off the UI thread.
 
 ## Seen outside my slice
 

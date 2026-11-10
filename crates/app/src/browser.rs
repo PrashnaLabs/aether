@@ -328,6 +328,11 @@ mod host {
             });
         }
 
+        #[cfg(target_os = "linux")]
+        pub fn visible(&self) -> bool {
+            self.visible.get()
+        }
+
         pub fn set_visible(&self, visible: bool) {
             if self.visible.replace(visible) != visible {
                 if !visible {
@@ -676,15 +681,20 @@ impl Browser {
         }
     }
 
-    /// GTK has no loop of its own here; turn it by hand so pages render.
+    /// GTK has no loop of its own here; turn it by hand so pages render, slower while hidden.
     #[cfg(target_os = "linux")]
     fn pump_gtk(&self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
+            let mut shown = true;
             loop {
-                cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
-                if this.update(cx, |_, _| ()).is_err() {
+                let ms = if shown { 16 } else { 250 };
+                cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+                let Ok(visible) =
+                    this.update(cx, |b, _| b.host.as_ref().is_some_and(|h| h.visible()))
+                else {
                     break;
-                }
+                };
+                shown = visible;
                 while gtk::events_pending() {
                     gtk::main_iteration_do(false);
                 }

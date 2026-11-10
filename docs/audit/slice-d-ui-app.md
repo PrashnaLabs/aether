@@ -33,7 +33,7 @@ for both touched crates (results below). No GUI launched.
 | D-PERF-1 | Medium | `crates/ui/src/chat/markdown.rs` | `set_text` re-parsed every markdown block on every frame | Fixed |
 | D-PERF-2 | Medium | `crates/app/src/session_workspace/persistence.rs`, `app/render.rs` | Workspace+drafts JSON serialized on every render | Fixed |
 | D-SEC-3 | Low | `crates/app/src/attachments.rs` | `store_bytes` itself had no size cap; conversion could exceed 20 MB | Fixed |
-| D-PERF-3 | Low | `crates/app/src/browser.rs` | Linux GTK pump loops every 16 ms even when hidden | Documented only |
+| D-PERF-3 | Low | `crates/app/src/browser.rs` | Linux GTK pump loops every 16 ms even when hidden | Fixed |
 
 ### Reviewed, no finding
 - `open_in.rs`: `open` requires absolute folders; `open_url` allowlists
@@ -173,7 +173,7 @@ Impact: constant wakeups/battery on Linux; no correctness issue.
 Fix (proposed, not applied): only pump while `native_visible()` (or after
 `host.set_visible(true)`), waking on show. Not applied: Linux-only path,
 hard to verify here.
-Status: Documented only.
+Status: Fixed in follow-up. While the webview is hidden the pump runs every 250 ms instead of every 16 ms. It doesn't stop completely, so pages keep loading in the background. This is Linux-only code and was not compiled on the macOS dev machine, so it needs a Linux build to verify.
 
 ## Seen outside my slice (not edited)
 - `crates/app/src/app/chat/manage.rs:678` — `NoticeLink::Open(url) =>
