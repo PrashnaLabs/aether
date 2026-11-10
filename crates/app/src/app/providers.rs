@@ -513,11 +513,13 @@ impl ChatApp {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut Settings),
     ) {
-        let detail = self.settings.chat_detail;
+        let (detail, hooks) = (self.settings.chat_detail, self.settings.show_hooks);
         f(&mut self.settings);
         settings::save(&self.settings);
         if self.settings.chat_detail != detail {
             self.reset_rows(cx);
+        } else if self.settings.show_hooks != hooks {
+            self.sync_rows(None, cx);
         }
         cx.notify();
     }

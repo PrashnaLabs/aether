@@ -143,21 +143,24 @@ pub(in crate::app) fn tool_record(c: &aether_core::ToolCall, max: usize) -> Opti
 /// block changed are remeasured regardless.
 pub(in crate::app) enum Changed {
     Blocks,
-    Thought,
+    /// Text was appended; holds the reply's text length before.
+    Text(usize),
+    /// Thinking was appended; holds the reply's step count before.
+    Thought(usize),
     Tool(String),
     All,
 }
 
 impl Changed {
-    pub(in crate::app) fn of(update: &Update) -> Self {
+    pub(in crate::app) fn of(update: &Update, reply: &Message) -> Self {
         match update {
-            Update::Delta(_)
-            | Update::Usage(_)
+            Update::Delta(_) => Self::Text(reply.text.len()),
+            Update::Usage(_)
             | Update::Window(_)
             | Update::Count { .. }
             | Update::Cost(_)
             | Update::Model(_) => Self::Blocks,
-            Update::Thinking(_) => Self::Thought,
+            Update::Thinking(_) => Self::Thought(reply.steps.len()),
             Update::Tool(call) => Self::Tool(call.id.clone()),
             _ => Self::All,
         }
@@ -407,6 +410,41 @@ impl ChatApp {
         self.sync(touched.map(|m| (m, Changed::All)), cx);
     }
 
+    /// Brings the rows up to date in place when the live reply only grew its last text
+    /// run or an open thought, returning the rows to remeasure. `None` when the update
+    /// may change the row structure, so the caller rebuilds.
+    fn extend_tail(&mut self, m: usize, changed: &Changed) -> Option<Vec<Range<usize>>> {
+        let chat = &self.chats[self.active];
+        let reply = chat.messages.get(m)?;
+        match *changed {
+            Changed::Thought(steps) => (reply.steps.len() == steps).then(Vec::new),
+            Changed::Text(old) => {
+                let partial = reply.text.get(..old)?.rsplit('\n').next()?;
+                let line = partial.trim_start_matches(' ');
+                // a fence could open on the unfinished line, moving earlier splits
+                let fence =
+                    line.starts_with(['`', '~']) || (line.is_empty() && !partial.is_empty());
+                let last = self.rows.len().checked_sub(1)?;
+                let row = &mut self.rows[last];
+                let Block::Text(range) = &mut row.block else { return None };
+                if fence
+                    || chat.cancel.is_none()
+                    || m + 1 != chat.messages.len()
+                    || row.message != m
+                    || range.end != old
+                    || range.start >= old
+                    || reply.step_positions.iter().any(|&p| p > old)
+                    || reply.requests.iter().any(|r| r.at > old)
+                {
+                    return None;
+                }
+                range.end = reply.text.len();
+                Some((range.end > old).then_some(last..last + 1).into_iter().collect())
+            }
+            _ => None,
+        }
+    }
+
     /// `sync_rows`, remeasuring only the rows of `touched` that `changed` may resize.
     /// Rows keep their place while they grow, so a reader scrolled into one stays put.
     pub(in crate::app) fn sync(
@@ -418,20 +456,25 @@ impl ChatApp {
         let last = self.rows.last().map_or(0, |r| r.message);
         let from = touched.as_ref().map_or(0, |(m, _)| (*m).min(last));
         let at = self.rows.partition_point(|r| r.message < from);
-        let rows = self.build_rows(from, cx);
-        let (splices, changed) = row_splice(&self.rows[at..], &rows);
-        self.rows.truncate(at);
-        self.rows.extend(rows);
-        let mut resized: Vec<Range<usize>> =
-            changed.into_iter().map(|r| at + r..at + r + 1).collect();
+        let (splices, mut resized) =
+            match touched.as_ref().and_then(|(m, changed)| self.extend_tail(*m, changed)) {
+                Some(resized) => (Vec::new(), resized),
+                None => {
+                    let rows = self.build_rows(from, cx);
+                    let (splices, changed) = row_splice(&self.rows[at..], &rows);
+                    self.rows.truncate(at);
+                    self.rows.extend(rows);
+                    (splices, changed.into_iter().map(|r| at + r..at + r + 1).collect())
+                }
+            };
         if let Some((m, changed)) = touched {
             let start = self.rows.partition_point(|r| r.message < m);
             let end = self.rows.partition_point(|r| r.message <= m);
             let steps = self.chats[self.active].messages.get(m).map_or(&[][..], |m| &m.steps);
             let one = |r: usize| r..r + 1;
             match changed {
-                Changed::Blocks => {}
-                Changed::Thought => resized.extend(
+                Changed::Blocks | Changed::Text(_) => {}
+                Changed::Thought(_) => resized.extend(
                     (start..end)
                         .rev()
                         .find(|&r| {

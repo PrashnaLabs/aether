@@ -196,3 +196,123 @@ fn tool_records_show_what_ran_with_output_tails() {
     let read = ToolCall::new("1", "T", ToolDetail::Read { path: "README.md".into(), range: None });
     assert_eq!(tool_record(&read, 600).unwrap(), "- Read README.md");
 }
+
+fn stream_app(window: &mut Window, cx: &mut Context<ChatApp>) -> ChatApp {
+    ChatApp::with_state(
+        aether_agent::Agent::new().unwrap(),
+        aether_core::Settings::default(),
+        None,
+        None,
+        false,
+        window,
+        cx,
+    )
+}
+
+fn live_reply(app: &mut ChatApp, updates: Vec<Update>, cx: &mut App) {
+    let chat = &mut app.chats[app.active];
+    chat.messages = vec![Message::user("go"), Message::assistant()];
+    for update in updates {
+        chat.messages[1].apply(update);
+    }
+    chat.cancel = Some(aether_agent::Cancel::inert());
+    app.rows = app.build_rows(0, cx);
+}
+
+fn stream(app: &mut ChatApp, update: Update) -> Changed {
+    let reply = &mut app.chats[app.active].messages[1];
+    let changed = Changed::of(&update, reply);
+    reply.apply(update);
+    changed
+}
+
+fn run(id: &str) -> Update {
+    Update::Tool(aether_core::ToolCall::new(id, "Run", aether_core::ToolDetail::Plain("x".into())))
+}
+
+#[gpui_kit::test]
+fn a_text_delta_on_the_last_block_extends_its_row_without_a_rebuild(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(stream_app);
+    window
+        .update(cx, |app, _, cx| {
+            let start = vec![
+                Update::Delta("Looking".into()),
+                run("a"),
+                Update::Delta(" closer\n".into()),
+                run("b"),
+                run("c"),
+                Update::Delta("Found ".into()),
+            ];
+            live_reply(app, start, cx);
+            let before = app.rows.len();
+            let changed = stream(app, Update::Delta("it".into()));
+            let resized = app.extend_tail(1, &changed).expect("fast path");
+            assert_eq!(resized, vec![before - 1..before]);
+            assert_eq!(app.rows, app.build_rows(0, cx));
+            let changed = stream(app, Update::Delta(" at last\n".into()));
+            app.sync(Some((1, changed)), cx);
+            assert_eq!(app.rows, app.build_rows(0, cx));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn structural_deltas_and_unsure_cases_still_rebuild(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(stream_app);
+    window
+        .update(cx, |app, _, cx| {
+            let full = |app: &mut ChatApp, update, cx: &mut App| {
+                let changed = stream(app, update);
+                assert!(app.extend_tail(1, &changed).is_none());
+                app.rows = app.build_rows(0, cx);
+            };
+            live_reply(app, vec![Update::Delta("a".into()), run("a")], cx);
+            full(app, Update::Delta("b".into()), cx);
+            live_reply(
+                app,
+                vec![Update::Delta("`".into()), run("a"), Update::Delta("`".into())],
+                cx,
+            );
+            full(app, Update::Delta("`".into()), cx);
+            live_reply(app, vec![run("a")], cx);
+            full(app, Update::Delta("first text".into()), cx);
+            live_reply(
+                app,
+                vec![Update::Delta("a".into()), run("a"), Update::Delta("b".into())],
+                cx,
+            );
+            full(app, run("b"), cx);
+            live_reply(
+                app,
+                vec![Update::Delta("a".into()), run("a"), Update::Delta("b".into())],
+                cx,
+            );
+            app.chats[app.active].cancel = None;
+            full(app, Update::Delta("c".into()), cx);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn growing_the_open_thought_keeps_the_rows_and_a_new_one_rebuilds(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(stream_app);
+    window
+        .update(cx, |app, _, cx| {
+            live_reply(app, vec![run("a"), Update::Thinking("hm".into())], cx);
+            let changed = stream(app, Update::Thinking(" more".into()));
+            assert_eq!(app.extend_tail(1, &changed), Some(Vec::new()));
+            assert_eq!(app.rows, app.build_rows(0, cx));
+            let changed = stream(app, run("b"));
+            assert!(app.extend_tail(1, &changed).is_none());
+            let changed = stream(app, Update::Thinking("again".into()));
+            assert!(app.extend_tail(1, &changed).is_none());
+        })
+        .unwrap();
+}

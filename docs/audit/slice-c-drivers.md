@@ -13,7 +13,7 @@ Reviewed crates/driver and crates/app/src/app/chat plus providers.rs against SEC
 
 | C-PERF-3 | Medium | Pi reparses growing tool arguments per delta | Documented only |
 | C-PERF-4 | Low | Claude copies growing activity prefix | Copy fixed; scan documented |
-| C-PERF-5 | Medium | Active reply rows rebuilt per update | Documented only |
+| C-PERF-5 | Medium | Active reply rows rebuilt per update | Fixed |
 
 ## C-PERF-1
 
@@ -73,8 +73,10 @@ Subagent text deltas append to sub_text, scan the accumulated prefix for a newli
 
 ### C-PERF-5
 
-Severity: Medium. Location: crates/app/src/app/chat/send.rs:790-797; crates/app/src/app/chat/mod.rs:365-435. Status: Documented only, requires incremental row-state design.
+Severity: Medium. Location: crates/app/src/app/chat/send.rs:790-797; crates/app/src/app/chat/mod.rs:365-435. Status: Fixed.
 
 Every active streamed update calls sync, which calls build_rows from the touched reply and constructs a fresh Vec of TranscriptRow values before computing splices. For the current reply, growing tool/step history is revisited even when only the final text/thought block changed. This scales with reply size per event, though it does not clone all Message vectors. Proposed fix: update the affected row and append new blocks incrementally, retaining full rebuilding for structural events; verify row splice and thought/tool remeasurement behavior. No full transcript cloning or per-delta sorting was confirmed in this path.
+
+Fix: `ChatApp::extend_tail` (crates/app/src/app/chat/mod.rs) runs before the rebuild in `sync`. For a text delta it extends the last `Block::Text` row in place and remeasures only that row; for thinking that adds no step it leaves the rows untouched and keeps the existing thought remeasure. It only applies when the chat is busy, the reply is the last message, the last row is a `Text` ending at the old text length, no step or request position lies past it, and the old unfinished line cannot open a code fence (which would move earlier splits). Anything else (first text, text after a tool or thought, new step, request, non-live reply, fold change) returns `None` and takes the full `build_rows` + `row_splice` path. `Changed` now carries the pre-update text length and step count for this check, and toggling `show_hooks` now resyncs rows because the fast path no longer rebuilds on every delta. Tests in crates/app/tests/unit/app/chat/mod.rs compare the fast result with a full `build_rows`.
 
 Follow-up verification: `CARGO_TARGET_DIR=/Users/iris/Downloads/xzx/PERSONAL/aether/target cargo clippy --locked -p aether-driver --all-targets` passed, including a final recheck. `cargo test --locked -p aether-driver` with the same target directory passed. `cargo fmt --all -- --check` and `git diff --check` passed. No app crate source changed. No commits were made.

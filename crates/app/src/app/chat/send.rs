@@ -727,7 +727,7 @@ impl ChatApp {
                     return;
                 };
                 let target = route(&chat.messages, last, &update);
-                let changed = Changed::of(&update);
+                let changed = Changed::of(&update, &chat.messages[target]);
                 chat.messages[target].apply(update);
                 if ix == self.active {
                     self.sync(Some((target, changed)), cx);
@@ -787,7 +787,7 @@ impl ChatApp {
         }
         let step_done = matches!(&update, Update::Tool(call) if call.status != ToolStatus::Running);
         let target = route(&chat.messages, reply_ix, &update);
-        let changed = Changed::of(&update);
+        let changed = Changed::of(&update, &chat.messages[target]);
         chat.messages[target].apply(update);
         if save_due(now, chat.saved_ms) {
             chat.saved_ms = now;
