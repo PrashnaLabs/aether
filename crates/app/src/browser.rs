@@ -454,6 +454,8 @@ pub(crate) struct Browser {
     pub(crate) watch_strip: bool,
     /// Toolbar sits under the macOS traffic lights.
     pub(crate) lights: bool,
+    /// Toolbar ends under the window controls.
+    pub(crate) controls: bool,
     browsers: Vec<OpenApp>,
     browsers_found: bool,
     selected_browser: Option<usize>,
@@ -535,6 +537,7 @@ impl Browser {
             shown: false,
             covered: false,
             lights: false,
+            controls: false,
             watch_strip: true,
             browsers: Vec::new(),
             browsers_found: false,
@@ -960,7 +963,8 @@ impl Render for Browser {
                             cx.notify();
                         }
                     })),
-            );
+            )
+            .when(self.controls, |t| t.child(aether_ui::window_controls_gap(window)));
         let host = self.host.clone();
         let open_error = self.open_error.clone().map(|e| {
             div()

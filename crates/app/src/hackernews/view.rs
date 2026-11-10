@@ -18,7 +18,10 @@ impl ChatApp {
     ) -> impl IntoElement {
         if self.hn_reader_open {
             let lights = self.settings.sidebar_collapsed;
-            self.hn_browser.update(cx, |b, _| b.lights = lights);
+            self.hn_browser.update(cx, |b, _| {
+                b.lights = lights;
+                b.controls = true;
+            });
             return v_flex()
                 .id("hackernews-reader")
                 .size_full()
