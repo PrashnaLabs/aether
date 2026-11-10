@@ -595,23 +595,7 @@ impl ChatApp {
         );
 
         if is_agent {
-            let pop = self.render_workspace_pop(window, cx);
-            let open = pop.is_some();
-            let toggle = icon_chip("workspace-toggle", open, cx)
-                .selected(open)
-                .toggled(open)
-                .icon(Lucide::LayoutList)
-                .accessibility_label("Workspace")
-                .tooltip("Workspace")
-                .when(!open, |d| {
-                    d.on_click(self.session_listener(cx, |this, _, window, cx| {
-                        this.toggle_workspace_pop(window, cx)
-                    }))
-                });
-            let workspace_btn =
-                anchored_popup("workspace-pop-anchor", toggle, &self.workspace_pop.trigger, true)
-                    .anchor(Anchor::TopRight)
-                    .when_some(pop, |p, pop| p.content(pop));
+            let workspace_btn = self.workspace_button(window, cx);
 
             let btw = icon_chip("btw-toggle", self.btw_open, cx)
                 .selected(self.btw_open)
@@ -758,6 +742,26 @@ impl ChatApp {
         }
     }
 
+    fn workspace_button(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let pop = self.render_workspace_pop(window, cx);
+        let open = pop.is_some();
+        let toggle = icon_chip("workspace-toggle", open, cx)
+            .selected(open)
+            .toggled(open)
+            .icon(Lucide::LayoutList)
+            .accessibility_label("Workspace")
+            .tooltip("Workspace")
+            .when(!open, |d| {
+                d.on_click(self.session_listener(cx, |this, _, window, cx| {
+                    this.toggle_workspace_pop(window, cx)
+                }))
+            });
+        anchored_popup("workspace-pop-anchor", toggle, &self.workspace_pop.trigger, true)
+            .anchor(Anchor::TopRight)
+            .when_some(pop, |p, pop| p.content(pop))
+            .into_any_element()
+    }
+
     fn right_panel_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let tabs = Surface::tabs(
             self.btw_open,
@@ -861,23 +865,7 @@ impl ChatApp {
                 .tooltip("Add tab")
                 .dropdown_menu_with_anchor(Anchor::TopRight, add),
         );
-        let pop = self.render_workspace_pop(window, cx);
-        let open = pop.is_some();
-        let toggle = icon_chip("workspace-toggle", open, cx)
-            .selected(open)
-            .toggled(open)
-            .icon(Lucide::LayoutList)
-            .accessibility_label("Workspace")
-            .tooltip("Workspace")
-            .when(!open, |d| {
-                d.on_click(self.session_listener(cx, |this, _, window, cx| {
-                    this.toggle_workspace_pop(window, cx)
-                }))
-            });
-        let workspace_btn =
-            anchored_popup("workspace-pop-anchor", toggle, &self.workspace_pop.trigger, true)
-                .anchor(Anchor::TopRight)
-                .when_some(pop, |p, pop| p.content(pop));
+        let workspace_btn = self.workspace_button(window, cx);
         bar = bar.action(workspace_btn);
         if self.settings.chat_layout != ChatLayout::Split {
             bar = bar.action(
@@ -900,7 +888,7 @@ impl ChatApp {
         bar.into_any_element()
     }
 
-    fn right_panel_rail(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn right_panel_rail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let under_controls = self.host_of(window) == 0
             && cfg!(any(target_os = "linux", target_os = "windows"))
             && !window.is_fullscreen();
@@ -941,7 +929,7 @@ impl ChatApp {
                     })),
             );
         }
-        rail.into_any_element()
+        rail.child(self.workspace_button(window, cx)).into_any_element()
     }
 
     pub(crate) fn side_panel_sidebar(

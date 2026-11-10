@@ -2,53 +2,64 @@ use super::*;
 use gpui_kit::TestAppContext;
 
 #[gpui_kit::test]
-fn workspace_popover_opens_in_the_tabbed_chat(cx: &mut TestAppContext) {
+fn workspace_popover_opens_in_all_chat_layouts(cx: &mut TestAppContext) {
     use gpui_kit::VisualTestContext;
     cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     cx.update(crate::actions::bind_keys);
-    let (main, app) = cx.update(|cx| {
-        gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
-            cx.new(|cx| {
-                ChatApp::with_state(
-                    Agent::new().unwrap(),
-                    Settings::default(),
-                    None,
-                    None,
-                    false,
-                    window,
-                    cx,
-                )
+    for (layout, collapsed) in [
+        (aether_core::ChatLayout::Sidebar, true),
+        (aether_core::ChatLayout::Sidebar, false),
+        (aether_core::ChatLayout::Split, false),
+        (aether_core::ChatLayout::Tabbed, false),
+    ] {
+        let (main, app) = cx.update(|cx| {
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| {
+                    ChatApp::with_state(
+                        Agent::new().unwrap(),
+                        Settings {
+                            chat_layout: layout,
+                            right_panel_collapsed: collapsed,
+                            ..Settings::default()
+                        },
+                        None,
+                        None,
+                        false,
+                        window,
+                        cx,
+                    )
+                })
             })
+            .unwrap()
+        });
+        cx.update_window(main, |_, window, cx| {
+            app.update(cx, |app, cx| {
+                app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
+                app.listing_worktrees = true;
+                app.chats[app.active].provider = aether_core::Provider::Codex;
+                app.workspace_pop.machine = Some("Test machine".into());
+                assert!(app.side_full && app.side_open());
+                cx.notify();
+            });
+            let _ = window.draw(cx);
         })
-        .unwrap()
-    });
-    cx.update_window(main, |_, window, cx| {
-        app.update(cx, |app, cx| {
-            app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
-            app.listing_worktrees = true;
-            app.chats[app.active].provider = aether_core::Provider::Codex;
-            app.workspace_pop.machine = Some("Test machine".into());
-            assert!(app.side_full && app.side_open());
-            cx.notify();
-        });
-        let _ = window.draw(cx);
-    })
-    .unwrap();
-    let mut visual = VisualTestContext::from_window(main, cx);
-    for _ in 0..2 {
-        let bounds = visual.read(|cx| app.read(cx).workspace_pop.trigger.get());
-        assert!(bounds.size.width > gpui_kit::px(0.), "Workspace button must be rendered");
-        visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
-        visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
-        visual.read(|cx| {
-            assert!(
-                app.read(cx).workspace_pop.open,
-                "clicking the Workspace button must open the Workspace popover"
-            )
-        });
-        visual.simulate_keystrokes("escape");
-        visual.read(|cx| assert!(!app.read(cx).workspace_pop.open));
+        .unwrap();
+        let mut visual = VisualTestContext::from_window(main, cx);
+        for _ in 0..2 {
+            let bounds = visual.read(|cx| app.read(cx).workspace_pop.trigger.get());
+            assert!(bounds.size.width > gpui_kit::px(0.), "Workspace button must be rendered");
+            visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
+            visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+            visual.read(|cx| {
+                assert!(
+                    app.read(cx).workspace_pop.open,
+                    "clicking the Workspace button must open the Workspace popover"
+                )
+            });
+            visual.simulate_keystrokes("escape");
+            visual.read(|cx| assert!(!app.read(cx).workspace_pop.open));
+        }
     }
 }
 
