@@ -170,7 +170,7 @@ impl ChatApp {
             .collect();
         let finished = self.finished_crew(id);
         let options = crew_options(id, Some(&crew), &finished);
-        let picked = Rc::new(std::cell::Cell::new(if crew.is_empty() { 0 } else { 1 }));
+        let picked = Rc::new(std::cell::Cell::new(0));
         let view = cx.entity();
         aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
             let (view, options, picked) = (view.clone(), options.clone(), picked.clone());
@@ -785,8 +785,8 @@ impl ChatApp {
     }
 }
 
-/// What a lead's Archive or Delete reaches: just the lead, the lead with its whole crew
-/// (`crew` is `None` when the lead can't go), or only its agents that aren't running.
+/// Archive or Delete reaches the lead with its whole crew, or only finished agents.
+/// `crew` is `None` when the lead can't go. An empty crew is a standalone chat.
 pub(crate) fn crew_options(
     lead: i64,
     crew: Option<&[i64]>,
@@ -795,11 +795,13 @@ pub(crate) fn crew_options(
     let agents = |n: usize| if n == 1 { "1 agent".to_string() } else { format!("{n} agents") };
     let mut options = Vec::new();
     if let Some(crew) = crew {
-        options.push(("Only this chat".to_string(), vec![lead]));
-        if !crew.is_empty() {
-            let all = crew.iter().copied().chain([lead]).collect();
-            options.push((format!("This chat and all its {}", agents(crew.len())), all));
-        }
+        let all = crew.iter().copied().chain([lead]).collect();
+        let label = if crew.is_empty() {
+            "This chat".to_string()
+        } else {
+            format!("This chat and all its {}", agents(crew.len()))
+        };
+        options.push((label, all));
     }
     if !finished.is_empty() {
         let n = finished.len();
@@ -818,7 +820,7 @@ fn crew_scope(
     picked: &Rc<std::cell::Cell<usize>>,
 ) -> AnyElement {
     let pick = picked.clone();
-    let only_lead = labels.len() == 1 && labels[0] == "Only this chat";
+    let only_lead = labels.len() == 1 && labels[0] == "This chat";
     v_flex()
         .gap_3()
         .child(div().child(text))
