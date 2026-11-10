@@ -83,7 +83,7 @@ impl ChatApp {
             .when(copy_it && self.settings.notes_enabled, |footer| {
                 footer.on_save_note(move |_, window, cx| {
                     save_note.update(cx, |this, cx| {
-                        this.notes_form(crate::notes::Form::Capture, note_text.clone(), window, cx);
+                        this.save_chat_note(note_text.clone(), window, cx);
                     });
                 })
             })

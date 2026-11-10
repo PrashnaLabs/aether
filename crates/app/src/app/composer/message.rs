@@ -113,12 +113,7 @@ impl ChatApp {
                         menu.item(PopupMenuItem::new("Save to note").on_click(
                             move |_, window, cx| {
                                 save_note.update(cx, |this, cx| {
-                                    this.notes_form(
-                                        crate::notes::Form::Capture,
-                                        note_text.clone(),
-                                        window,
-                                        cx,
-                                    );
+                                    this.save_chat_note(note_text.clone(), window, cx);
                                 });
                             },
                         ))
@@ -317,7 +312,7 @@ impl ChatApp {
             .when(self.settings.notes_enabled, |row| {
                 row.on_save_note(move |_, window, cx| {
                     save_note.update(cx, |this, cx| {
-                        this.notes_form(crate::notes::Form::Capture, note_text.clone(), window, cx);
+                        this.save_chat_note(note_text.clone(), window, cx);
                     });
                 })
             })
