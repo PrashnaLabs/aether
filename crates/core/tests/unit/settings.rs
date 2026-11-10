@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn account_env_follows_the_chosen_account_per_provider() {
+    let mut s: Settings = serde_json::from_str(
+        r#"{"accounts":[
+            {"provider":"claude","name":"work","dir":"/w/claude"},
+            {"provider":"codex","name":"alt","dir":"/w/codex"},
+            {"provider":"claude","name":"blank","dir":" "}],
+          "default_accounts":{"claude":"work","codex":"alt"}}"#,
+    )
+    .unwrap();
+    let pair = |k: &str, v: &str| vec![(k.to_string(), v.to_string())];
+    assert_eq!(s.account_env(Provider::Claude), pair("CLAUDE_CONFIG_DIR", "/w/claude"));
+    assert_eq!(s.account_env(Provider::Codex), pair("CODEX_HOME", "/w/codex"));
+    assert!(s.account_env(Provider::OpenCode).is_empty());
+    s.default_accounts.insert("claude".into(), "blank".into());
+    assert!(s.account_env(Provider::Claude).is_empty());
+    s.default_accounts.insert("claude".into(), "gone".into());
+    assert!(s.account_env(Provider::Claude).is_empty());
+    assert!(Settings::default().account_env(Provider::Claude).is_empty());
+}
+
+#[test]
 fn missing_fields_fall_back_to_defaults() {
     let settings: Settings =
         serde_json::from_str(r#"{ "appearance": "dark", "reasoning": "off" }"#).unwrap();
@@ -14,10 +35,10 @@ fn missing_fields_fall_back_to_defaults() {
 #[test]
 fn provider_defaults_to_openrouter_with_empty_overrides() {
     let s = Settings::default();
-    assert_eq!(s.provider, Provider::OpenRouter);
+    assert_eq!((s.provider, s.provider()), (None, Provider::OpenRouter));
     assert!(s.provider_models.is_empty() && s.claude_binary.is_empty());
     let parsed: Settings = serde_json::from_str(r#"{"model":"x"}"#).unwrap();
-    assert_eq!(parsed.provider, Provider::OpenRouter);
+    assert_eq!(parsed.provider(), Provider::OpenRouter);
 }
 
 #[test]

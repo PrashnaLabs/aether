@@ -97,6 +97,12 @@ helper starts on the lead's own provider. The reply includes `quota_left` (the
 chosen provider's tightest percent left) when quota decided the pick. The
 model is the last one used on that provider, or the CLI's default. Naming a
 provider explicitly skips all of this.
+`message_agent` also reaches chats that aren't the lead's children (not
+the lead itself, not archived). Their answers don't come back on their own;
+read them with `read_history` and the chat's `id`, which leads can pass to
+read any chat. A negative `offset` counts back from the end, so `-3` reads
+the last three messages. `list_chats` and the other chat filters take
+`search`, words that must all appear in the title.
 
 ## Linux troubleshooting
 

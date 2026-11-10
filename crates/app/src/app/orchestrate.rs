@@ -14,7 +14,7 @@ use super::providers::{USAGE_STALE_MS, initial_model};
 use super::{
     Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir,
 };
-use crate::board::model::{Col, lead_move, open_lines};
+use crate::board::model::{Col, card_lines, lead_move, lead_update};
 use crate::session_workspace::SplitAxis;
 
 pub(crate) fn lead_capable(provider: Provider) -> bool {
@@ -270,7 +270,10 @@ impl ChatApp {
                 }
                 "read_history" => self.read_history(ix, &call.args),
                 _ if !self.chats[ix].lead
-                    && !matches!(call.tool.as_str(), "list_cards" | "add_card" | "move_card") =>
+                    && !matches!(
+                        call.tool.as_str(),
+                        "list_cards" | "add_card" | "move_card" | "update_card"
+                    ) =>
                 {
                     Err("lead chat not found".to_string())
                 }
@@ -279,14 +282,10 @@ impl ChatApp {
                 "read_agent" => self.read_agent(ix, &call.args),
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
-                "list_cards" => {
-                    let project = self.lead_project(ix);
-                    let cards: Vec<_> =
-                        self.cards.iter().filter(|c| c.project == project).cloned().collect();
-                    Ok(Value::String(open_lines(&cards)))
-                }
+                "list_cards" => self.list_cards(ix, &call.args),
                 "add_card" => self.add_card(ix, &call.args),
                 "move_card" => self.move_card(ix, &call.args),
+                "update_card" => self.update_card(ix, &call.args),
                 "list_chats" => self.list_chats(ix, &call.args),
                 "archive_chats" => self.ask_bulk(ix, Bulk::Archive, &call.args, window, cx),
                 "delete_chats" => self.ask_bulk(ix, Bulk::Delete, &call.args, window, cx),
@@ -378,6 +377,47 @@ impl ChatApp {
         Ok(Value::String(msg))
     }
 
+    fn list_cards(&self, ix: usize, args: &Value) -> Result<Value, String> {
+        let f = super::control::parse_card_filter(args)?;
+        let cards: Vec<_> = self
+            .matching_cards(ix, &f)
+            .into_iter()
+            .filter(|c| f.col.is_some() || f.ids.is_some() || c.col != Col::Done)
+            .cloned()
+            .collect();
+        let bodies = args["bodies"] == true;
+        Ok(Value::String(card_lines(&cards, bodies, &self.lead_project(ix))))
+    }
+
+    fn update_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_i64()
+            .or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()))
+            .ok_or_else(|| r#"missing "id""#.to_string())?;
+        if let Some(chat) = args["chat"].as_i64()
+            && self.chat_ix(chat).is_none()
+        {
+            return Err(format!("chat {chat} not found"));
+        }
+        let before = args["before"].as_i64();
+        let project = self.lead_project(lead_ix);
+        let card = self
+            .cards
+            .iter_mut()
+            .find(|c| c.id == id && c.project == project)
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        let from = card.col;
+        let msg = lead_update(card, args)?;
+        card.updated_at = now_ms();
+        let col = card.col;
+        if col == from && before.is_none() {
+            self.board_save(id);
+        } else {
+            self.board_move(id, col, before);
+        }
+        Ok(Value::String(msg))
+    }
+
     pub(super) fn own_child(&self, lead_ix: usize, args: &Value) -> Result<usize, String> {
         let id = args["id"]
             .as_i64()
@@ -435,7 +475,20 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
-        let ix = self.own_child(lead_ix, args)?;
+        let ix = self.target(args)?;
+        if ix == lead_ix {
+            return Err("a lead can't message itself".into());
+        }
+        if self.chats[ix].archived {
+            return Err(format!("chat {} is archived; unarchive it first", self.chats[ix].id));
+        }
+        let child = self.chats[ix].parent == Some(self.chats[lead_ix].id);
+        let tag = move |mut reply: Value| {
+            if !child {
+                reply["reply"] = "not your child: its answer won't be sent to you; read it later with read_history and this chat's id".into();
+            }
+            reply
+        };
         let text = args["text"].as_str().unwrap_or_default().trim().to_string();
         if text.is_empty() {
             return Err(r#"missing "text""#.into());
@@ -464,7 +517,7 @@ impl ChatApp {
         };
         if chat.busy() {
             chat.queue.push(queued);
-            return Ok(json!({"status": "queued"}));
+            return Ok(tag(json!({"status": "queued"})));
         }
         if let Some(reason) = self.worktree_blocks_send(ix) {
             return Err(reason.to_string());
@@ -480,14 +533,14 @@ impl ChatApp {
         let follow = self.follows(ix, cx);
         self.submit_as(ix, text, attachments, follow, window, cx);
         if behind == 0 {
-            Ok(json!({"status": "sent"}))
+            Ok(tag(json!({"status": "sent"})))
         } else {
-            Ok(json!({
+            Ok(tag(json!({
                 "status": "queued",
                 "note": format!(
                     "agent {id} was idle with {behind} queued message(s); the oldest queued text was sent now, and your text is queued behind it"
                 ),
-            }))
+            })))
         }
     }
 

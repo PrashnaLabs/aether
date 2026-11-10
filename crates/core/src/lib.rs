@@ -22,10 +22,10 @@ pub use request::{
 };
 pub use settings::{
     AccessMode, Appearance, ChatDetail, ChatLayout, CornerStyle, DateFormat, FooterChips, IconPack,
-    NotesEditor, NotesSettings, ProjectScript, Provider, Reasoning, Settings, SidebarGrouping,
-    SidebarOrdering, SidebarStyle, THEME_FAMILIES, TerminalCursor, TerminalTheme, ThemeFamily,
-    TileLayout, TimeFormat, ToolPolicy, Watch, WatchCorner, effort_label, effort_levels,
-    family_index, toggle_watch,
+    NotesEditor, NotesSettings, NotifyDelivery, NotifySound, ProjectScript, Provider, Reasoning,
+    Settings, SidebarGrouping, SidebarOrdering, SidebarStyle, THEME_FAMILIES, TerminalCursor,
+    TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, Watch, WatchCorner,
+    effort_label, effort_levels, family_index, toggle_watch,
 };
 pub use skill::{
     Skill, SkillSource, complete_skill, mention_at, mentioned_skills, valid_skill_name,

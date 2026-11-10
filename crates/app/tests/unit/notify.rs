@@ -8,6 +8,25 @@ fn notification_text_cannot_break_out_of_its_applescript_string() {
 }
 
 #[test]
+fn notifies_only_when_enabled_and_unwatched() {
+    assert!(should_notify(true, false));
+    assert!(!should_notify(true, true));
+    assert!(!should_notify(false, false));
+}
+
+#[test]
+fn repeats_are_rate_limited_per_chat_and_state() {
+    use std::time::{Duration, Instant};
+    let mut limit = RateLimit::default();
+    let t = Instant::now();
+    assert!(limit.allow(1, State::Done, t));
+    assert!(!limit.allow(1, State::Done, t + Duration::from_secs(5)));
+    assert!(limit.allow(1, State::Request, t + Duration::from_secs(5)));
+    assert!(limit.allow(2, State::Done, t + Duration::from_secs(5)));
+    assert!(limit.allow(1, State::Done, t + Duration::from_secs(11)));
+}
+
+#[test]
 fn preview_is_one_trimmed_line() {
     assert_eq!(preview("  Done.\n\nAll tests   pass ", 80), "Done. All tests pass");
     assert_eq!(preview("abcdef ghij", 7), "abcdef…");

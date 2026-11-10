@@ -133,7 +133,7 @@ fn new_chat_resets_to_agent_tab_for_fresh_and_reused_drafts(cx: &mut gpui_kit::T
     });
     cx.update_window(window, |_, window, cx| {
         app.update(cx, |app, cx| {
-            app.settings.provider = Provider::Codex;
+            app.settings.provider = Some(Provider::Codex);
             for (index, tab) in
                 [SideTab::Explorer, SideTab::Terminal, SideTab::Browser].into_iter().enumerate()
             {

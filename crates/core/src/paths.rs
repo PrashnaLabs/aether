@@ -102,7 +102,7 @@ fn executable_exts() -> Vec<String> {
     vec![String::new()]
 }
 
-fn expand_tilde(p: &str) -> PathBuf {
+pub(crate) fn expand_tilde(p: &str) -> PathBuf {
     match p.strip_prefix("~/") {
         Some(rest) => home_dir().join(rest),
         None if p == "~" => home_dir(),

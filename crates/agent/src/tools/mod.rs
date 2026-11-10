@@ -43,7 +43,11 @@ impl Tools {
         }
         if let Some((key, calls, pending, is_lead)) = lead {
             tools.extend(lead::lead_tools(key, calls, pending).into_iter().filter(|tool| {
-                is_lead || matches!(tool.name(), "list_cards" | "add_card" | "move_card")
+                is_lead
+                    || matches!(
+                        tool.name(),
+                        "list_cards" | "add_card" | "move_card" | "update_card"
+                    )
             }));
         }
         tools

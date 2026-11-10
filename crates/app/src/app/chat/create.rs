@@ -337,7 +337,7 @@ impl ChatApp {
     }
 
     pub(crate) fn current_project_folder(&self) -> Option<PathBuf> {
-        let cli = CLIS.contains(&self.settings.provider);
+        let cli = CLIS.contains(&self.default_provider());
         let current = self
             .chats
             .get(self.active)
@@ -366,7 +366,7 @@ impl ChatApp {
                 && c.pending.is_empty()
                 && self.workspace.model.pane_for(c.id).is_none()
         }) {
-            let provider = self.settings.provider;
+            let provider = self.default_provider();
             self.chats[ix].provider = provider;
             self.chats[ix].provider_model = initial_model(&self.settings, provider);
             self.chats[ix].access = self.settings.default_access(provider);
@@ -379,6 +379,7 @@ impl ChatApp {
             self.chats[ix].title = "New chat".into();
             return self.select(ix, window, cx);
         }
+        let default_provider = self.default_provider();
         let id = crate::session::allocate_chat_id(
             &mut self.chat_id_highwater,
             self.chats.iter().map(|c| c.id),
@@ -399,8 +400,8 @@ impl ChatApp {
             messages: Vec::new(),
             pinned: false,
             archived: false,
-            provider: self.settings.provider,
-            provider_model: initial_model(&self.settings, self.settings.provider),
+            provider: default_provider,
+            provider_model: initial_model(&self.settings, default_provider),
             cancel: None,
             open_steps: HashMap::new(),
             run: 0,
@@ -408,7 +409,7 @@ impl ChatApp {
             unseen: ChatStatus::Idle,
             cwd: String::new(),
             view: ChatViewMode::Chat,
-            access: self.settings.default_access(self.settings.provider),
+            access: self.settings.default_access(default_provider),
             effort: String::new(),
             cli_session: String::new(),
             queue: Vec::new(),

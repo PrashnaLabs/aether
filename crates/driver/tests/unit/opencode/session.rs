@@ -16,6 +16,7 @@ fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
 fn create_body_carries_location_and_model_ref() {
     let opts = DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp/aether-no-such-dir-xyz/".into(),
         model: "anthropic/claude-x".into(),

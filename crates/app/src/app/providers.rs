@@ -27,12 +27,39 @@ pub(super) fn usage_due(newest: Option<i64>, attempted: i64, configured: bool, n
     old(attempted) && newest.map_or(configured, old)
 }
 
+/// First of Claude, Codex with a login; Claude wins when both have one.
+pub(super) fn subscription_provider(claude: bool, codex: bool) -> Option<Provider> {
+    if claude { Some(Provider::Claude) } else { codex.then_some(Provider::Codex) }
+}
+
 impl ChatApp {
+    /// The user's pick, else a detected subscription, else OpenRouter.
+    pub(crate) fn default_provider(&self) -> Provider {
+        self.settings.provider.or(self.detected_provider).unwrap_or_default()
+    }
+
+    pub(super) fn detect_subscription(&mut self, cx: &mut Context<Self>) {
+        let bg = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let found = bg
+                .spawn(async {
+                    subscription_provider(
+                        read_claude_credentials(None).is_some(),
+                        read_codex_token(None).is_some(),
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, _| this.detected_provider = found);
+        })
+        .detach();
+    }
+
     pub(super) fn refresh_provider_usage(&mut self, provider: Provider, cx: &mut Context<Self>) {
         let bg = cx.background_executor().clone();
+        let dir = self.settings.account_dir(provider);
         match provider {
             Provider::Claude => {
-                if let Some((tok, sub)) = read_claude_credentials() {
+                if let Some((tok, sub)) = read_claude_credentials(dir.as_deref()) {
                     cx.spawn(async move |this, cx| {
                         let usage = bg
                             .spawn(async move { fetch_claude_plan_usage(&tok, sub.as_deref()) })
@@ -49,7 +76,7 @@ impl ChatApp {
                 }
             }
             Provider::Codex => {
-                if let Some(tok) = read_codex_token() {
+                if let Some(tok) = read_codex_token(dir.as_deref()) {
                     cx.spawn(async move |this, cx| {
                         let usage = bg.spawn(async move { fetch_codex_plan_usage(&tok) }).await;
                         if let Some(usage) = usage {
@@ -108,6 +135,22 @@ impl ChatApp {
     fn store_plan_usage(&mut self, provider: Provider, usage: PlanUsage) {
         self.plan_usage_at.insert(provider, chrono::Utc::now().timestamp_millis());
         self.provider_plan_usages.insert(provider, usage);
+    }
+
+    /// Makes `name` (None: the CLI's own login) the account new runs of `provider` use.
+    pub(crate) fn switch_account(
+        &mut self,
+        provider: Provider,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_settings(cx, |s| match name {
+            Some(name) => drop(s.default_accounts.insert(provider.key().into(), name)),
+            None => drop(s.default_accounts.remove(provider.key())),
+        });
+        // another login's numbers must not linger under this one
+        self.provider_plan_usages.remove(&provider);
+        self.refresh_provider_usage(provider, cx);
     }
 
     pub(super) fn refresh_stale_usage(&mut self, cx: &mut Context<Self>) {
@@ -437,7 +480,7 @@ impl ChatApp {
         }
         let lead = chat.lead;
         self.persist(ix);
-        self.update_settings(cx, |s| s.provider = provider);
+        self.update_settings(cx, |s| s.provider = Some(provider));
         self.sync_selector(cx);
         self.reset_rows(cx);
         if lead && provider == Provider::Antigravity {
@@ -491,7 +534,7 @@ impl ChatApp {
         chat.provider_model = initial_model(&self.settings, provider);
         chat.access = self.settings.default_access(provider);
         chat.effort.clear();
-        self.update_settings(cx, |s| s.provider = provider);
+        self.update_settings(cx, |s| s.provider = Some(provider));
         self.sync_selector(cx);
         self.load_bases(cx);
         self.refresh_git(false, cx);

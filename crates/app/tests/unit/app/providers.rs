@@ -124,3 +124,10 @@ fn usage_refetches_only_when_stale() {
     assert!(!usage_due(None, now - 11 * min, false, now), "none yet, nothing configured");
     assert!(!usage_due(None, now - min, true, now), "none yet, just tried");
 }
+
+#[test]
+fn subscription_picks_claude_then_codex_else_none() {
+    assert_eq!(subscription_provider(true, true), Some(Provider::Claude));
+    assert_eq!(subscription_provider(false, true), Some(Provider::Codex));
+    assert_eq!(subscription_provider(false, false), None);
+}

@@ -28,7 +28,7 @@ impl Fixture {
         cx.background_executor.allow_parking();
         cx.update(gpui_kit::init);
         let mut settings = Settings {
-            provider: Provider::OpenRouter,
+            provider: Some(Provider::OpenRouter),
             workspace_root: self.project.display().to_string(),
             ..Settings::default()
         };
@@ -586,7 +586,7 @@ fn notes_search_result_clicks_do_not_select_preview_text(cx: &mut TestAppContext
     cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     let mut settings = Settings {
-        provider: Provider::OpenRouter,
+        provider: Some(Provider::OpenRouter),
         workspace_root: f.project.display().to_string(),
         ..Settings::default()
     };

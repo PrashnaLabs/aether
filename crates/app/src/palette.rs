@@ -14,6 +14,7 @@ use crate::actions::{
 };
 use crate::app::orchestrate::shows_lead_chip;
 use crate::app::{ChatApp, chat_markdown, picker_value};
+use crate::projects::AgentState;
 
 /// What a palette row does when it has no Action of its own.
 #[derive(Clone)]
@@ -50,6 +51,8 @@ pub(crate) enum PaletteCommand {
     ShareWorktree(PathBuf),
     NewDirectChat,
     SwitchSidebar(crate::app::SidebarView),
+    /// Reopen the palette filtered to chats in this state.
+    FilterChats(AgentState),
 }
 
 /// A palette item and the text it's found by: its label, then its keywords.
@@ -196,6 +199,12 @@ impl ChatApp {
                 crate::app::SidebarView::Outside => self.switch_sidebar_to_outside(cx),
                 crate::app::SidebarView::Archived => self.switch_sidebar_to_archive(cx),
             },
+            Some(PaletteCommand::FilterChats(state)) => {
+                self.toggle_palette(window, cx);
+                self.palette_query
+                    .update(cx, |input, cx| input.set_value(state.filter(), window, cx));
+                self.palette.update(cx, |s, cx| s.set_query(state.filter(), window, cx));
+            }
             None => {}
         }
     }
@@ -428,6 +437,21 @@ impl ChatApp {
         ));
         groups.push(("Chat", chat));
 
+        let now = crate::app::now_ms();
+        groups.push((
+            "Filter chats",
+            AgentState::ALL
+                .into_iter()
+                .map(|state| {
+                    (
+                        item(format!("Chats: {}", state.name()))
+                            .icon(gpui_kit::assets::IconName::ListFilter)
+                            .keywords(["filter", "goto", "state"]),
+                        Some(PaletteCommand::FilterChats(state)),
+                    )
+                })
+                .collect(),
+        ));
         groups.push((
             "Go to chat",
             self.chats
@@ -444,6 +468,10 @@ impl ChatApp {
                     (
                         item(chat.title.clone())
                             .keywords(chat.folder_name(&self.settings.workspace_root))
+                            .keywords({
+                                let state = AgentState::of(chat.status(now));
+                                [state.name().to_string(), state.filter()]
+                            })
                             .checked(ix == self.active && self.page == crate::app::Page::Chat),
                         Some(PaletteCommand::OpenChat(ix)),
                     )

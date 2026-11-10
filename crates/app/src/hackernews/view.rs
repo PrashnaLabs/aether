@@ -17,6 +17,8 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if self.hn_reader_open {
+            let lights = self.settings.sidebar_collapsed;
+            self.hn_browser.update(cx, |b, _| b.lights = lights);
             return v_flex()
                 .id("hackernews-reader")
                 .size_full()
@@ -49,6 +51,11 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let lights = aether_ui::traffic_lights_gap(
+            self.page == Page::HackerNews && self.settings.sidebar_collapsed,
+            window,
+            cx,
+        );
         let theme = cx.theme();
         let border = theme.tokens.border;
         let active_cat = self.hackernews.category;
@@ -69,6 +76,7 @@ impl ChatApp {
                 h_flex()
                     .items_center()
                     .gap(px(14.))
+                    .child(lights)
                     // Hacker News Badge and Title
                     .child(
                         h_flex()
