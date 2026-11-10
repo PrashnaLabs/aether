@@ -477,7 +477,7 @@ fn agy_rows_reads_with_and_without_a_wal() {
     let db = dir.join("c2f4e33d.db");
     let sql = "CREATE TABLE steps (idx INTEGER, step_type INTEGER, step_payload BLOB); \
                INSERT INTO steps VALUES (0, 14, X'9A010412026869'), (1, 132, X'00');";
-    let made = std::process::Command::new("/usr/bin/sqlite3").arg(&db).arg(&sql).status();
+    let made = std::process::Command::new("/usr/bin/sqlite3").arg(&db).arg(sql).status();
     assert!(made.unwrap().success());
     assert_eq!(agy_rows(&db).as_deref(), Some("14|9A010412026869\n132|00\n"));
     std::fs::write(db.with_extension("db-wal"), "not a wal").unwrap();

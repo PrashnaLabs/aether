@@ -21,6 +21,7 @@ pub fn parse_iostat_cpu(text: &str) -> Option<f32> {
     Some((100. - idle).clamp(0., 100.))
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub fn parse_vm_stat(memsize: &str, vm_stat: &str) -> Option<(u64, u64)> {
     let total: u64 = memsize.trim().parse().ok()?;
     let page: u64 = vm_stat
@@ -79,6 +80,7 @@ pub fn parse_meminfo(text: &str) -> Option<(u64, u64)> {
     Some((total.checked_sub(kb("MemAvailable:")?)? * 1024, total * 1024))
 }
 
+#[cfg(target_os = "macos")]
 fn run(program: &str, args: &[&str]) -> Option<String> {
     let out = aether_core::command(program).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())

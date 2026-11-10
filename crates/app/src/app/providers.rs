@@ -281,7 +281,7 @@ impl ChatApp {
             "Tip: Customize visible items in Settings → Bottom Bar.",
         ];
         let phase = (super::now_ms() / 6_000) as usize;
-        let text = if busy == Busy::Waiting || phase % 2 == 0 {
+        let text = if busy == Busy::Waiting || phase.is_multiple_of(2) {
             busy_placeholder(chat.provider.short_label(), busy)
         } else {
             tips[(phase / 2) % tips.len()].to_string()

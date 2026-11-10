@@ -7,6 +7,7 @@ pub(crate) struct Note {
     pub title: String,
     pub subtitle: String,
     pub body: String,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub provider: Provider,
 }
 
@@ -103,7 +104,7 @@ pub(crate) fn webhook(url: &str, title: &str, body: &str, chat: i64, state: Stat
 
 /// Posts a desktop notification. macOS uses the notification center directly for the
 /// subtitle and provider logo; outside a bundle it falls back to AppleScript.
-#[cfg_attr(target_os = "macos", allow(unused_variables))]
+#[cfg_attr(any(target_os = "macos", target_os = "linux"), allow(unused_variables))]
 pub(crate) fn post(note: Note, cx: &App) {
     #[cfg(target_os = "macos")]
     {

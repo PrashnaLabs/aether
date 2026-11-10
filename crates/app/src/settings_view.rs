@@ -1133,7 +1133,7 @@ impl ChatApp {
                     let cards = CLIS.into_iter().map(|provider| {
                         let installed =
                             self.probes.get(&provider).is_some_and(|probe| probe.installed);
-                        let status = if self.probes.get(&provider).is_none() {
+                        let status = if !self.probes.contains_key(&provider) {
                             "Checking…"
                         } else if installed {
                             "Available"

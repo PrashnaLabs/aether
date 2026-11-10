@@ -124,8 +124,7 @@ fn saved_projects_without_chats_sort_last_alphabetically() {
 
 #[test]
 fn hidden_projects_stay_out_and_adding_one_unhides_it() {
-    let mut s = Settings::default();
-    s.hidden_projects = vec!["/w/a".into()];
+    let mut s = Settings { hidden_projects: vec!["/w/a".into()], ..Settings::default() };
     assert!(project_list(vec![(PathBuf::from("/w/a"), 5)], &[], &s.hidden_projects).is_empty());
     add_project(&mut s, Path::new("/w/a"));
     assert_eq!(s.projects, vec!["/w/a".to_string()]);

@@ -18,9 +18,11 @@ fn markdown_preview_preserves_edits_and_line_links_open_source(cx: &mut gpui_kit
     let path = dir.as_path().join("README.md");
     std::fs::write(&path, "# Hello\n\n- native preview\n").unwrap();
     let window = cx.add_window(|window, cx| {
-        let mut settings = aether_core::Settings::default();
-        settings.provider = Some(aether_core::Provider::Codex);
-        settings.workspace_root = dir.as_path().display().to_string();
+        let settings = aether_core::Settings {
+            provider: Some(aether_core::Provider::Codex),
+            workspace_root: dir.as_path().display().to_string(),
+            ..Default::default()
+        };
         let mut app = ChatApp::with_state(
             aether_agent::Agent::new().unwrap(),
             settings,

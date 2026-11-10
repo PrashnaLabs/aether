@@ -54,7 +54,7 @@ fn claude_takes_small_images_natively_and_the_rest_by_path() {
     assert!(native.is_empty());
     assert_eq!(paths, vec![small.clone(), pdf.clone()]);
     let tiff = att("t.tiff", "image/tiff", 1);
-    let (native, paths) = native_image_split(Provider::Claude, &[tiff.clone()]);
+    let (native, paths) = native_image_split(Provider::Claude, std::slice::from_ref(&tiff));
     assert!(native.is_empty() && paths == vec![tiff.clone()]);
     let (native, paths) =
         native_image_split(Provider::Codex, &[big.clone(), tiff.clone(), pdf.clone()]);

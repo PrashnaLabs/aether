@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod cases {
     use crate::hackernews::HackerNewsModel;
     use crate::hackernews::types::{
         HnCategory, HnState, HnStory, PrototypeStateOverride, sample_stories,

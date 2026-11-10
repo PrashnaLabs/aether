@@ -293,15 +293,17 @@ fn notes_defaults_support_old_and_partial_settings() {
 
 #[test]
 fn notes_settings_round_trip_all_overrides() {
-    let mut settings = Settings::default();
-    settings.notes = NotesSettings {
-        directory: "/custom/notes".into(),
-        editor: NotesEditor::Neovim,
-        project_scope: true,
-        nvim: "/bin/custom-nvim".into(),
-        tmux: "/bin/custom-tmux".into(),
-        session: "personal".into(),
-        socket: "/tmp/personal.sock".into(),
+    let settings = Settings {
+        notes: NotesSettings {
+            directory: "/custom/notes".into(),
+            editor: NotesEditor::Neovim,
+            project_scope: true,
+            nvim: "/bin/custom-nvim".into(),
+            tmux: "/bin/custom-tmux".into(),
+            session: "personal".into(),
+            socket: "/tmp/personal.sock".into(),
+        },
+        ..Settings::default()
     };
     let parsed: Settings =
         serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();

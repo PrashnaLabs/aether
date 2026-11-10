@@ -55,10 +55,12 @@ impl Fixture {
         for tool in [&nvim, &tmux] {
             std::fs::set_permissions(tool, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        let mut settings = aether_core::NotesSettings::default();
-        settings.nvim = nvim.to_str().unwrap().into();
-        settings.tmux = tmux.to_str().unwrap().into();
-        settings.socket = root.join("socket").to_str().unwrap().into();
+        let settings = aether_core::NotesSettings {
+            nvim: nvim.to_str().unwrap().into(),
+            tmux: tmux.to_str().unwrap().into(),
+            socket: root.join("socket").to_str().unwrap().into(),
+            ..Default::default()
+        };
         Self { root, settings, log }
     }
     fn note(&self) -> PathBuf {

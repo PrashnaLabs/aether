@@ -40,8 +40,10 @@ fn resume_command_runs_cli_directly_in_the_project_folder() {
 
 #[test]
 fn resume_command_quotes_custom_binary_paths() {
-    let mut s = aether_core::Settings::default();
-    s.codex_binary = "/tmp/agent's bin/codex".into();
+    let s = aether_core::Settings {
+        codex_binary: "/tmp/agent's bin/codex".into(),
+        ..Default::default()
+    };
     assert_eq!(
         resume_command(&s, Provider::Codex, "abc", std::path::Path::new("/tmp/project")),
         Some(r"cd '/tmp/project' && '/tmp/agent'\''s bin/codex' resume 'abc'".into())
