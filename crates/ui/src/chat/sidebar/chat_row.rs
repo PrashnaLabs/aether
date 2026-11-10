@@ -350,6 +350,25 @@ fn with_card(
     }
 }
 
+/// The agent icon, giving its place to the row's actions on hover or while the menu is open.
+fn icon_or_actions(icon: Icon, actions: Div, group: &SharedString, show: bool) -> Div {
+    div()
+        .relative()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(rems(1.25))
+        .child(
+            div()
+                .flex()
+                .when(show, |d| d.opacity(0.))
+                .when(!show, |d| d.group_hover(group.clone(), |s| s.opacity(0.)))
+                .child(icon.size(rems(0.8125))),
+        )
+        .child(div().absolute().inset_0().child(actions))
+}
+
 fn swap(mark: AnyElement, chevron: Option<AnyElement>) -> AnyElement {
     div()
         .relative()
@@ -549,7 +568,7 @@ pub(super) fn render_chat(
         chat.active,
         cx,
     )
-    .group(group)
+    .group(group.clone())
     .w_full()
     .px_2()
     .py_1()
@@ -687,7 +706,12 @@ pub(super) fn render_chat(
                         .child(rollup(summary, Tier::Narrow, cx)),
                 )
                 .children(approve_action)
-                .child(actions);
+                .child(match line.as_ref() {
+                    Some(l) => {
+                        icon_or_actions(provider_icon(l.provider), actions, &group, show_menu)
+                    }
+                    None => actions,
+                });
             return row.py_0p5().child(one).context_menu(context).into_any_element();
         }
         let idle = matches!(status, ChatStatus::Idle | ChatStatus::Background(_));
@@ -865,7 +889,7 @@ pub(super) fn render_chat(
                 .child(title_cell(title.clone()))
                 .child(tally.unwrap_or(trailing))
                 .children(approve_action)
-                .child(actions);
+                .child(icon_or_actions(provider_icon(line.provider), actions, &group, show_menu));
             return row.py_0p5().child(one).context_menu(context).into_any_element();
         }
         SidebarStyle::Default => {}
