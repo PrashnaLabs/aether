@@ -74,28 +74,32 @@ are filed as backlog cards.
 
 Ordered by priority. Each one is a backlog card on the board.
 
-1. **C-PERF-5, Medium.** Every streamed update rebuilds the transcript rows for
-   the active reply (`build_rows`), so long replies with many tools get slower to
-   stream. Fix: patch the affected row in place and keep full rebuilds for
-   structural events.
-2. **D-PERF-2, Medium.** Each `ChatApp` render serializes the workspace layout and
-   every draft to JSON, only to find nothing changed. Fix: keep a mutation
-   counter and skip when it hasn't changed.
+1. **C-PERF-5, Medium: fixed in follow-up.** When a streamed text delta only
+   extends the last text row of the live reply (`extend_tail`), that row is
+   updated in place. Anything that could change the row structure still triggers
+   a full rebuild: steps, requests, a possible code fence, a reply that isn't
+   live, or the first text.
+2. **D-PERF-2, Medium: fixed in follow-up.** The save step compares the
+   current layout and drafts with the last saved ones, and serializes only when
+   they differ.
 3. **C-PERF-1, Medium.** CLI stdout/stderr readers use `BufReader::lines` with no
    cap on line length, and update channels are unbounded. Fixing it needs a
    per-protocol decision on what to do on overflow: kill the session and show an
    error, without losing a pending approval.
-4. **Lead token left on disk.** This is out of slice in B's report.
-   `claude/spawn.rs` `write_mcp_config` leaves `aether-mcp-<hash>.json` (0600) in
-   the temp dir after exit. Fix: delete it when the session ends, or write it
-   under `config_dir()`.
-5. **Orchestrator socket hardening (B-SEC-5, B-SEC-7, B-SEC-8).** The socket is
-   bound first and chmod'd after. The read timeout is per read, not per request.
-   A call that times out still runs later. All need same-user access, and the
-   token is still required.
-6. **B-SEC-6.** Non-lead chats can read board cards from other projects. This
-   needs a product decision.
-7. **Smaller items.** B-SEC-9 (`web_search` has no timeout), B-PERF-1 and
+4. **Lead token left on disk: won't fix.** `claude/spawn.rs` `write_mcp_config`
+   leaves `aether-mcp-<hash>.json` in the temp dir. The token is random, minted
+   per run (`agent.rs` `lead_token`), and held only in memory, so it stops
+   working when the app exits. The file is 0600, and its name is a hash of the
+   token, so nobody can guess it in advance. Moving the file somewhere else
+   would gain nothing.
+5. **Orchestrator socket hardening (B-SEC-5, B-SEC-7, B-SEC-8): fixed in
+   follow-up.** On Unix the socket is now bound inside a private 0700 `orch/`
+   directory under the config dir. Each request has one 5 s total read deadline.
+   The UI skips a call whose 30 s deadline has passed, and only the UI frees
+   pending slots. `docs/orchestration.md` is updated with the new socket path.
+6. **B-SEC-6: fixed in follow-up.** You decided chats that aren't leads only see
+   board cards in their own project. Leads keep `project: "all"`.
+7. **Smaller items.** B-SEC-9 is now fixed (`web_search` has a 15 s timeout). Still open: B-PERF-1 and
    B-PERF-2 (usage scan cache), A-PERF-5 (synchronous explorer refresh),
    D-PERF-3 (GTK pump keeps running while the browser is hidden) and the
    remaining part of C-PERF-3.

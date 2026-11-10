@@ -30,11 +30,11 @@ What was checked and found sound:
 | B-SEC-2 | Medium | `agent/src/external.rs` `agy_rows` | Antigravity DB copied to predictable `/tmp/aether-agy-<pid>`, dir left behind | Fixed |
 | B-SEC-3 | Medium | `app/src/app/orchestrate.rs` `message_agent` | A low-access lead can drive a higher-access chat, bypassing its approvals | Fixed |
 | B-SEC-4 | Low | `app/src/app/orchestrate.rs` `spawn_agent` | `spawn_queue` grows without bound | Fixed (spawn queue); message queue Documented only |
-| B-SEC-5 | Low | `agent/src/orchestrator/server.rs` | Socket is chmod 0600 after `bind`; parent dir mode not enforced | Documented only |
-| B-SEC-6 | Low | `app/src/app/orchestrate.rs` `read_card`, `control.rs` `matching_cards` | Non-lead chats can read cards of other projects | Documented only |
-| B-SEC-7 | Low | `agent/src/orchestrator/server.rs` | Per-read (not total) 5 s timeout lets 32 slow clients pin the listener | Documented only |
-| B-SEC-8 | Low | `agent/src/orchestrator/server.rs` `answer` | A call that times out after 30 s still runs later, and frees its pending slot | Documented only |
-| B-SEC-9 | Low | `agent/src/tools/mod.rs` | `web_search` client has no timeout, body is unbounded | Documented only |
+| B-SEC-5 | Low | `agent/src/orchestrator/server.rs` | Socket is chmod 0600 after `bind`; parent dir mode not enforced | Fixed |
+| B-SEC-6 | Low | `app/src/app/orchestrate.rs` `read_card`, `control.rs` `matching_cards` | Non-lead chats can read cards of other projects | Fixed |
+| B-SEC-7 | Low | `agent/src/orchestrator/server.rs` | Per-read (not total) 5 s timeout lets 32 slow clients pin the listener | Fixed |
+| B-SEC-8 | Low | `agent/src/orchestrator/server.rs` `answer` | A call that times out after 30 s still runs later, and frees its pending slot | Fixed |
+| B-SEC-9 | Low | `agent/src/tools/mod.rs` | `web_search` client has no timeout, body is unbounded | Fixed (15 s total timeout) |
 | B-SEC-10 | Info | `app/src/app/orchestrate.rs` `SpawnArgs::parse` | `effort` (and `model` when the probe lists none) reach CLI argv unvalidated | Documented only |
 | B-SEC-11 | Info | `app/src/hitl.rs` `enter_submits` | Enter in an Aether-owned approval line means Allow | Documented only |
 | B-PERF-1 | Low | `agent/src/usage_history/discovery.rs` | `load_opencode_session_dirs` re-reads every OpenCode session JSON on every scan | Documented only |
@@ -75,11 +75,11 @@ Fix: at most `MAX_QUEUED_SPAWNS` (32) queued spawns per lead; the next gets an e
 
 Not fixed: `message_agent` to a busy chat also appends to `chat.queue` with no cap (same shape, 64 KiB per entry, and it is persisted). Proposed approach: cap queued entries per chat (for example 50) and return the error the same way.
 
-## B-SEC-5: socket bind then chmod (Low, Documented only)
+## B-SEC-5: socket bind then chmod (Low, Fixed)
 
 `UnixListener::bind` creates the socket with `0777 & ~umask`, then `set_permissions(0o600)`. The config dir is created 0700 only when it doesn't exist (`create_private_dir` keeps the mode of an existing dir). With a umask of 022 (default on macOS) nobody else can connect in the gap, because connecting needs write permission. Only a umask of 000 leaves a window. The per-chat token is still required for every call, so a connection alone gets nothing.
 
-Why not fixed here: chmod-ing the parent would also hit tests that bind in the system temp dir, and a umask swap needs `libc` (no new dependencies). Proposed: bind inside a private subdir (`config/orch/orchestrator.sock`), created 0700, so no window exists regardless of umask.
+Fix: Unix sockets now bind inside `<config dir>/orch/`, created atomically with mode 0700. Existing non-private directories and symlinks are rejected; no parent directory is chmod'd. Socket mode remains 0600. Defaults and `docs/orchestration.md` use the new Unix path; Windows keeps its existing address-file path. Tests cover private creation and rejection without changing shared parent permissions.
 
 ## B-SEC-6: cross-project board reads from non-lead chats (Low, Documented only)
 
@@ -87,17 +87,21 @@ Why not fixed here: chmod-ing the parent would also hit tests that bind in the s
 
 Proposed: for non-lead chats, ignore `project` and `ids` outside the chat's own project in `matching_cards`, and add the project check to `read_card` when `!chat.lead`. Left alone because it changes documented board behaviour and needs a product call.
 
-## B-SEC-7: slow clients (Low, Documented only)
+Status: Fixed in follow-up, after the user decided non-lead chats stay in their own project. `matching_cards` ignores `project` and `ids` outside the chat's project when the chat isn't a lead, and `read_card` adds the same project check. Leads keep `project: "all"`. Test: `non_lead_chats_only_read_their_own_projects_cards`. `docs/task-board.md` is updated.
 
-`serve` sets a 5 s read timeout, which resets on every byte. A client trickling one byte every 4 s holds a connection thread for up to about 3 days (64 KiB), and 32 of them stop everyone else from connecting. Only the same user can open the socket (0600), so this is self-DoS. Proposed: track an absolute deadline in `serve` and stop reading after, say, 10 s total.
+## B-SEC-7: slow clients (Low, Fixed)
 
-## B-SEC-8: late execution after a timeout (Low, Documented only)
+Fix: request reads share one absolute five-second deadline. Each buffered read uses only the remaining time, so trickling bytes cannot renew the budget. The 64 KiB cap remains. Regression test: `trickling_request_cannot_extend_total_read_deadline`.
 
-`answer` waits 30 s for the UI (`recv_timeout`), then calls `done_pending` and returns "Aether didn't answer". The `OrchCall` is already in the unbounded channel, so a wedged UI will still run it when it recovers (a `spawn_agent` without `nonce` becomes a surprise child), and the in-flight counter that is meant to stop queueing at 16 is released. Under a UI stall of N seconds up to 16 calls per 30 s pile up. Proposed: carry a deadline in `OrchCall` and have `orchestrate` drop calls past it, and only release the pending slot when the UI has taken the call.
+## B-SEC-8: late execution after a timeout (Low, Fixed)
+
+Fix: socket and in-process calls carry a 30-second deadline. The UI skips expired calls before executing any tool, and only the UI consumer releases queued pending slots, so a stalled UI cannot accumulate calls beyond the existing cap. Tests cover retained slots after timeout and a skipped late mutation. Calls already executing when their deadline passes are not interrupted.
 
 ## B-SEC-9: `web_search` client without timeout (Low, Documented only)
 
 `Tools::new` uses `reqwest::Client::new()`; `duckduckgo::search` reads `response.text()` without limit. The endpoint is fixed (no agent controlled URL), so risk is a hung turn. Proposed: `Client::builder().timeout(Duration::from_secs(15))`.
+
+Status: Fixed in backlog follow-up. `Tools::new` builds the client with a 15 s total timeout, which also bounds how long the body read can take.
 
 ## B-SEC-10: unvalidated `effort` and `model` (Info, Documented only)
 
