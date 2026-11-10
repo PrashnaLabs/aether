@@ -88,6 +88,8 @@ impl RenderOnce for Markdown {
 struct MarkdownEntry {
     raw: String,
     linked: Option<SharedString>,
+    /// Last source pushed into the view: re-setting the view re-parses it.
+    shown: String,
     linking: bool,
     state: Entity<TextViewState>,
     reflow: Option<Reflow>,
@@ -138,6 +140,7 @@ fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
             let entry = MarkdownEntry {
                 raw: text.to_string(),
                 linked: None,
+                shown: text.to_string(),
                 linking: false,
                 state: state.clone(),
                 reflow: md.on_reflow.clone(),
@@ -167,6 +170,7 @@ fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
                 if entry.raw == raw {
                     let linked = SharedString::from(linked);
                     entry.linked = Some(linked.clone());
+                    entry.shown = linked.to_string();
                     state.update(cx, |state, cx| state.set_text(&linked, cx));
                 }
                 if let Some(reflow) = reflow {
@@ -177,7 +181,20 @@ fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
         .detach();
     }
     let source = shown.unwrap_or_else(|| text.to_string().into());
-    state.update(cx, |state, cx| state.set_text(&source, cx));
+    let changed = match cx.default_global::<MarkdownStates>().0.get(key) {
+        Some(entry) => {
+            if entry.shown == source {
+                false
+            } else {
+                entry.shown = source.to_string();
+                true
+            }
+        }
+        None => false,
+    };
+    if changed {
+        state.update(cx, |state, cx| state.set_text(&source, cx));
+    }
 
     let theme = cx.theme();
     let (muted, mono) = (theme.muted_foreground, theme.mono_font_family.clone());
