@@ -21,6 +21,59 @@ OpenRouter chats cannot be leads; child chats cannot be leads. A lead can
 run at most `max_children` children at once (default 8, configurable in
 settings.json, clamped 1–50).
 
+## Claude child auto-compaction
+
+Claude children created by `spawn_agent` automatically summarize long contexts.
+Change **Settings > Providers > Claude child agents**, or set these keys in
+Aether's `settings.json` (`~/.config/aether/settings.json` on Linux by default):
+
+```json
+{
+  "agent_compaction": {
+    "enabled": true,
+    "threshold_percent": 45
+  }
+}
+```
+
+Missing keys use these defaults; unknown keys are ignored. The threshold must
+be an integer from **30 to 90**. Invalid values reject settings loading with a
+clear diagnostic (Aether's existing loader falls back to default settings).
+Set `enabled` to `false` to turn the guardrail off.
+
+At Claude process launch, Aether sets only
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=round(threshold_percent / 100 × 967000)` in
+that child's environment. The default is **435,150 tokens**, without rounding
+to thousands. Sonnet and Opus 5.x model IDs, and the `sonnet` / `opus` CLI
+aliases (including `[1m]`), use the 967,000-token window. Haiku, older and
+unknown models keep Claude's own defaults. Only 1M-context models are affected;
+200k models retain their own limit (about 180k).
+
+The lead can pass an optional `compaction_threshold_percent` integer to
+`spawn_agent` to override the global percentage for that child. Omit it to use
+the global setting; invalid values return a tool error. An override does not
+enable a disabled guardrail. Overrides persist with the chat and apply to
+resumed children through the same launch path. Running agents keep their old
+environment; settings changes take effect on subsequent launches. Leads and
+ordinary chats are unaffected. Codex, Pi, OpenCode and Antigravity (`agy`)
+children have no equivalent guardrail in Aether.
+
+Aether does not edit `~/.claude/settings.json` or the parent process environment.
+An explicit child value takes precedence over the user's stopgap setting. When
+off or unsupported, Aether adds nothing; any user-managed Claude environment
+or settings still apply. Remove the old stopgap separately if you want it off
+everywhere.
+
+The choice of 45% comes from the owner's local Claude Code **2.1.286** experiment
+and simulation of **45 sessions / 6,556 turns**: 30% produced 34 compactions,
+45% produced 18, and 60% produced 9. It is at the low end of the roughly linear
+savings stretch, before compactions rise sharply below 40%. These are simulated
+counts, not measured production savings; summary size and relative token prices
+were assumed, using one day's data from one project. The token-window variable
+triggered compaction in stream-json experiments; `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
+did not, so Aether does not use it. Compaction can lose exact details and require
+re-reading files; raise the threshold if summaries interrupt review work.
+
 ## Manual setup (advanced)
 
 Only needed if you run an agent outside Aether and want it to call the

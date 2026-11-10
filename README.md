@@ -127,6 +127,14 @@ For a webhook, set `notify_webhook` in `settings.json` to a URL. Each notificati
 Press `Alt+N` to open Notes. The default folder is `~/notes`; configure the
 folder and editor under **Settings > Tools > Notes**. See [docs/notes.md](docs/notes.md).
 
+## Claude child auto-compaction
+
+**Settings > Providers > Claude child agents** controls auto-compaction for
+Claude agents spawned by a lead. It defaults to **on at 45%** of the supported
+1M models' 967,000-token compaction window (435,150 tokens). Choose any integer
+from 30% to 90%, or turn the toggle off. Running agents keep their old value.
+See [the settings, evidence and limits](docs/orchestration.md#claude-child-auto-compaction).
+
 ## Development
 
 Install [Rust with rustup](https://rustup.rs/). The repository pins its compiler in

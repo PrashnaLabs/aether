@@ -1127,6 +1127,40 @@ impl ChatApp {
                     });
             }
             SettingsTab::Providers => {
+                page = page.when(show("agent-compaction") || show("agent-compaction-threshold"), |page| {
+                    page.child(SettingsSection::new("Claude child agents")
+                        .icon(Icon::new(gpui_kit::assets::IconName::Bot))
+                        .when(show("agent-compaction"), |section| section.child(
+                            div().id("agent-compaction").child(
+                                SettingsRow::new("Auto-compact Claude children")
+                                    .description("Summarize long contexts in agents spawned by a lead. On by default. Running agents keep their old value.")
+                                    .control(Switch::new("agent-compaction-enabled")
+                                        .checked(settings.agent_compaction.enabled)
+                                        .accessibility_label("Auto-compact Claude children")
+                                        .on_click(cx.listener(|this, enabled: &bool, _, cx| {
+                                            this.update_settings(cx, |s| s.agent_compaction.enabled = *enabled);
+                                        }))),
+                            ),
+                        ))
+                        .when(show("agent-compaction-threshold"), |section| section.child(
+                            div().id("agent-compaction-threshold").child(
+                                SettingsRow::new("Compaction threshold")
+                                    .description("30–90% of the context window; default 45%. Supported 1M Claude models only. Used when auto-compaction is on.")
+                                    .control(settings_dropdown(
+                                        "agent-compaction-percent",
+                                        "Compaction threshold percent (30 to 90)",
+                                        usize::from(settings.agent_compaction.threshold_percent.percent() - 30),
+                                        (30..=90).map(|n| if n == 45 { "45% (default)".to_string() } else { format!("{n}%") }),
+                                        cx.listener(|this, ix: &usize, _, cx| {
+                                            if let Ok(threshold) = aether_core::CompactionThreshold::new((*ix + 30) as u8) {
+                                                this.update_settings(cx, |s| s.agent_compaction.threshold_percent = threshold);
+                                            }
+                                        }),
+                                        cx,
+                                    )),
+                            ),
+                        )))
+                });
                 let mut coding_agents = SettingsSection::new("Coding agents")
                     .icon(Icon::new(gpui_kit::assets::IconName::Bot));
                 if matches.is_none() {
@@ -1751,7 +1785,7 @@ fn settings_dropdown(
     settings_dropdown_trigger(id, options[selected].clone(), cx)
         .accessibility_label(label)
         .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu: PopupMenu, _, _| {
-            menu = settings_dropdown_menu(menu);
+            menu = settings_dropdown_menu(menu).scrollable(options.len() > 20);
             for (index, option) in options.iter().enumerate() {
                 let on_change = on_change.clone();
                 menu = menu.item(

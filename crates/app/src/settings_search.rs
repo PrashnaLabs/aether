@@ -10,6 +10,20 @@ pub(crate) struct SettingItem {
 
 static SETTING_CATALOG: &[SettingItem] = &[
     SettingItem {
+        id: "agent-compaction",
+        tab: SettingsTab::Providers,
+        title: "Auto-compact Claude children",
+        description: "Summarize long contexts in Claude agents spawned by a lead. Running agents keep their value.",
+        keywords: &["claude", "compact", "context", "tokens", "guardrail", "lead"],
+    },
+    SettingItem {
+        id: "agent-compaction-threshold",
+        tab: SettingsTab::Providers,
+        title: "Compaction threshold",
+        description: "30–90% of the context window; default 45%. Applies to supported 1M Claude models.",
+        keywords: &["claude", "compact", "percent", "context", "tokens", "guardrail"],
+    },
+    SettingItem {
         id: "bottom-bar-entries",
         tab: SettingsTab::BottomBar,
         title: "Visible entries",

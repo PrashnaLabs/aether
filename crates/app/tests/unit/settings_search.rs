@@ -2,6 +2,16 @@ use crate::settings_search::*;
 use crate::settings_view::SettingsTab;
 
 #[test]
+fn compaction_controls_search_into_providers() {
+    for (query, id) in
+        [("compact", "agent-compaction"), ("threshold", "agent-compaction-threshold")]
+    {
+        let hit = search_settings(query).into_iter().find(|m| m.id == id).expect(id);
+        assert_eq!(hit.tab, SettingsTab::Providers);
+    }
+}
+
+#[test]
 fn terminal_rows_search_into_the_terminal_tab() {
     for (query, id) in [("cursor", "terminal-cursor"), ("nerd", "terminal-font-family")] {
         let hit = search_settings(query).into_iter().find(|m| m.id == id).expect(id);
