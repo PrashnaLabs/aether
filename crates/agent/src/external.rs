@@ -682,8 +682,9 @@ fn agy_rows(db: &Path) -> Option<String> {
     if !wal.exists() {
         return run("/usr/bin/sqlite3", &[&format!("file:{}?immutable=1", db.display()), sql]);
     }
-    let dir = std::env::temp_dir().join(format!("aether-agy-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).ok()?;
+    let tag: String = aether_core::random_bytes::<8>().iter().map(|b| format!("{b:02x}")).collect();
+    let dir = std::env::temp_dir().join(format!("aether-agy-{}-{tag}", std::process::id()));
+    aether_core::create_private_dir(&dir).ok()?;
     let copy = dir.join(db.file_name()?);
     let rows = std::fs::copy(db, &copy)
         .and_then(|_| std::fs::copy(&wal, copy.with_extension("db-wal")))
@@ -692,6 +693,7 @@ fn agy_rows(db: &Path) -> Option<String> {
     for ext in ["db", "db-wal", "db-shm"] {
         let _ = std::fs::remove_file(copy.with_extension(ext));
     }
+    let _ = std::fs::remove_dir(&dir);
     rows
 }
 

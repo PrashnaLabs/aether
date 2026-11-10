@@ -194,6 +194,8 @@ fn delivery_head(child: &Chat, outcome: &str) -> String {
     )
 }
 
+const MAX_QUEUED_SPAWNS: usize = 32;
+
 const SEP: &str = "\n\n---\n\n";
 
 pub(super) fn unread(deliveries: Vec<Delivery>, chats: &[Chat]) -> Vec<Delivery> {
@@ -572,6 +574,12 @@ impl ChatApp {
             return Err(format!("chat {} is archived; unarchive it first", self.chats[ix].id));
         }
         let child = self.chats[ix].parent == Some(self.chats[lead_ix].id);
+        if !child && rank(self.chats[ix].access) > rank(self.chats[lead_ix].access) {
+            return Err(format!(
+                "chat {} runs with more access than this lead; only the user can message it",
+                self.chats[ix].id
+            ));
+        }
         let tag = move |mut reply: Value| {
             if !child {
                 reply["reply"] = "not your child: its answer won't be sent to you; read it later with read_history and this chat's id".into();
@@ -786,10 +794,19 @@ impl ChatApp {
             let same = |(lead, queued): &(i64, Value)| {
                 *lead == lead_id && !a.nonce.is_empty() && queued["nonce"] == a.nonce.as_str()
             };
-            let at = self.spawn_queue.iter().position(same).unwrap_or_else(|| {
-                self.spawn_queue.push((lead_id, args.clone()));
-                self.spawn_queue.len() - 1
-            });
+            let at = match self.spawn_queue.iter().position(same) {
+                Some(at) => at,
+                None => {
+                    let queued = self.spawn_queue.iter().filter(|(lead, _)| *lead == lead_id);
+                    if queued.count() >= MAX_QUEUED_SPAWNS {
+                        return Err(format!(
+                            "{MAX_QUEUED_SPAWNS} spawns are already queued; wait for some to start"
+                        ));
+                    }
+                    self.spawn_queue.push((lead_id, args.clone()));
+                    self.spawn_queue.len() - 1
+                }
+            };
             let position =
                 self.spawn_queue[..=at].iter().filter(|(lead, _)| *lead == lead_id).count();
             return Ok(json!({

@@ -482,6 +482,9 @@ fn agy_rows_reads_with_and_without_a_wal() {
     assert_eq!(agy_rows(&db).as_deref(), Some("14|9A010412026869\n132|00\n"));
     std::fs::write(db.with_extension("db-wal"), "not a wal").unwrap();
     assert_eq!(texts(&agy_transcript(&agy_rows(&db).unwrap())), [(Role::User, "hi".to_string())]);
+    let prefix = format!("aether-agy-{}-", std::process::id());
+    let left = std::fs::read_dir(std::env::temp_dir()).unwrap().flatten();
+    assert!(left.filter(|e| e.file_name().to_string_lossy().starts_with(&prefix)).count() == 0);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

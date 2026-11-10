@@ -124,6 +124,35 @@ pub(crate) fn questions_answer(
     )
 }
 
+const MASK: &str = "••••••";
+
+/// What the transcript and chat database keep of an answer: secret fields are masked.
+pub(crate) fn redact_secrets(ask: &Ask, answer: &Answer) -> Answer {
+    let mask = |values: &[String]| values.iter().map(|_| MASK.to_string()).collect();
+    match (ask, answer) {
+        (Ask::Questions(questions), Answer::Answers(answers)) => Answer::Answers(
+            answers
+                .iter()
+                .enumerate()
+                .map(|(i, values)| match questions.get(i) {
+                    Some(q) if q.secret => mask(values),
+                    _ => values.clone(),
+                })
+                .collect(),
+        ),
+        (Ask::Form(form), Answer::Form(fields)) => Answer::Form(
+            fields
+                .iter()
+                .map(|(key, values)| {
+                    let secret = form.fields.iter().any(|f| f.secret && f.key == *key);
+                    (key.clone(), if secret { mask(values) } else { values.clone() })
+                })
+                .collect(),
+        ),
+        _ => answer.clone(),
+    }
+}
+
 /// In agent chats the line is a note for the agent, sent only with a deny; elsewhere it's
 /// the edited input.
 fn approval_answer(
@@ -492,11 +521,13 @@ impl ChatApp {
         };
         let agent = self.chats[chat].is_agent();
         let msg = &mut self.chats[chat].messages[message];
-        let tool = msg.requests.iter().find(|r| r.id == id).and_then(|r| match &r.ask {
+        let request = msg.requests.iter().find(|r| r.id == id);
+        let tool = request.and_then(|r| match &r.ask {
             Ask::Approval(a) => Some(a.tool.clone()),
             _ => None,
         });
-        if !msg.answer(id, answer.clone()) {
+        let kept = request.map_or_else(|| answer.clone(), |r| redact_secrets(&r.ask, &answer));
+        if !msg.answer(id, kept) {
             return;
         }
         // CLI tool names aren't aether's tools; the CLI keeps its own session allowance

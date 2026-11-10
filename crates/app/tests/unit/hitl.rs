@@ -294,3 +294,26 @@ fn session_transfer_keeps_partially_typed_request(cx: &mut gpui_kit::TestAppCont
         })
         .unwrap();
 }
+
+#[test]
+fn secret_answers_are_masked_before_they_are_kept() {
+    let question = |secret| Question { question: "q".into(), secret, ..Question::default() };
+    let ask = Ask::Questions(vec![question(false), question(true)]);
+    let answer = Answer::Answers(vec![vec!["plain".into()], vec!["hunter2".into()]]);
+    let Answer::Answers(kept) = redact_secrets(&ask, &answer) else { panic!("kept") };
+    assert_eq!(kept[0], ["plain"]);
+    assert_eq!(kept[1], [MASK]);
+
+    let field = |key: &str, secret| Field { key: key.into(), secret, ..Field::default() };
+    let form = Ask::Form(Form {
+        fields: vec![field("user", false), field("token", true)],
+        ..Form::default()
+    });
+    let answer = Answer::Form(vec![
+        ("user".into(), vec!["me".into()]),
+        ("token".into(), vec!["sk-live".into()]),
+    ]);
+    let Answer::Form(kept) = redact_secrets(&form, &answer) else { panic!("kept") };
+    assert_eq!(kept[0].1, ["me"]);
+    assert_eq!(kept[1].1, [MASK]);
+}

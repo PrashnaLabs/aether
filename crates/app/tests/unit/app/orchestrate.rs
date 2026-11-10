@@ -737,6 +737,45 @@ fn delivery_says_who_stopped_the_child(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn spawn_queue_is_capped_per_lead(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            for _ in 0..8 {
+                let id = with_child(app, 10);
+                let ix = child_ix(app, id);
+                app.chats[ix].cancel = Some(aether_agent::Cancel::inert());
+            }
+            for _ in 0..32 {
+                app.spawn_agent(1, &spawn_args("codex", "gpt-5"), window, cx).unwrap();
+            }
+            let err = app.spawn_agent(1, &spawn_args("codex", "gpt-5"), window, cx).unwrap_err();
+            assert!(err.contains("already queued"), "{err}");
+            assert_eq!(app.spawn_queue.len(), 32);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn message_agent_refuses_a_chat_with_more_access_than_the_lead(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let mut other = lead_chat(20);
+            other.access = AccessMode::Full;
+            other.cancel = Some(aether_agent::Cancel::inert());
+            app.chats.push(other);
+            let err =
+                app.message_agent(1, &json!({"id": 20, "text": "x"}), window, cx).unwrap_err();
+            assert!(err.contains("more access"), "{err}");
+            app.chats[2].access = AccessMode::AutoEdit;
+            let sent = app.message_agent(1, &json!({"id": 20, "text": "x"}), window, cx).unwrap();
+            assert_eq!(sent["status"], "queued");
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn spawn_queues_at_running_cap_and_starts_when_a_slot_frees(cx: &mut TestAppContext) {
     // the drained spawn starts a real CLI run whose worker thread sends updates
     cx.background_executor.allow_parking();
