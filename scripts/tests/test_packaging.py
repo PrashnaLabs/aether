@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -42,6 +43,23 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue((self.stage / "usr/share/doc/aether/copyright").is_file())
         if shutil.which("desktop-file-validate"):
             subprocess.run(["desktop-file-validate", desktop], check=True)
+
+    def test_tar_filter_normalizes_ownership_and_permissions(self):
+        import tarfile
+        ti_file = tarfile.TarInfo("test_file")
+        ti_file.type = tarfile.REGTYPE
+        ti_file.mode = 0o600
+        ti_file.uid = 1000
+        ti_file.gid = 1000
+        filtered = build.tar_filter(ti_file)
+        self.assertEqual((filtered.uid, filtered.gid, filtered.uname, filtered.gname), (0, 0, "root", "root"))
+        self.assertEqual(filtered.mode, 0o644)
+
+        ti_dir = tarfile.TarInfo("test_dir")
+        ti_dir.type = tarfile.DIRTYPE
+        ti_dir.mode = 0o700
+        filtered_dir = build.tar_filter(ti_dir)
+        self.assertEqual(filtered_dir.mode, 0o755)
 
     def test_icon_dimensions_and_icns_chunks(self):
         for size in (16, 32, 48, 64, 128, 256, 512, 1024):
@@ -99,7 +117,7 @@ class PackagingTests(unittest.TestCase):
 
     def test_invalid_format_fails_before_build(self):
         fmt = "deb" if platform.system() == "Darwin" else "dmg"
-        result = subprocess.run(["python3", SCRIPT, "--format", fmt], capture_output=True)
+        result = subprocess.run([sys.executable, SCRIPT, "--format", fmt], capture_output=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn(b"unsupported", result.stderr)
 
