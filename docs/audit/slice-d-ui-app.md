@@ -31,7 +31,7 @@ for both touched crates (results below). No GUI launched.
 | D-SEC-1 | High | `crates/app/src/browser.rs` | Webview loaded `file://`/`data:`/`mailto:` from any source (omnibox, HN, `window.open`) | Fixed |
 | D-SEC-2 | High | `crates/ui/src/chat/links.rs` | Agent-controlled markdown links fell through to `cx.open_url` for any OS scheme | Fixed |
 | D-PERF-1 | Medium | `crates/ui/src/chat/markdown.rs` | `set_text` re-parsed every markdown block on every frame | Fixed |
-| D-PERF-2 | Medium | `crates/app/src/session_workspace/persistence.rs`, `app/render.rs` | Workspace+drafts JSON serialized on every render | Documented only |
+| D-PERF-2 | Medium | `crates/app/src/session_workspace/persistence.rs`, `app/render.rs` | Workspace+drafts JSON serialized on every render | Fixed |
 | D-SEC-3 | Low | `crates/app/src/attachments.rs` | `store_bytes` itself had no size cap; conversion could exceed 20 MB | Fixed |
 | D-PERF-3 | Low | `crates/app/src/browser.rs` | Linux GTK pump loops every 16 ms even when hidden | Documented only |
 
@@ -124,7 +124,7 @@ the next render is skipped too.
 Status: Fixed. (No rendering test added: the guard needs a live
 `TextViewState`; `cargo test -p aether-ui` passes 283/283.)
 
-### D-PERF-2 — Medium — `crates/app/src/session_workspace/persistence.rs`, `crates/app/src/app/render.rs` — Documented only
+### D-PERF-2 — Medium — `crates/app/src/session_workspace/persistence.rs`, `crates/app/src/app/render.rs` — Fixed
 What: `ChatApp::render` calls `schedule_workspace_save` every frame, which
 serializes the whole `WorkspaceModel` plus all session drafts to JSON
 `String`s and a `format!` signature on every render, deduplicating only
@@ -135,13 +135,19 @@ Evidence: `self.schedule_workspace_save(cx)` in `render()` line ~61;
 `save.last == signature` is compared.
 Impact: O(workspace + drafts) allocation/copy/serialize per frame at
 60 fps for the app's lifetime; grows with open panes and composer content.
-Fix (proposed, not applied): gate `schedule_workspace_save` on a mutation
-version — bump a counter in `WorkspaceModel` mutators (or only recompute
-the signature when a tracked dirty flag is set from the layout/bounds/draft
-paths) and skip `workspace_payload()` entirely when clean. Skipping this
-needs careful handling of `flush_workspace` and the 300 ms debounce so the
-final state isn't lost, hence Documented only rather than a partial fix.
-Status: Documented only.
+Fix: `SaveState` caches the last saved `(WorkspaceModel, drafts)` and compares
+the current model and `session_snapshots()` against it with `PartialEq`. Only
+when something differs does it serialize to JSON and schedule a write.
+`WindowLayout` equality ignores the transient `shown` field, which isn't
+persisted. The snapshots are still cloned on each render, but the JSON
+serialization and `format!` signature are gone. The 300 ms debounce and the
+shutdown flush are unchanged. Unit tests cover an unchanged state, layout
+changes, draft changes, and a live composer edit.
+Lead review: codex's version also skipped building the snapshots, using a
+second 67-line function that repeated the `session_snapshots` field logic.
+The lead dropped it, because if the two ever drifted apart, saves would be
+silently skipped.
+Status: Fixed.
 
 ### D-SEC-3 — Low — `crates/app/src/attachments.rs` — Fixed
 What: `store_bytes` had no size check of its own; the 20 MB cap lives in

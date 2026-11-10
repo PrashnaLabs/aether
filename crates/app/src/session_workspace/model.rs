@@ -107,7 +107,7 @@ pub(crate) fn split_sizes(total: f32, a: f32, b: f32, ratio: f32) -> Option<(f32
     Some((first, usable - first))
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) enum DockNode {
     Leaf(PaneId),
     Split { id: u64, axis: SplitAxis, ratio: f32, first: Box<Self>, second: Box<Self> },
@@ -206,7 +206,7 @@ impl DockNode {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct FloatingPane {
     pub pane: PaneId,
     pub bounds: Rect,
@@ -225,6 +225,17 @@ pub(crate) struct WindowLayout {
     // monocle tab; outlives focus moving to a float
     #[serde(skip)]
     pub shown: Option<PaneId>,
+}
+impl PartialEq for WindowLayout {
+    fn eq(&self, other: &Self) -> bool {
+        // Persistence compares only fields written to the layout file.
+        self.bounds == other.bounds
+            && self.stack == other.stack
+            && self.root == other.root
+            && self.floats == other.floats
+            && self.focused == other.focused
+            && self.maximized == other.maximized
+    }
 }
 impl WindowLayout {
     pub(crate) fn panes(&self) -> Vec<PaneId> {
@@ -245,7 +256,7 @@ impl WindowLayout {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct WorkspaceModel {
     pub windows: BTreeMap<WindowId, WindowLayout>,
     pub panes: BTreeMap<PaneId, i64>,
