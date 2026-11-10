@@ -86,6 +86,17 @@ Aether prompts to register it when a lead first starts.
 back to the lead automatically; leads should not poll `read_agent` for
 completion.
 
+### Choosing a provider for a helper
+
+`spawn_agent` takes `provider` and `model`. Pass `provider: "auto"` (or leave
+it out, along with `model`) and Aether starts the helper on the installed
+provider with the most quota left. It compares each provider's tightest plan
+limit, divided by (1 + the chats already running on it), so a burst of spawns
+spreads out. Only usage snapshots under 10 minutes old count; with none, the
+helper starts on the lead's own provider. The reply includes `quota_left` (the
+chosen provider's tightest percent left) when quota decided the pick. The
+model is the last one used on that provider, or the CLI's default. Naming a
+provider explicitly skips all of this.
 `message_agent` also reaches chats that aren't the lead's children (not
 the lead itself, not archived). Their answers don't come back on their own;
 read them with `read_history` and the chat's `id`, which leads can pass to

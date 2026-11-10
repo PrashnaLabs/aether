@@ -105,6 +105,85 @@ fn lead_app(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<ChatApp> {
     })
 }
 
+fn seed_quota(app: &mut ChatApp, claude: f32, codex: f32, age_ms: i64) {
+    use aether_agent::usage::{PlanLimit, PlanUsage};
+    app.probes.insert(Provider::Claude, ProviderProbe { installed: true, ..Default::default() });
+    let at = now_ms() - age_ms;
+    for (p, left) in [(Provider::Claude, claude), (Provider::Codex, codex)] {
+        let usage = PlanUsage { limits: vec![PlanLimit::new("w", left, "")], ..Default::default() };
+        app.provider_plan_usages.insert(p, usage);
+        app.plan_usage_at.insert(p, at);
+    }
+    // keeps the spawn-time refresh from reading real credentials in tests
+    app.usage_attempt_at = now_ms();
+}
+
+#[test]
+fn parse_accepts_empty_model_as_cli_default() {
+    let a = SpawnArgs::parse(&spawn_args("codex", ""), &codex_probes(&["gpt-5"])).unwrap();
+    assert_eq!(a.model, "");
+}
+
+#[gpui_kit::test]
+fn auto_picks_provider_with_most_quota_left(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            seed_quota(app, 20.0, 65.0, 1_000);
+            app.settings.provider_models.insert("codex".into(), "gpt-5".into());
+            for provider in ["auto", ""] {
+                let mut args = spawn_args(provider, "");
+                args.as_object_mut().unwrap().remove("model");
+                let (out, left) = app.resolve_auto(1, &args, cx).unwrap();
+                assert_eq!(
+                    (out["provider"].as_str(), out["model"].as_str()),
+                    (Some("codex"), Some("gpt-5"))
+                );
+                assert_eq!(left, Some(65.0));
+            }
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn auto_without_fresh_usage_falls_back_to_lead_provider(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            seed_quota(app, 20.0, 99.0, 11 * 60_000);
+            let (out, left) = app.resolve_auto(1, &spawn_args("auto", ""), cx).unwrap();
+            assert_eq!(out["provider"], "claude");
+            assert_eq!(left, None);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn auto_model_not_in_probe_falls_back_to_cli_default(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            seed_quota(app, 20.0, 65.0, 1_000);
+            app.settings.provider_models.insert("codex".into(), "retired".into());
+            let (out, _) = app.resolve_auto(1, &spawn_args("auto", ""), cx).unwrap();
+            assert_eq!(out["model"], "");
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn explicit_provider_ignores_quota(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            seed_quota(app, 99.0, 1.0, 1_000);
+            let args = spawn_args("codex", "gpt-5");
+            let (out, left) = app.resolve_auto(1, &args, cx).unwrap();
+            assert_eq!((out, left), (args, None));
+        })
+        .unwrap();
+}
+
 #[test]
 fn parse_rejects_missing_task() {
     let mut args = spawn_args("codex", "gpt-5");

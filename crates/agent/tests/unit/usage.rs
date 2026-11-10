@@ -157,3 +157,52 @@ fn formats_seconds_countdown_hours_and_days() {
     assert_eq!(format_seconds_countdown(12106), "in 3h 21m");
     assert_eq!(format_seconds_countdown(432464), "in 5d 0h");
 }
+
+fn plan(lefts: &[f32]) -> PlanUsage {
+    PlanUsage {
+        limits: lefts.iter().map(|&l| PlanLimit::new("w", l, "")).collect(),
+        ..PlanUsage::default()
+    }
+}
+
+#[test]
+fn headroom_is_tightest_window() {
+    assert_eq!(headroom(&plan(&[90.0, 5.0])), Some(5.0));
+}
+
+#[test]
+fn headroom_is_unknown_without_meters() {
+    assert_eq!(headroom(&default_plan_usage("pi")), None);
+}
+
+#[test]
+fn best_provider_prefers_most_headroom() {
+    let (a, b) = (plan(&[40.0]), plan(&[70.0]));
+    let pick = best_provider([(Provider::Claude, &a, 0), (Provider::Codex, &b, 0)]);
+    assert_eq!(pick, Some((Provider::Codex, 70.0)));
+}
+
+#[test]
+fn best_provider_spreads_load_and_skips_unknown() {
+    let (a, b, none) = (plan(&[80.0]), plan(&[50.0]), default_plan_usage("pi"));
+    let pick = best_provider([
+        (Provider::Claude, &a, 1),
+        (Provider::Pi, &none, 0),
+        (Provider::Codex, &b, 0),
+    ]);
+    assert_eq!(pick, Some((Provider::Codex, 50.0)));
+}
+
+#[test]
+fn best_provider_ties_keep_first_and_empty_is_none() {
+    let (a, b) = (plan(&[30.0]), plan(&[30.0]));
+    let pick = best_provider([(Provider::Claude, &a, 0), (Provider::Codex, &b, 0)]);
+    assert_eq!(pick, Some((Provider::Claude, 30.0)));
+    assert_eq!(best_provider([]), None);
+}
+
+#[test]
+fn best_provider_still_picks_when_all_exhausted() {
+    let a = plan(&[0.0]);
+    assert_eq!(best_provider([(Provider::Claude, &a, 0)]), Some((Provider::Claude, 0.0)));
+}

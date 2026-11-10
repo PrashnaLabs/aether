@@ -113,8 +113,8 @@ pub fn tool_specs() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity"},
-                    "model": {"type": "string", "description": "Model id for the provider"},
+                    "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity, or \"auto\" (the default) to start on whichever has the most quota left"},
+                    "model": {"type": "string", "description": "Model id for the provider; omit to use the provider's usual model"},
                     "title": {"type": "string", "description": "Short chat title"},
                     "task": {"type": "string", "description": "What the agent should do"},
                     "effort": {"type": "string", "description": "Optional reasoning effort"},
@@ -122,7 +122,7 @@ pub fn tool_specs() -> Value {
                     "nonce": {"type": "string", "description": "Idempotency key for this spawn; retrying with the same key returns the existing child instead of creating a second"},
                     "card": {"type": "integer", "description": "Optional board card id to link; omitted adds a card for this agent"}
                 },
-                "required": ["provider", "model", "title", "task"]
+                "required": ["title", "task"]
             }
         },
         {

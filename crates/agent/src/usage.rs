@@ -1,4 +1,4 @@
-use aether_core::home_dir;
+use aether_core::{Provider, home_dir};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -678,6 +678,28 @@ pub fn fetch_antigravity_plan_usage() -> Option<PlanUsage> {
 /// Placeholder until a provider's real limits load; never invented numbers.
 pub fn default_plan_usage(provider: &str) -> PlanUsage {
     PlanUsage { plan_name: provider.to_string(), ..PlanUsage::default() }
+}
+
+/// Tightest remaining window; `None` when the plan exposes no meters.
+pub fn headroom(usage: &PlanUsage) -> Option<f32> {
+    usage.limits.iter().map(|l| l.percent_left).reduce(f32::min)
+}
+
+/// Picks the provider with the most headroom per running chat, returning it with its raw
+/// tightest percent left. Candidates are `(provider, usage, running chats)`; ties keep the
+/// earlier candidate, so callers pass them in a fixed order.
+pub fn best_provider<'a>(
+    cands: impl IntoIterator<Item = (Provider, &'a PlanUsage, usize)>,
+) -> Option<(Provider, f32)> {
+    let mut best: Option<(Provider, f32, f32)> = None;
+    for (provider, usage, running) in cands {
+        let Some(left) = headroom(usage) else { continue };
+        let score = left / (1 + running) as f32;
+        if best.is_none_or(|(_, _, top)| score > top) {
+            best = Some((provider, left, score));
+        }
+    }
+    best.map(|(provider, left, _)| (provider, left))
 }
 
 #[cfg(test)]
