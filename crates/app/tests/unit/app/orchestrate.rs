@@ -1830,6 +1830,55 @@ fn card_tools_stay_in_the_leads_project(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn non_lead_chats_only_read_their_own_projects_cards(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let ix = app.chats.iter().position(|c| c.id == 10).unwrap();
+            app.chats[ix].lead = false;
+            let home = app.lead_project(ix);
+            let other = app.board_add(
+                "Other".into(),
+                String::new(),
+                Col::Todo,
+                "/tmp/x".into(),
+                None,
+                false,
+            );
+            let mine = app.board_add("Mine".into(), String::new(), Col::Todo, home, None, false);
+            let mut call = |tool: &str, args: Value| {
+                let (reply, answer) = std::sync::mpsc::channel();
+                app.orchestrate(
+                    OrchCall {
+                        deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                        lead: "10".into(),
+                        tool: tool.into(),
+                        args,
+                        reply,
+                    },
+                    window,
+                    cx,
+                );
+                answer.try_recv().unwrap()
+            };
+            assert_eq!(
+                call("list_cards", json!({"filter": {"project": "all"}})),
+                Ok(Value::String(format!("#{mine} [todo] Mine")))
+            );
+            assert_eq!(
+                call("list_cards", json!({"filter": {"ids": [other]}})),
+                Ok(Value::String("No matching cards.".into()))
+            );
+            assert_eq!(
+                call("read_card", json!({"id": other})),
+                Err(format!("card #{other} not found"))
+            );
+            assert!(call("read_card", json!({"id": mine})).is_ok());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn deleting_a_lead_unlinks_its_children_cards_and_handoffs(cx: &mut TestAppContext) {
     let window = lead_app(cx);
     window

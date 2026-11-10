@@ -81,6 +81,9 @@ Replies are plain text to keep tokens low. With Pi the tools appear as
 
 - `move_card` and `update_card` only reach cards in the lead's own project;
   `list_cards` and `delete_cards` take `project: "all"` for the rest.
+- Chats that are not leads only see cards in their own project. For them,
+  `list_cards` ignores `project` and `read_card` won't open another project's
+  card.
 - Card ids are short counters (`#66`) and are never reused, even after a
   delete. Cards made before short ids were renumbered on first launch.
 - Queued spawns live in memory; quitting Aether drops them.

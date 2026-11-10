@@ -560,9 +560,11 @@ impl ChatApp {
     /// Cards matching `f` for the lead at `lead_ix`.
     pub(super) fn matching_cards(&self, lead_ix: usize, f: &CardFilter) -> Vec<&BoardCard> {
         let home = self.lead_project(lead_ix);
+        let scoped = !self.chats[lead_ix].lead;
         self.cards
             .iter()
             .filter(|c| match f.project.as_deref() {
+                _ if scoped => c.project == home,
                 Some("all") => true,
                 Some(p) => c.project == p || folder(Path::new(&c.project)).eq_ignore_ascii_case(p),
                 None => f.ids.is_some() || c.project == home,

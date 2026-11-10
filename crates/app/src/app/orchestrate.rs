@@ -284,7 +284,7 @@ impl ChatApp {
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
                 "list_cards" => self.list_cards(ix, &call.args),
-                "read_card" => self.read_card(&call.args),
+                "read_card" => self.read_card(ix, &call.args),
                 "add_card" => self.add_card(ix, &call.args),
                 "move_card" => self.move_card(ix, &call.args),
                 "update_card" => self.update_card(ix, &call.args),
@@ -402,7 +402,7 @@ impl ChatApp {
         Ok(Value::String(card_lines(&cards, bodies, &self.lead_project(ix))))
     }
 
-    fn read_card(&self, args: &Value) -> Result<Value, String> {
+    fn read_card(&self, ix: usize, args: &Value) -> Result<Value, String> {
         let id = args["id"]
             .as_i64()
             .or_else(|| {
@@ -412,7 +412,7 @@ impl ChatApp {
         let card = self
             .cards
             .iter()
-            .find(|c| c.id == id)
+            .find(|c| c.id == id && (self.chats[ix].lead || c.project == self.lead_project(ix)))
             .ok_or_else(|| format!("card #{id} not found"))?;
         let now = now_ms();
         let chats: Vec<Value> = card
