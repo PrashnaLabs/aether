@@ -6,6 +6,7 @@ mod agents_view;
 mod app;
 mod assets;
 mod attachments;
+mod attachments_view;
 mod board;
 mod browser;
 mod explorer;

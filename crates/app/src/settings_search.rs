@@ -394,6 +394,13 @@ static SETTING_CATALOG: &[SettingItem] = &[
         keywords: &["git", "isolated", "checkout", "reveal"],
     },
     SettingItem {
+        id: "attachments",
+        tab: SettingsTab::Attachments,
+        title: "Attachments",
+        description: "Images and files saved from chats in every project. Preview or delete them.",
+        keywords: &["images", "pasted", "files", "screenshots", "storage"],
+    },
+    SettingItem {
         id: "web_search",
         tab: SettingsTab::Tools,
         title: "Web search",

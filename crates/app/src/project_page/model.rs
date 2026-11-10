@@ -78,6 +78,7 @@ pub(crate) struct ProjectPageState {
     pub group: GroupBy,
     pub sort: SortBy,
     pub data: Option<ProjectData>,
+    pub attachments: bool,
 }
 
 pub(crate) struct ProjectData {

@@ -42,12 +42,13 @@ pub(crate) enum SettingsTab {
     Model,
     Providers,
     Worktrees,
+    Attachments,
     Tools,
     Terminal,
 }
 
 impl SettingsTab {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Appearance,
         Self::BottomBar,
         Self::Tiling,
@@ -55,6 +56,7 @@ impl SettingsTab {
         Self::Model,
         Self::Providers,
         Self::Worktrees,
+        Self::Attachments,
         Self::Tools,
         Self::Terminal,
     ];
@@ -68,6 +70,7 @@ impl SettingsTab {
             Self::Model => "Direct Chat",
             Self::Providers => "Providers",
             Self::Worktrees => "Worktrees",
+            Self::Attachments => "Attachments",
             Self::Tools => "Tools",
             Self::Terminal => "Terminal",
         }
@@ -1273,6 +1276,9 @@ impl ChatApp {
             SettingsTab::Worktrees => {
                 page = page.child(self.worktrees_section(cx));
             }
+            SettingsTab::Attachments => {
+                page = page.child(self.render_stored_files(None, cx));
+            }
             SettingsTab::Tools => {
                 let notes_ids = [
                     "notes-directory",
@@ -1801,6 +1807,7 @@ impl SettingsTab {
             Self::Model => "Set your default model, response behavior and custom instructions.",
             Self::Providers => "Configure coding agents and their workspace.",
             Self::Worktrees => "Manage isolated checkouts used by your chats.",
+            Self::Attachments => "Files saved from chats across every project.",
             Self::Tools => "Control tool permissions and planning.",
             Self::Terminal => "Set the terminal's colors, font, cursor and keys.",
         }
@@ -1816,6 +1823,7 @@ impl SettingsTab {
             Self::Model => Lucide::MessageCircle,
             Self::Providers => Lucide::Bot,
             Self::Worktrees => Lucide::GitFork,
+            Self::Attachments => Lucide::Paperclip,
             Self::Tools => Lucide::Wrench,
             Self::Terminal => Lucide::SquareTerminal,
         }
@@ -1831,6 +1839,9 @@ impl ChatApp {
         self.settings_tab = tab;
         if tab == SettingsTab::Worktrees {
             self.load_worktrees(cx);
+        }
+        if tab == SettingsTab::Attachments {
+            self.load_stored_files(cx);
         }
         cx.notify();
     }
@@ -1896,6 +1907,7 @@ impl ChatApp {
                 &[
                     SettingsTab::Providers,
                     SettingsTab::Worktrees,
+                    SettingsTab::Attachments,
                     SettingsTab::Tools,
                     SettingsTab::Terminal,
                 ][..],

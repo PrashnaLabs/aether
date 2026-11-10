@@ -160,6 +160,20 @@ impl ChatApp {
                         this.toggle_sidebar(window, cx)
                     }))
             });
+        let back = aether_ui::button("project-back")
+            .ghost()
+            .small()
+            .icon(Lucide::ArrowLeft)
+            .accessibility_label("Back")
+            .tooltip("Back")
+            .on_click(cx.listener(|this, _, _, cx| {
+                if this.project_view.attachments {
+                    this.project_view.attachments = false;
+                    cx.notify();
+                } else {
+                    this.open_page(crate::app::Page::Chat, cx);
+                }
+            }));
         let name = self.project_page.as_deref().map(|dir| self.project_name(dir));
         h_flex()
             .flex_none()
@@ -168,6 +182,7 @@ impl ChatApp {
             .gap(px(8.))
             .items_center()
             .children(expand_btn)
+            .child(back)
             .children(name.map(|name| {
                 h_flex()
                     .id("breadcrumb")

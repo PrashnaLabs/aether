@@ -657,6 +657,10 @@ impl ChatApp {
             board_picks: HashSet::new(),
             archive_picks: Default::default(),
             project_picks: Default::default(),
+            stored_files: Vec::new(),
+            stored_file_picks: HashSet::new(),
+            stored_files_error: None,
+            stored_files_project_filter: Default::default(),
             right_panel_resizing: false,
             side_tabs: HashMap::new(),
             side_back: crate::side_panel::SideTab::Agent,
@@ -736,6 +740,13 @@ impl ChatApp {
                 .flat_map(|m| &m.attachments)
                 .map(|a| a.path.clone())
                 .chain(app.chats.iter().flat_map(|c| &c.pending).map(|a| a.path.clone()))
+                .chain(
+                    app.chats
+                        .iter()
+                        .flat_map(|c| &c.queue)
+                        .flat_map(|q| &q.attachments)
+                        .map(|a| a.path.clone()),
+                )
                 .chain(
                     app.chats
                         .iter()

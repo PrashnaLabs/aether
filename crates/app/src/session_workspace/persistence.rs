@@ -99,9 +99,23 @@ impl ChatApp {
         {
             for (id, snapshot) in saved.drafts {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == id) {
+                    // drafts file can predate last send; reusing those paths shares/deletes sent files
+                    let sent: std::collections::HashSet<_> = chat
+                        .messages
+                        .iter()
+                        .flat_map(|m| &m.attachments)
+                        .chain(chat.queue.iter().flat_map(|q| &q.attachments))
+                        .map(|a| a.path.clone())
+                        .collect();
+                    let fresh = |files: &[aether_core::Attachment]| {
+                        files.iter().filter(|a| !sent.contains(&a.path)).cloned().collect()
+                    };
                     chat.draft = snapshot.text.clone();
-                    chat.pending = snapshot.pending.clone();
-                    chat.edit_stash = snapshot.edit_stash.clone();
+                    chat.pending = fresh(&snapshot.pending);
+                    chat.edit_stash = snapshot
+                        .edit_stash
+                        .as_ref()
+                        .map(|(text, files)| (text.clone(), fresh(files)));
                     self.workspace.restored_drafts.insert(id, snapshot);
                 }
             }

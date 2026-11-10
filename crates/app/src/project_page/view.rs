@@ -10,7 +10,8 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, checkbox::Checkbox, h_flex, v_flex,
+    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, checkbox::Checkbox, h_flex,
+    v_flex,
 };
 use gpui_kit::{
     Anchor, AnyElement, App, Context, FontWeight, Hsla, Role, SharedString, div, img, prelude::*,
@@ -74,6 +75,26 @@ impl ChatApp {
         let data = self.project_view.data.as_ref().filter(|d| d.folder == folder);
         let missing = self.missing_folders.contains(&folder);
         let header = self.project_header(&folder, data, missing, cx);
+        if self.project_view.attachments {
+            return div()
+                .id("project-page")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(
+                    v_flex()
+                        .w_full()
+                        .max_w(px(980.))
+                        .mx_auto()
+                        .px(px(28.))
+                        .pt(px(28.))
+                        .pb(px(40.))
+                        .child(header)
+                        .child(caption("Attachments", cx))
+                        .child(self.render_stored_files(Some(&folder), cx)),
+                )
+                .into_any_element();
+        }
         let filters = self.project_filters(&cards, cx);
         let grid = self.project_grid(&cards, now, cx);
         let ids: Vec<i64> = cards
@@ -190,6 +211,20 @@ impl ChatApp {
                     this.new_chat_in(new_folder.clone(), window, cx)
                 }))
             });
+        let attachments = aether_ui::button("project-attachments")
+            .outline()
+            .small()
+            .h(px(28.))
+            .icon(Lucide::Paperclip)
+            .label("Attachments")
+            .selected(self.project_view.attachments)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.project_view.attachments = !this.project_view.attachments;
+                if this.project_view.attachments {
+                    this.load_stored_files(cx);
+                }
+                cx.notify();
+            }));
         h_flex()
             .gap(px(14.))
             .items_center()
@@ -218,6 +253,7 @@ impl ChatApp {
                             .children(facts),
                     ),
             )
+            .child(attachments)
             .child(self.project_open_in(folder, missing, cx))
             .child(new_agent)
     }

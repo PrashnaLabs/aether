@@ -254,7 +254,7 @@ enum WorktreeJob {
 }
 
 /// Sidebar group of a CLI chat: the folder it started in, even once it runs in a worktree.
-fn project_dir(chat: &Chat, workspace_root: &str) -> PathBuf {
+pub(crate) fn project_dir(chat: &Chat, workspace_root: &str) -> PathBuf {
     if chat.project.is_empty() {
         chat_cwd(chat, workspace_root)
     } else {
@@ -664,6 +664,10 @@ pub(crate) struct ChatApp {
     pub(crate) board_picks: HashSet<i64>,
     pub(crate) archive_picks: HashSet<i64>,
     pub(crate) project_picks: HashSet<i64>,
+    pub(crate) stored_files: Vec<crate::attachments_view::StoredFile>,
+    pub(crate) stored_file_picks: HashSet<PathBuf>,
+    pub(crate) stored_files_error: Option<SharedString>,
+    pub(crate) stored_files_project_filter: crate::attachments_view::ProjectFilter,
     pub(crate) right_panel_resizing: bool,
     /// Detached session windows' tabs; main keeps `side_tab`.
     pub(crate) side_tabs: HashMap<crate::session_workspace::WindowId, crate::side_panel::SideTab>,
@@ -725,6 +729,7 @@ impl ChatApp {
     pub(crate) fn open_project_page(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
         self.project_page = Some(folder.clone());
         self.project_picks.clear();
+        self.project_view.attachments = false;
         self.open_page(Page::Project, cx);
         self.load_project_data(folder, cx);
     }
