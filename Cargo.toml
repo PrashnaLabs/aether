@@ -60,3 +60,6 @@ opt-level = 2
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+[patch.crates-io]
+gpui-base = { path = "vendor/gpui-base" }
