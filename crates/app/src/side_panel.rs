@@ -901,6 +901,10 @@ impl ChatApp {
             self.board_tab,
         );
         for (index, surface) in tabs.into_iter().enumerate() {
+            if surface == Surface::Workspace {
+                rail = rail.child(self.workspace_toggle(cx));
+                continue;
+            }
             let active = self.right_surface == Some(surface);
             rail = rail.child(
                 icon_chip(("right-panel-rail", index), active, cx)
@@ -913,7 +917,7 @@ impl ChatApp {
                     })),
             );
         }
-        rail.child(self.workspace_toggle(cx)).into_any_element()
+        rail.into_any_element()
     }
 
     pub(crate) fn side_panel_sidebar(
