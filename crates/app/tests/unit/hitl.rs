@@ -408,3 +408,52 @@ fn rewind_clear_restart_and_delete_drop_pending_requests(cx: &mut gpui_kit::Test
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn enter_on_a_lit_option_picks_it_before_moving_on(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let question = |options: Vec<Choice>| Question {
+                question: "Pick one".into(),
+                other: true,
+                options,
+                ..Question::default()
+            };
+            let ask = Ask::Questions(vec![
+                question(vec![choice("Alpha", ""), choice("Beta", "")]),
+                question(vec![choice("Gamma", "")]),
+                question(vec![choice("Delta", "")]),
+            ]);
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 840, ask: ask.clone() });
+            app.chats[0].messages = vec![m];
+            app.add_request_input(840, &ask, false, true, window, cx);
+            app.sync_rows(None, cx);
+            let card = app.request_inputs[&840].focus.clone();
+            window.focus(&card, cx);
+
+            app.request_inputs.get_mut(&840).unwrap().cursor = 1;
+            app.ask_key(840, AskKey::Primary, window, cx);
+            assert_eq!(app.request_picks[&840][0], BTreeSet::from([1]));
+            assert_eq!(app.request_inputs[&840].step, 1);
+
+            // "Something else…" needs typed text, so Enter doesn't pick it
+            app.request_inputs.get_mut(&840).unwrap().cursor = 1;
+            app.ask_key(840, AskKey::Primary, window, cx);
+            assert!(app.request_picks[&840].get(1).is_none_or(BTreeSet::is_empty));
+            assert_eq!(app.request_inputs[&840].step, 2);
+        })
+        .unwrap();
+}

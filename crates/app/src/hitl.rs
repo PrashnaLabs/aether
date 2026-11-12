@@ -741,7 +741,19 @@ impl ChatApp {
             AskKey::Dismiss if approval => self.submit_request(id, Submit::Deny, window, cx),
             AskKey::Dismiss => self.focus_composer(window, cx),
             AskKey::Primary if on_card || in_line => match (primary, current) {
-                (Some(Submit::Answers), _) => self.step_to(id, step + 1, window, cx),
+                (Some(Submit::Answers), current) => {
+                    if let (true, Some(Target::Option { i, k, multi: false })) = (on_card, current)
+                        && matches!(&request.ask, Ask::Questions(qs) if qs.get(i).is_some_and(|q| k < q.options.len()))
+                        && self
+                            .request_picks
+                            .get(&id)
+                            .and_then(|p| p.get(i))
+                            .is_none_or(BTreeSet::is_empty)
+                    {
+                        self.pick_option(id, i, k, false, cx);
+                    }
+                    self.step_to(id, step + 1, window, cx)
+                }
                 (Some(submit), _) => self.submit_request(id, submit, window, cx),
                 (None, Some(target)) => self.activate(id, target, window, cx),
                 (None, None) => {}
