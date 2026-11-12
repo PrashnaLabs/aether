@@ -241,6 +241,7 @@ impl ChatApp {
             let draft = self.chats[ix].draft.clone();
             self.composer.update(cx, |s, cx| s.set_value(draft, window, cx));
             self.bind_session_widgets(id, window, cx);
+            self.rebind_session_requests(id, window, cx);
             self.reset_rows(cx);
             self.apply_restored_session(id, window, cx);
             self.sync_selector(cx);
@@ -259,6 +260,7 @@ impl ChatApp {
         if self.ui_owner.is_none() {
             self.ui_owner = Some(id);
             self.bind_session_widgets(id, window, cx);
+            self.rebind_session_requests(id, window, cx);
             self.apply_restored_session(id, window, cx);
         } else {
             self.ensure_session_ui(id, window, cx);

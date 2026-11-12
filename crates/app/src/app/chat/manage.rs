@@ -220,6 +220,7 @@ impl ChatApp {
         self.session_views.remove(&id);
         self.session_subscriptions.remove(&id);
         self.session_windows.remove(&id);
+        self.expire_chat_requests(ix);
         let mut chat = self.chats.remove(ix);
         if let Some(WorktreeJob::Creating(_, cancel)) = &chat.worktree_job {
             cancel.store(true, Ordering::Relaxed);
@@ -635,6 +636,9 @@ impl ChatApp {
         }
         let (settings, session) = self.cli_request(ix);
         self.agent.close_session(&session.key);
+        self.expire_chat_requests(ix);
+        self.sync_chat_rows(ix, None, cx);
+        self.persist(ix);
         self.agent.attach(&settings, &session, restored_background(&self.chats[ix]));
         let now = now_ms();
         self.refresh_health(ix, now);

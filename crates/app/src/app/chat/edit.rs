@@ -324,6 +324,8 @@ impl ChatApp {
             });
         }
         self.agent.close_session(&chat.id.to_string());
+        self.expire_chat_requests(ix);
+        let chat = &mut self.chats[ix];
         chat.messages.truncate(from);
         chat.lead_seen = chat.lead_seen.filter(|&seen| seen < from);
         // nothing left to title it, so the resent first message names it again

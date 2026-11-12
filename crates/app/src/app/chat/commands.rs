@@ -9,6 +9,7 @@ impl ChatApp {
         if self.chats[ix].cancel.is_some() {
             return;
         }
+        self.expire_chat_requests(ix);
         let chat = &mut self.chats[ix];
         chat.messages.clear();
         chat.lead_seen = None;

@@ -300,3 +300,85 @@ fn accepted_failed_turn_is_not_replayed() {
     record_missed_turn(&mut chat, 1, false);
     assert_eq!(chat.handoff_seen.unwrap().seen, 0);
 }
+
+#[gpui_kit::test]
+fn apply_keeps_ask_and_resolution_when_chat_run_advances(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            app.chats[0].messages.push(Message::assistant());
+            app.chats[0].messages.push(Message::assistant());
+            app.chats[0].run = 2;
+            let ask = Ask::Approval(aether_core::Approval {
+                tool: "Bash".into(),
+                input: "pwd".into(),
+                ..aether_core::Approval::default()
+            });
+            app.apply(0, 0, 1, Update::Ask { id: 810, ask }, window, cx);
+            assert!(app.request_inputs.contains_key(&810));
+            assert_eq!(app.chats[0].messages[0].requests.len(), 1);
+            assert_eq!(
+                app.chats[0].messages[0].requests[0].status,
+                aether_core::RequestStatus::Pending
+            );
+
+            app.apply(0, 0, 1, Update::AskResolved(810), window, cx);
+            assert!(!app.request_inputs.contains_key(&810));
+            assert_eq!(
+                app.chats[0].messages[0].requests[0].status,
+                aether_core::RequestStatus::Withdrawn
+            );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn non_active_visible_session_syncs_rows_on_ask_and_answer(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut second = crate::app::chat_with("second", &[]);
+            second.id = 444;
+            second.messages.push(Message::assistant());
+            app.chats.push(second);
+            app.ensure_session_ui(444, window, cx);
+            assert_eq!(app.active, 0);
+
+            let ask = Ask::Approval(aether_core::Approval {
+                tool: "Bash".into(),
+                input: "echo hi".into(),
+                ..aether_core::Approval::default()
+            });
+            let run = app.chats[1].run;
+            app.apply(1, 0, run, Update::Ask { id: 840, ask }, window, cx);
+            let has_req_row = app
+                .in_session(444, cx, |this, _| {
+                    this.rows.iter().any(|r| matches!(r.block, aether_ui::Block::Request(0)))
+                })
+                .unwrap_or(false);
+            assert!(has_req_row, "split-pane session rows must include the new ask");
+        })
+        .unwrap();
+}

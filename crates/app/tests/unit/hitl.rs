@@ -317,3 +317,94 @@ fn secret_answers_are_masked_before_they_are_kept() {
     assert_eq!(kept[0].1, ["me"]);
     assert_eq!(kept[1].1, [MASK]);
 }
+
+#[gpui_kit::test]
+fn ensure_session_ui_binds_pending_requests(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let ask = Ask::Approval(Approval {
+                tool: "Bash".into(),
+                input: "ls".into(),
+                ..Approval::default()
+            });
+            let mut second = crate::app::chat_with("second", &[]);
+            second.id = 222;
+            let mut m1 = aether_core::Message::assistant();
+            m1.apply(aether_core::Update::Ask { id: 802, ask });
+            second.messages.push(m1);
+            app.chats.push(second);
+            assert!(!app.request_inputs.contains_key(&802));
+            app.ensure_session_ui(222, window, cx);
+            assert!(app.request_inputs.contains_key(&802));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn rewind_clear_restart_and_delete_drop_pending_requests(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let ask = Ask::Approval(Approval::default());
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 820, ask: ask.clone() });
+            app.chats[0].messages = vec![aether_core::Message::user("hi"), m];
+            app.add_request_input(820, &ask, false, true, window, cx);
+            assert!(app.request_inputs.contains_key(&820));
+            app.retry(window, cx);
+            assert!(!app.request_inputs.contains_key(&820));
+
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 821, ask: ask.clone() });
+            app.chats[0].messages = vec![m];
+            app.add_request_input(821, &ask, false, true, window, cx);
+            assert!(app.request_inputs.contains_key(&821));
+            app.clear_chat(cx);
+            assert!(!app.request_inputs.contains_key(&821));
+
+            app.chats[0].provider = aether_core::Provider::Claude;
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 822, ask: ask.clone() });
+            app.chats[0].messages = vec![m];
+            app.add_request_input(822, &ask, true, true, window, cx);
+            assert!(app.request_inputs.contains_key(&822));
+            app.restart_agent(0, cx);
+            assert!(!app.request_inputs.contains_key(&822));
+            assert_eq!(app.chats[0].messages[0].requests[0].status, RequestStatus::Expired);
+
+            let mut extra = crate::app::chat_with("extra", &[]);
+            extra.id = 333;
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 823, ask: ask.clone() });
+            extra.messages = vec![m];
+            app.chats.push(extra);
+            app.add_request_input(823, &ask, false, false, window, cx);
+            assert!(app.request_inputs.contains_key(&823));
+            app.delete_chat(1, window, cx);
+            assert!(!app.request_inputs.contains_key(&823));
+        })
+        .unwrap();
+}

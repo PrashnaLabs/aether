@@ -1219,7 +1219,17 @@ fn launch_uses_public_flags_and_hook_events() {
     let pair = |a: &str, b: &str| args.windows(2).any(|w| w[0] == a && w[1] == b);
     assert!(pair("--permission-prompts", "host") && pair("--permission-mode", "manual"));
     assert!(args.iter().any(|a| a == "--include-hook-events"));
-    assert!(!args.iter().any(|a| a == "--permission-prompt-tool"));
+}
+
+#[test]
+fn every_mode_routes_permission_prompts_to_the_host_over_stdio() {
+    for access in AccessMode::ALL {
+        let (args, ..) = launch_args(&DriverStartOptions { access, ..ask_opts() });
+        assert!(
+            args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1] == "stdio"),
+            "{access:?} never asks: the CLI denies what would prompt"
+        );
+    }
 }
 
 #[test]

@@ -482,14 +482,34 @@ impl ChatApp {
         Some((request, chat, self.chats[chat].is_agent()))
     }
 
-    /// Forgets a request's fields, picks and errors once it can't be answered here. If its
-    /// card had focus, the next pending card takes it, as a new ask would, else the composer.
-    pub(crate) fn drop_request(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let input = self.request_inputs.remove(&id);
+    pub(crate) fn remove_request(&mut self, id: u64) -> Option<RequestInput> {
         self.request_subscriptions.remove(&id);
         self.editing_plans.remove(&id);
         self.request_picks.remove(&id);
         self.request_errors.remove(&id);
+        self.request_inputs.remove(&id)
+    }
+
+    pub(crate) fn expire_chat_requests(&mut self, ix: usize) {
+        let ids: Vec<u64> = self.chats[ix]
+            .messages
+            .iter_mut()
+            .flat_map(|m| {
+                m.requests.iter_mut().filter(|r| r.status == RequestStatus::Pending).map(|r| {
+                    r.status = RequestStatus::Expired;
+                    r.id
+                })
+            })
+            .collect();
+        for id in ids {
+            self.remove_request(id);
+        }
+    }
+
+    /// Forgets a request's fields, picks and errors once it can't be answered here. If its
+    /// card had focus, the next pending card takes it, as a new ask would, else the composer.
+    pub(crate) fn drop_request(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.remove_request(id);
         if !input.is_some_and(|r| r.focus.contains_focused(window, cx)) {
             return;
         }
@@ -538,9 +558,7 @@ impl ChatApp {
         }
         self.agent.answer(id, answer);
         self.drop_request(id, window, cx);
-        if chat == self.active {
-            self.sync_rows(Some(message), cx);
-        }
+        self.sync_chat_rows(chat, Some(message), cx);
         cx.notify();
     }
 
@@ -594,10 +612,8 @@ impl ChatApp {
     }
 
     fn refresh_request(&mut self, id: u64, cx: &mut Context<Self>) {
-        if let Some((chat, message)) = self.locate_request(id)
-            && chat == self.active
-        {
-            self.sync_rows(Some(message), cx);
+        if let Some((chat, message)) = self.locate_request(id) {
+            self.sync_chat_rows(chat, Some(message), cx);
         }
         cx.notify();
     }
@@ -1250,9 +1266,10 @@ impl RenderOnce for AskCard {
                 if app
                     .request_inputs
                     .get(&self.id)
-                    .is_some_and(|input| input.window != window.window_handle().window_id())
+                    .is_none_or(|input| input.window != window.window_handle().window_id())
+                    && let Some((ix, _)) = app.locate_request(self.id)
                 {
-                    let chat = app.chats[app.active].id;
+                    let chat = app.chats[ix].id;
                     app.rebind_session_requests(chat, window, cx);
                 }
                 app.ask_card(self.id, &self.view, window, cx)

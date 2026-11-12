@@ -629,6 +629,30 @@ impl ChatApp {
         });
     }
 
+    pub(in crate::app) fn sync_chat(
+        &mut self,
+        ix: usize,
+        touched: Option<(usize, Changed)>,
+        cx: &mut Context<Self>,
+    ) {
+        if ix == self.active {
+            self.sync(touched, cx);
+        } else if let Some(id) = self.chats.get(ix).map(|c| c.id)
+            && self.session_views.contains_key(&id)
+        {
+            self.in_session(id, cx, |this, cx| this.sync(touched, cx));
+        }
+    }
+
+    pub(crate) fn sync_chat_rows(
+        &mut self,
+        ix: usize,
+        touched: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_chat(ix, touched.map(|m| (m, Changed::All)), cx);
+    }
+
     /// Rebuilds the active chat's rows and starts the list over.
     pub(in crate::app) fn reset_rows(&mut self, cx: &mut Context<Self>) {
         self.rows = self.build_rows(0, cx);
@@ -646,6 +670,13 @@ impl ChatApp {
         if ix == self.active {
             self.sync_rows(touched, cx);
             self.scroller.update(cx, |s, cx| s.scroll_to_end(cx));
+        } else if let Some(id) = self.chats.get(ix).map(|c| c.id)
+            && self.session_views.contains_key(&id)
+        {
+            self.in_session(id, cx, |this, cx| {
+                this.sync_rows(touched, cx);
+                this.scroller.update(cx, |s, cx| s.scroll_to_end(cx));
+            });
         }
     }
 
@@ -663,7 +694,7 @@ impl ChatApp {
         })
     }
 
-    pub(super) fn persist(&self, ix: usize) {
+    pub(crate) fn persist(&self, ix: usize) {
         if let Some(store) = &self.store {
             let chat = &self.chats[ix];
             store.save(SavedChat {

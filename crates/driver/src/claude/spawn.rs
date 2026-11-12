@@ -362,6 +362,8 @@ pub(crate) fn launch_args(
         "--include-hook-events",
         "--permission-prompts",
         "host",
+        "--permission-prompt-tool",
+        "stdio",
         "--permission-mode",
         mode,
     ]
