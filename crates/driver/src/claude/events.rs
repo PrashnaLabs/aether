@@ -593,7 +593,12 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                 Some(i) => s.echoes.remove(i),
                 None => s.echoes.pop_front(),
             };
-            entry.flatten().map(Update::Steered).into_iter().collect()
+            let mut out: Vec<_> =
+                entry.clone().flatten().map(Update::Steered).into_iter().collect();
+            if entry.is_some() {
+                out.insert(0, Update::Accepted);
+            }
+            out
         }
         Some("user") => {
             let parent = v["parent_tool_use_id"].as_str();

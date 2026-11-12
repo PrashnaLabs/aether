@@ -486,8 +486,11 @@ fn steers_are_reported_when_claude_echoes_them() {
     let echo = |t: &str| {
         json!({"type":"user","isReplay":true,"parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":t}]}}).to_string()
     };
-    assert_eq!(map_line(&mut s, &echo("count")), []);
-    assert_eq!(map_line(&mut s, &echo("also say done")), [Update::Steered("also say done".into())]);
+    assert_eq!(map_line(&mut s, &echo("count")), [Update::Accepted]);
+    assert_eq!(
+        map_line(&mut s, &echo("also say done")),
+        [Update::Accepted, Update::Steered("also say done".into())]
+    );
 }
 
 #[test]
@@ -823,7 +826,7 @@ fn steer_missed_by_the_last_call_keeps_the_turn_open_for_its_own_result() {
     };
     assert_eq!(
         map_line(&mut s, &echo("Count from 1 to 40, one number per line, no other text.")),
-        []
+        [Update::Accepted]
     );
     let first = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"1\n2\n40","usage":{"input_tokens":2,"cache_creation_input_tokens":20243,"cache_read_input_tokens":15259,"output_tokens":88,"iterations":[{"input_tokens":2,"output_tokens":88,"cache_read_input_tokens":15259,"cache_creation_input_tokens":20243}]},"modelUsage":{"claude-haiku-5-5":{"inputTokens":2,"outputTokens":88,"cacheReadInputTokens":15259,"cacheCreationInputTokens":20243,"contextWindow":1000000}},"result_index":0}"#;
     let out = map_line(&mut s, first);
@@ -832,7 +835,12 @@ fn steer_missed_by_the_last_call_keeps_the_turn_open_for_its_own_result() {
     assert!(s.active);
     assert_eq!(
         map_line(&mut s, &echo("Also, after the numbers, write the word BANANA on its own line.")),
-        [Update::Steered("Also, after the numbers, write the word BANANA on its own line.".into())]
+        [
+            Update::Accepted,
+            Update::Steered(
+                "Also, after the numbers, write the word BANANA on its own line.".into()
+            )
+        ]
     );
     let second = first.replace(r#""result":"1\n2\n40""#, r#""result":"1\n2\n40\nBANANA""#);
     let out = map_line(&mut s, &second);
@@ -1722,10 +1730,10 @@ fn a_mismatched_echo_still_pops_so_the_turn_can_end() {
     let mut s = State { active: true, ..State::default() };
     on_prompt(&mut s, "count");
     on_steer(&mut s, "also say done\n\nAttached files:\n- a.png");
-    assert_eq!(map_line(&mut s, &echo("count")), []);
+    assert_eq!(map_line(&mut s, &echo("count")), [Update::Accepted]);
     assert_eq!(
         map_line(&mut s, &echo("[Image #1] also say done")),
-        [Update::Steered("also say done".into())]
+        [Update::Accepted, Update::Steered("also say done".into())]
     );
     assert!(s.echoes.is_empty());
     let result = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"ok","usage":{},"modelUsage":{}}"#;
@@ -1738,9 +1746,15 @@ fn out_of_order_echoes_mark_their_own_steers() {
     on_prompt(&mut s, "count");
     on_steer(&mut s, "first");
     on_steer(&mut s, "second");
-    assert_eq!(map_line(&mut s, &echo("second")), [Update::Steered("second".into())]);
-    assert_eq!(map_line(&mut s, &echo("first")), [Update::Steered("first".into())]);
-    assert_eq!(map_line(&mut s, &echo("count")), []);
+    assert_eq!(
+        map_line(&mut s, &echo("second")),
+        [Update::Accepted, Update::Steered("second".into())]
+    );
+    assert_eq!(
+        map_line(&mut s, &echo("first")),
+        [Update::Accepted, Update::Steered("first".into())]
+    );
+    assert_eq!(map_line(&mut s, &echo("count")), [Update::Accepted]);
     assert!(s.echoes.is_empty());
 }
 
@@ -1750,7 +1764,7 @@ fn a_trimmed_echo_matches_its_steer() {
     on_prompt(&mut s, "count");
     on_steer(&mut s, "one");
     on_steer(&mut s, "two");
-    assert_eq!(map_line(&mut s, &echo("two\n")), [Update::Steered("two".into())]);
+    assert_eq!(map_line(&mut s, &echo("two\n")), [Update::Accepted, Update::Steered("two".into())]);
     assert_eq!(s.echoes.len(), 2);
 }
 
@@ -1859,7 +1873,7 @@ fn a_stop_keeps_steers_the_cli_still_holds_and_refuses_the_rest() {
             .any(|u| matches!(u, Update::Final(_) | Update::Error(_)))
     );
     assert!(s.active, "the held steer runs next in this reply");
-    assert_eq!(map_line(&mut s, &echo("kept")), [Update::Steered("kept".into())]);
+    assert_eq!(map_line(&mut s, &echo("kept")), [Update::Accepted, Update::Steered("kept".into())]);
     let result =
         r#"{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{}}"#;
     assert_eq!(map_line(&mut s, result).last(), Some(&Update::Final("done".into())));

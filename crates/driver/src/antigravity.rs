@@ -960,9 +960,10 @@ fn step(s: &mut State, st: &Value) -> Vec<Update> {
                 return Vec::new();
             }
             let Some(input) = s.inputs.get(s.taken) else { return Vec::new() };
-            let steered = input.steer.then(|| Update::Steered(input.text.clone()));
+            let update =
+                if input.steer { Update::Steered(input.text.clone()) } else { Update::Accepted };
             s.taken += 1;
-            steered.into_iter().collect()
+            vec![update]
         }
         other => {
             log_unknown("agy", other.unwrap_or("step_update without a type"));

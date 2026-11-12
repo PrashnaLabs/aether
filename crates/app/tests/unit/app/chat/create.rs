@@ -519,7 +519,7 @@ fn handoff_switches_in_place_and_the_sidebar_copies(cx: &mut gpui_kit::TestAppCo
 }
 
 #[gpui_kit::test]
-fn handoff_delivery_tracks_output_and_failed_turns(cx: &mut gpui_kit::TestAppContext) {
+fn handoff_delivery_tracks_acceptance_and_failed_turns(cx: &mut gpui_kit::TestAppContext) {
     cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {
@@ -561,6 +561,17 @@ fn handoff_delivery_tracks_output_and_failed_turns(cx: &mut gpui_kit::TestAppCon
             assert_eq!((h.seen, h.pending, h.context_tokens), (1, false, Some(42)));
             app.chats[0].handoff_seen.as_mut().unwrap().pending = true;
             app.apply(0, 3, run, Update::Delta("answer".into()), window, cx);
+            assert!(app.chats[0].handoff_seen.is_none());
+            app.chats[0].handoff_seen = Some(aether_agent::HandoffSeen {
+                seen: 1,
+                context_tokens: Some(42),
+                context_window: Some(100_000),
+                pending: true,
+            });
+            app.apply(0, 3, run, Update::Accepted, window, cx);
+            assert!(app.chats[0].handoff_seen.is_none());
+            app.apply(0, 3, run, Update::Error("failed".into()), window, cx);
+            app.finish_run(0, 3, run, epoch, true, window, cx);
             assert!(app.chats[0].handoff_seen.is_none());
             app.chats[0].messages[3] = Message::assistant();
             app.apply(0, 3, run, Update::Error("failed".into()), window, cx);
@@ -623,12 +634,12 @@ fn handoff_send_retries_or_restarts_uncertain_session(cx: &mut gpui_kit::TestApp
 fn native_fork_requires_supported_idle_source_and_no_handoff() {
     let mut chat = chat_with("t", &["hi"]);
     chat.cli_session = "source".into();
-    for provider in [Provider::Claude, Provider::Codex] {
+    for provider in [Provider::Claude, Provider::Codex, Provider::Pi, Provider::OpenCode] {
         chat.provider = provider;
         assert_eq!(native_fork_source(&chat, false), "source");
         assert!(native_fork_source(&chat, true).is_empty());
     }
-    chat.provider = Provider::Pi;
+    chat.provider = Provider::Antigravity;
     assert!(native_fork_source(&chat, false).is_empty());
     chat.provider = Provider::Claude;
     chat.cli_session.clear();
@@ -656,7 +667,7 @@ fn duplicate_dispatch_consumes_and_persists_native_fork(cx: &mut gpui_kit::TestA
     });
     window
         .update(cx, |app, window, cx| {
-            for provider in [Provider::Claude, Provider::Codex] {
+            for provider in [Provider::Claude, Provider::Codex, Provider::Pi, Provider::OpenCode] {
                 let mut source = chat_with("source", &["hello", "reply"]);
                 source.provider = provider;
                 source.cwd = "/tmp".into();

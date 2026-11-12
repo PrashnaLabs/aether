@@ -247,7 +247,7 @@ pub fn coverage(
     tool: bool,
 ) -> String {
     let recovery = if tool {
-        "Recover omitted history using the Aether read_history tool ({\"offset\":0,\"limit\":20,\"max_chars\":4000}); paginate with offset=next_offset. For one long message use offset=<message>, limit=1 and text_offset=next_text_offset until it is absent. Message and item numbers identify historical activity; no foreign tool calls are replayed."
+        "Recover omitted history using the Aether read_history tool ({\"offset\":0,\"limit\":20,\"max_chars\":4000}); paginate with offset=next_offset. For one long message use offset=<message>, limit=1 and text_offset=next_text_offset until it is absent. Use view=items with after_position=next_position to page items, or item=<id> with text_offset=next_text_offset to read an item. Message and item numbers identify historical activity; no foreign tool calls are replayed."
     } else {
         "Omitted history is not available to you; ask the user if you need it. No foreign tool calls are replayed."
     };

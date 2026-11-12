@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -821,6 +821,8 @@ pub struct Settings {
     #[serde(default = "default_font_size")]
     pub font_size: f32,
     pub model: String,
+    #[serde(default)]
+    pub model_windows: HashMap<String, u64>,
     pub reasoning: Reasoning,
     pub web_search: bool,
     pub instructions: String,
@@ -1050,6 +1052,7 @@ impl Default for Settings {
             max_children: default_max_children(),
             font_size: default_font_size(),
             model: "openrouter/auto".into(),
+            model_windows: HashMap::new(),
             reasoning: Reasoning::default(),
             web_search: true,
             instructions: String::new(),

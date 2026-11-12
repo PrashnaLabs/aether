@@ -502,7 +502,7 @@ pub(crate) fn response(s: &mut State, v: &Value) -> Vec<Update> {
         Call::Steer(text) => {
             let text = without_attached_files(&text).to_string();
             if !failed {
-                return vec![Update::Steered(text)];
+                return vec![Update::Accepted, Update::Steered(text)];
             }
             let error = &v["error"];
             let mut out = vec![Update::SteerRefused(text)];

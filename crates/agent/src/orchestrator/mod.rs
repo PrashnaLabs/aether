@@ -262,9 +262,12 @@ pub fn tool_specs() -> Value {
                 "properties": {
                     "id": {"type": "integer", "description": "Leads only: another chat's id from list_chats (default: this chat)"},
                     "offset": {"type": "integer", "description": "First message number (default 0); negative counts back from the end, so -3 reads the last 3"},
-                    "limit": {"type": "integer", "description": "How many messages, 1 to 20 (default 5)"},
-                    "max_chars": {"type": "integer", "description": "Cap per message, 500 to 20000 (default 4000)"},
-                    "text_offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Character offset into each message's text, for reading the rest of a long message; use the next_text_offset a previous call returned"}
+                    "view": {"type": "string", "enum": ["messages", "items"], "description": "History view (default messages)"},
+                    "after_position": {"type": "integer", "description": "Items after this position (default -1); follow next_position"},
+                    "item": {"type": "string", "description": "Read one handoff item by id"},
+                    "limit": {"type": "integer", "description": "Page size, 1 to 20 (default 5 messages or 20 items)"},
+                    "max_chars": {"type": "integer", "description": "Cap per text, 500 to 20000 (default 4000)"},
+                    "text_offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Character offset into text; follow next_text_offset"}
                 }
             }
         },

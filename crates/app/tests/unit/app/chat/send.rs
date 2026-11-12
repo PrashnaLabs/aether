@@ -232,3 +232,71 @@ fn a_failed_or_stopped_run_releases_its_steers() {
     release_steers(&mut chat, false);
     assert!(!chat.busy());
 }
+
+#[test]
+fn handoff_window_uses_session_reply_learned_and_provider_order() {
+    let mut chat = chat_with("t", &["question", "answer"]);
+    chat.provider = Provider::Claude;
+    let mut settings = Settings::default();
+    settings.model_windows.insert("model".into(), 300_000);
+    chat.messages[1].model = Some("other".into());
+    chat.messages[1].context_window = Some(400_000);
+    assert_eq!(handoff_window(&chat, &settings, "model"), Some(300_000));
+    chat.messages[1].model = Some("model".into());
+    assert_eq!(handoff_window(&chat, &settings, "model"), Some(400_000));
+    chat.handoff_seen = Some(aether_agent::HandoffSeen {
+        seen: 1,
+        pending: false,
+        context_tokens: None,
+        context_window: Some(500_000),
+    });
+    assert_eq!(handoff_window(&chat, &settings, "model"), Some(500_000));
+    chat.handoff_seen = None;
+    chat.messages[1].context_window = None;
+    settings.model_windows.clear();
+    assert_eq!(handoff_window(&chat, &settings, "model"), Some(200_000));
+    assert_eq!(handoff_window(&chat, &settings, "model[1m]"), Some(1_000_000));
+    chat.provider = Provider::Codex;
+    assert_eq!(handoff_window(&chat, &settings, "model"), None);
+}
+
+#[test]
+fn reported_windows_are_learned_for_the_reply_model() {
+    let mut settings = Settings::default();
+    let mut reply = Message::assistant();
+    reply.model = Some("model".into());
+    learn_window(&mut settings, &reply, &Update::Window(200_000));
+    learn_window(&mut settings, &reply, &Update::Window(300_000));
+    assert_eq!(settings.model_windows.get("model"), Some(&300_000));
+}
+
+#[test]
+fn missed_turn_keeps_earliest_undelivered_message() {
+    let mut chat = chat_with("t", &[]);
+    chat.provider = Provider::Claude;
+    chat.cli_session = "session".into();
+    chat.messages = vec![
+        Message::user("first"),
+        Message::assistant(),
+        Message::user("second"),
+        Message::assistant(),
+    ];
+    record_missed_turn(&mut chat, 1, false);
+    record_missed_turn(&mut chat, 3, false);
+    assert_eq!(chat.handoff_seen.as_ref().unwrap().seen, 0);
+}
+
+#[test]
+fn accepted_failed_turn_is_not_replayed() {
+    let mut chat = chat_with("t", &[]);
+    chat.provider = Provider::Claude;
+    chat.cli_session = "session".into();
+    let mut reply = Message::assistant();
+    reply.apply(Update::Error("failed".into()));
+    chat.messages = vec![Message::user("hello"), reply];
+    record_missed_turn(&mut chat, 1, true);
+    assert!(chat.handoff_seen.is_none());
+    chat.messages[1].apply(Update::Delta("partial".into()));
+    record_missed_turn(&mut chat, 1, false);
+    assert_eq!(chat.handoff_seen.unwrap().seen, 0);
+}

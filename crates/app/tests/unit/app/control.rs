@@ -294,6 +294,61 @@ fn read_history_pages_this_chats_messages_with_tools(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn read_history_pages_and_reads_items(cx: &mut TestAppContext) {
+    use aether_core::{ToolCall, ToolDetail, Update};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            app.chats[1].messages[1].apply(Update::Tool(ToolCall::new(
+                "1",
+                "T",
+                ToolDetail::Command {
+                    command: "echo test".into(),
+                    cwd: None,
+                    output: "界".repeat(600),
+                    exit_code: Some(0),
+                },
+            )));
+            let first = app.read_history(1, &json!({"view": "items", "limit": 1})).unwrap();
+            assert_eq!(first["items"][0]["item"], "0");
+            assert_eq!(first["next_position"], 0);
+            let next = app
+                .read_history(
+                    1,
+                    &json!({"view": "items", "after_position": first["next_position"], "limit": 1}),
+                )
+                .unwrap();
+            assert_eq!(next["items"][0]["position"], 1);
+            assert_eq!(next["items"][0]["item"], "1.0");
+            assert_eq!(next["items"][0]["kind"], "command_execution");
+            assert_eq!(next["next_position"], 1);
+            let last = app.read_history(1, &json!({"view": "items", "after_position": 1})).unwrap();
+            assert_eq!(last["items"][0]["item"], "1");
+            assert!(last.get("next_position").is_none());
+            let one = app.read_history(1, &json!({"item": "1.0", "max_chars": 500})).unwrap();
+            assert_eq!(one["item"], "1.0");
+            assert_eq!(one["next_text_offset"], 500);
+            let rest = app
+                .read_history(1, &json!({"view": "items", "item": "1.0", "text_offset": 500}))
+                .unwrap();
+            assert_eq!(
+                format!("{}{}", one["text"].as_str().unwrap(), rest["text"].as_str().unwrap()),
+                format!("Command: echo test\nExit code: 0\n{}", "界".repeat(600))
+            );
+            assert_eq!(
+                app.read_history(1, &json!({"item": "missing"})),
+                Err("no item missing".into())
+            );
+            assert_eq!(
+                app.read_history(0, &json!({"id": 20, "item": "1.0"})).unwrap()["item"],
+                "1.0"
+            );
+            assert!(app.read_history(1, &json!({"id": 22, "view": "items"})).is_err());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn read_history_pages_long_message_text(cx: &mut TestAppContext) {
     use aether_core::{ToolCall, ToolDetail, Update};
     let window = app(cx);

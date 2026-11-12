@@ -153,3 +153,10 @@ fn side_context_reserves_the_whole_block_at_the_exact_cap() {
     assert_eq!(context.chars().count(), SIDE_CHAT_CONTEXT_MAX_CHARS);
     assert!(context.contains("- Earlier items truncated."));
 }
+
+#[test]
+fn coverage_describes_item_recovery() {
+    let text = coverage(1, 0, 2, Some("0"), Some("2"), true);
+    assert!(text.contains("view=items with after_position=next_position"));
+    assert!(text.contains("item=<id> with text_offset=next_text_offset"));
+}

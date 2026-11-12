@@ -2,6 +2,30 @@ use super::*;
 use aether_core::AccessMode;
 
 #[test]
+fn fork_request_returns_child_and_rejects_failures() {
+    let child = fork_session("ses_source", |path, body| {
+        assert_eq!(path, "/api/session/ses_source/fork");
+        assert_eq!(body, json!({"before": null}));
+        Ok(json!({"data": {"id": "ses_child"}}))
+    })
+    .unwrap();
+    assert_eq!(child["data"]["id"], "ses_child");
+    assert!(fork_session("ses_source", |_, _| Err("failed".into())).is_err());
+    assert!(fork_session("ses_source", |_, _| Ok(json!({"data": {}}))).is_err());
+}
+
+#[test]
+fn failed_fork_selects_fresh_session_and_notifies() {
+    use futures::StreamExt;
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    assert!(fork_or_fresh("ses_source", &tx, |_, _| Err("failed".into())).is_none());
+    let update = futures::executor::block_on(rx.next()).unwrap();
+    assert!(
+        matches!(update, Update::Notice(n) if n.id == "info-fork" && n.text == "Could not fork the source conversation natively (failed). Started a fresh session with its history.")
+    );
+}
+
+#[test]
 fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
     let notice = lost_resume(true, false).unwrap();
     assert_eq!(notice.id, "info-resume");

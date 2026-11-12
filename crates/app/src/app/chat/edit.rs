@@ -41,6 +41,11 @@ fn unstash(chat: &mut Chat) -> String {
     text
 }
 
+fn retain_sessions(chat: &mut Chat, from: usize) {
+    chat.agent_sessions.retain(|session| session.seen <= from);
+    chat.handoff_seen = chat.handoff_seen.take().filter(|handoff| handoff.seen <= from);
+}
+
 impl ChatApp {
     /// Regenerates the last answer from the same question.
     pub(crate) fn retry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -224,8 +229,7 @@ impl ChatApp {
         chat.session = session;
         chat.cli_session.clear();
         chat.fork_from.clear();
-        chat.agent_sessions.clear();
-        chat.handoff_seen = None;
+        retain_sessions(chat, from);
         self.agent.close_session(&chat.id.to_string());
         chat.messages.truncate(from);
         chat.lead_seen = chat.lead_seen.filter(|&seen| seen < from);

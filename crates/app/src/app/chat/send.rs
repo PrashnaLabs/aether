@@ -20,6 +20,37 @@ use crate::app::{Chat, ChatApp, Queued, chat_cwd};
 use crate::board::model::Turn;
 use crate::suggest::prompt_commands;
 
+fn handoff_window(chat: &Chat, settings: &Settings, model: &str) -> Option<u64> {
+    chat.handoff_seen
+        .as_ref()
+        .and_then(|h| h.context_window)
+        .or_else(|| {
+            chat.messages.iter().rev().find_map(|m| {
+                (m.role == Role::Assistant && m.model.as_deref() == Some(model))
+                    .then_some(m.context_window)
+                    .flatten()
+            })
+        })
+        .or_else(|| settings.model_windows.get(model).copied())
+        .or_else(|| {
+            (chat.provider == Provider::Claude).then_some(if model.contains("[1m]") {
+                1_000_000
+            } else {
+                200_000
+            })
+        })
+}
+
+fn learn_window(settings: &mut Settings, message: &Message, update: &Update) {
+    if let Update::Window(window) = update
+        && let Some(model) = message.model.as_ref()
+        && settings.model_windows.get(model) != Some(window)
+    {
+        settings.model_windows.insert(model.clone(), *window);
+        crate::settings::save(settings);
+    }
+}
+
 /// Title a chat takes from its first message until renamed or titled by its CLI.
 fn auto_title(text: &str) -> String {
     text.lines().next().unwrap_or_default().chars().take(40).collect()
@@ -33,12 +64,29 @@ fn title_text(m: &Message) -> &str {
     }
 }
 
-const SAVE_EVERY_MS: i64 = 2_000;
-
-fn agent_output(update: &Update) -> bool {
-    matches!(update, Update::Delta(text) | Update::Replace(text) | Update::Thinking(text) | Update::Final(text) if !text.is_empty())
-        || matches!(update, Update::Tool(_))
+fn record_missed_turn(chat: &mut Chat, reply_ix: usize, accepted: bool) {
+    if accepted {
+        return;
+    }
+    if chat.provider == Provider::OpenRouter || chat.cli_session.is_empty() {
+        if let Some(handoff) = &mut chat.handoff_seen {
+            handoff.pending = false;
+        }
+        return;
+    }
+    if let Some(user_ix) = chat.messages[..reply_ix].iter().rposition(|m| m.role == Role::User) {
+        let handoff = chat.handoff_seen.get_or_insert(aether_agent::HandoffSeen {
+            seen: user_ix,
+            context_tokens: None,
+            context_window: None,
+            pending: false,
+        });
+        handoff.seen = handoff.seen.min(user_ix);
+        handoff.pending = false;
+    }
 }
+
+const SAVE_EVERY_MS: i64 = 2_000;
 
 /// The trailing reply, if it never finished, so a turn the CLI picks back up continues it.
 fn reusable_reply(messages: &[Message]) -> Option<usize> {
@@ -404,24 +452,10 @@ impl ChatApp {
         effective.provider = Some(chat.provider);
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
         let model = chat.model(&self.settings);
-        let known_window = chat
-            .messages
-            .iter()
-            .rev()
-            .find(|m| {
-                m.role == Role::Assistant
-                    && m.model.as_deref() == Some(model.as_str())
-                    && m.context_window.is_some()
-            })
-            .and_then(|m| m.context_window);
         let session = ChatSession {
             ephemeral: false,
             delta_from: chat.handoff_seen.as_ref().map(|h| h.seen),
-            window: chat.handoff_seen.as_ref().and_then(|h| h.context_window).or_else(|| {
-                (chat.cli_session.is_empty() || chat.handoff_seen.is_some())
-                    .then_some(known_window)
-                    .flatten()
-            }),
+            window: handoff_window(chat, &self.settings, &model),
             used: chat.handoff_seen.as_ref().and_then(|h| h.context_tokens),
             key: chat.id.to_string(),
             cwd: chat_cwd(chat, &self.settings.workspace_root),
@@ -560,9 +594,9 @@ impl ChatApp {
             epoch,
         };
         cx.spawn_in(window, async move |this, cx| {
-            let mut has_output = false;
+            let mut accepted = false;
             while let Some(update) = updates.next().await {
-                has_output |= agent_output(&update);
+                accepted |= matches!(update, Update::Accepted);
                 let applied = this.update_in(cx, |this, window, cx| {
                     if let Some(ix) = target.resolve(&this.chats) {
                         this.apply(ix, reply_ix, run, update, window, cx);
@@ -574,7 +608,7 @@ impl ChatApp {
             }
             this.update_in(cx, |this, window, cx| {
                 if let Some(ix) = target.resolve(&this.chats) {
-                    this.finish_run(ix, reply_ix, run, epoch, has_output, window, cx);
+                    this.finish_run(ix, reply_ix, run, epoch, accepted, window, cx);
                 }
             })
             .ok();
@@ -589,7 +623,7 @@ impl ChatApp {
         reply_ix: usize,
         run: u64,
         epoch: u64,
-        has_output: bool,
+        accepted: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -610,35 +644,13 @@ impl ChatApp {
             let expired: Vec<u64> = reply.requests.iter().map(|r| r.id).collect();
             let injected_delta = chat.provider == Provider::Codex
                 && chat.handoff_seen.as_ref().is_some_and(|h| h.pending);
-            if failed && !has_output && chat.run == run && injected_delta {
+            if failed && !accepted && chat.run == run && injected_delta {
                 // codex took the delta into its thread natively; resending would duplicate it
                 self.agent.close_session(&chat.id.to_string());
                 chat.cli_session.clear();
                 chat.handoff_seen = None;
-            } else if failed
-                && !has_output
-                && chat.run == run
-                && chat.provider != Provider::OpenRouter
-                && !chat.cli_session.is_empty()
-            {
-                if let Some(user_ix) =
-                    chat.messages[..reply_ix].iter().rposition(|m| m.role == Role::User)
-                {
-                    let handoff = chat.handoff_seen.get_or_insert(aether_agent::HandoffSeen {
-                        seen: user_ix,
-                        context_tokens: None,
-                        context_window: None,
-                        pending: false,
-                    });
-                    handoff.seen = handoff.seen.min(user_ix);
-                    handoff.pending = false;
-                }
-            } else if failed
-                && !has_output
-                && chat.run == run
-                && let Some(handoff) = &mut chat.handoff_seen
-            {
-                handoff.pending = false;
+            } else if failed && chat.run == run {
+                record_missed_turn(chat, reply_ix, accepted);
             }
             if !watched {
                 chat.unseen = if failed { ChatStatus::Failed } else { ChatStatus::Done };
@@ -802,6 +814,7 @@ impl ChatApp {
                 };
                 let target = route(&chat.messages, last, &update);
                 let changed = Changed::of(&update, &chat.messages[target]);
+                learn_window(&mut self.settings, &chat.messages[target], &update);
                 chat.messages[target].apply(update);
                 if ix == self.active {
                     self.sync(Some((target, changed)), cx);
@@ -845,7 +858,8 @@ impl ChatApp {
         if matches!(update, Update::Session(_) | Update::Title(_)) {
             return self.apply_cli_meta(ix, update, window, cx);
         }
-        let delivered = agent_output(&update);
+        let delivered = matches!(update, Update::Accepted | Update::Tool(_))
+            || matches!(&update, Update::Delta(t) | Update::Replace(t) | Update::Thinking(t) | Update::Final(t) if !t.is_empty());
         let now = now_ms();
         let chat = &mut self.chats[ix];
         let cleared = delivered && chat.handoff_seen.take().is_some();
@@ -864,6 +878,7 @@ impl ChatApp {
         let step_done = matches!(&update, Update::Tool(call) if call.status != ToolStatus::Running);
         let target = route(&chat.messages, reply_ix, &update);
         let changed = Changed::of(&update, &chat.messages[target]);
+        learn_window(&mut self.settings, &chat.messages[target], &update);
         chat.messages[target].apply(update);
         if cleared || save_due(now, chat.saved_ms) {
             chat.saved_ms = now;

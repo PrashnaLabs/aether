@@ -17,6 +17,41 @@ fn path() -> Option<PathBuf> {
 }
 
 pub fn load() -> Settings {
+    let mut settings = load_saved();
+    let home = env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")));
+    if let Some(home) = home {
+        let before = settings.model_windows.len();
+        seed_model_windows(&mut settings, &home.join("models_cache.json"));
+        if settings.model_windows.len() != before {
+            save(&settings);
+        }
+    }
+    settings
+}
+
+fn seed_model_windows(settings: &mut Settings, path: &std::path::Path) {
+    #[derive(serde::Deserialize)]
+    struct Cache {
+        models: Vec<Model>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Model {
+        slug: String,
+        context_window: u64,
+    }
+    let Some(cache) =
+        fs::read(path).ok().and_then(|bytes| serde_json::from_slice::<Cache>(&bytes).ok())
+    else {
+        return;
+    };
+    for model in cache.models {
+        settings.model_windows.entry(model.slug).or_insert(model.context_window);
+    }
+}
+
+fn load_saved() -> Settings {
     let Some(path) = path() else {
         return Settings::default();
     };
@@ -66,4 +101,28 @@ pub fn api_key() -> Option<(String, KeySource)> {
 
 pub fn store_api_key(key: &str) -> keyring::Result<()> {
     keyring::Entry::new(SERVICE, ACCOUNT)?.set_password(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_cache_seeds_missing_windows() {
+        let path = env::temp_dir().join(format!(
+            "aether-model-windows-{}.json",
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let mut settings = Settings::default();
+        settings.model_windows.insert("learned".into(), 123);
+        seed_model_windows(&mut settings, &path);
+        fs::write(&path, r#"{"models":[{"slug":"learned","context_window":999},{"slug":"fresh","context_window":272000}]}"#).unwrap();
+        seed_model_windows(&mut settings, &path);
+        assert_eq!(settings.model_windows.get("learned"), Some(&123));
+        assert_eq!(settings.model_windows.get("fresh"), Some(&272_000));
+        fs::write(&path, "invalid").unwrap();
+        seed_model_windows(&mut settings, &path);
+        assert_eq!(settings.model_windows.len(), 2);
+        fs::remove_file(path).unwrap();
+    }
 }

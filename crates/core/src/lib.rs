@@ -305,6 +305,8 @@ fn lenient_steps<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Step>, D:
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
+    /// The CLI took the prompt into its native session.
+    Accepted,
     Delta(String),
     /// Full text of the current model turn; replaces that turn's deltas.
     Final(String),
@@ -698,7 +700,11 @@ impl Message {
                 status: RequestStatus::Pending,
                 asked_ms: now_ms(),
             }),
-            Update::Title(_) | Update::Session(_) | Update::Wake | Update::SteerRefused(_) => {}
+            Update::Title(_)
+            | Update::Session(_)
+            | Update::Wake
+            | Update::SteerRefused(_)
+            | Update::Accepted => {}
             Update::Tool(call) => {
                 let id = call.id.clone();
                 let ends = matches!(

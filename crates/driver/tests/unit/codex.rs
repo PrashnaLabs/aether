@@ -162,7 +162,7 @@ fn turn_start_request_and_reply() {
     let plain = start_turn(&mut State::default(), "x", &[]);
     assert!(plain["params"].get("model").is_none() && plain["params"].get("effort").is_none());
     let reply = r#"{"id":2,"result":{"turn":{"id":"01a15159-37a0-7e91-8b17-66a8e86975a5","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}"#;
-    assert_eq!(ev(&mut s, reply), []);
+    assert_eq!(ev(&mut s, reply), [Update::Accepted]);
     assert_eq!(s.turn_id.as_deref(), Some("01a15159-37a0-7e91-8b17-66a8e86975a5"));
 
     start_turn(&mut s, "Reply OK.", &[]);
@@ -631,7 +631,7 @@ fn compaction_turn_takes_its_id_from_turn_started() {
     assert_eq!(ev(&mut s, r#"{"id":0,"result":{}}"#), []);
     assert_eq!(s.turn_id, None);
     let started = r#"{"method":"turn/started","params":{"threadId":"01a1516e-4d32-72a1-9898-521541c20fc7","turn":{"id":"01a1516e-6adf-7212-9030-5572adaf7da0","rootTurnId":"01a1516e-6adf-7212-9030-5572adaf7da0","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":1792367553,"completedAt":null,"durationMs":null}}}"#;
-    assert_eq!(ev(&mut s, started), []);
+    assert_eq!(ev(&mut s, started), [Update::Accepted]);
     assert_eq!(s.turn_id.as_deref(), Some("01a1516e-6adf-7212-9030-5572adaf7da0"));
     let item = r#"{"method":"item/started","params":{"item":{"type":"contextCompaction","id":"01a1516e-6b66-7a30-865e-ffa3b8954b6b"},"threadId":"01a1516e-4d32-72a1-9898-521541c20fc7","turnId":"01a1516e-6adf-7212-9030-5572adaf7da0","startedAtMs":1792367553382}}"#;
     assert_eq!(tool(&ev(&mut s, item)).title, "Compact context");
@@ -1452,7 +1452,7 @@ fn accepted_steers_are_reported() {
     };
     let line = steer_turn(&mut s, "also this".into(), vec![]);
     let ok = json!({"id": line["id"], "result": {"turnId": "turn-1"}});
-    assert_eq!(map_event(&mut s, &ok), [Update::Steered("also this".into())]);
+    assert_eq!(map_event(&mut s, &ok), [Update::Accepted, Update::Steered("also this".into())]);
 }
 
 #[test]
@@ -3080,4 +3080,15 @@ for line in sys.stdin:
     assert!(requests.find("thread/fork").unwrap() < requests.find("thread/start").unwrap());
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn prompt_acceptance_is_emitted_once_for_response_and_notification() {
+    let mut s = State { thread: "t".into(), ..State::default() };
+    start_turn(&mut s, "hello", &[]);
+    assert_eq!(ev(&mut s, r#"{"id":0,"result":{"turn":{"id":"turn"}}}"#), [Update::Accepted]);
+    assert_eq!(
+        ev(&mut s, r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn"}}}"#),
+        []
+    );
 }

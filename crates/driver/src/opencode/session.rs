@@ -33,8 +33,20 @@ pub(super) fn start(
 ) -> Result<Conn, String> {
     let (api, server) = connect(opts, tx)?;
     let api = Arc::new(api);
-    let resume = opts.resume.starts_with("ses_");
-    let session = if resume { opts.resume.clone() } else { new_session_id() };
+    let mut resume = opts.resume.starts_with("ses_");
+    let mut forked = None;
+    if opts.fork && !opts.resume.is_empty() {
+        forked =
+            fork_or_fresh(&opts.resume, tx, |path, body| api.call(Method::POST, path, Some(body)));
+        resume = false;
+    }
+    let session = if let Some(info) = &forked {
+        info["data"]["id"].as_str().unwrap().to_string()
+    } else if resume {
+        opts.resume.clone()
+    } else {
+        new_session_id()
+    };
     {
         let mut s = state.guard();
         s.root = session.clone();
@@ -52,7 +64,9 @@ pub(super) fn start(
     let label = if resume { "Resuming session" } else { "Creating session" };
     step(tx, NoticeState::Running, label);
     let setup = || -> Result<Option<Value>, String> {
-        let info = if resume {
+        let info = if forked.is_some() {
+            forked.clone()
+        } else if resume {
             match c.api.send(Method::GET, &c.path(""), None, REQUEST_TIMEOUT)? {
                 (200, text) => Some(serde_json::from_str::<Value>(&text).unwrap_or_default()),
                 (404, _) => None,
@@ -91,7 +105,7 @@ pub(super) fn start(
     {
         let _ = tx.unbounded_send(Update::Title(title.into()));
     }
-    if resumed {
+    if resumed && forked.is_none() {
         reattach(&c, state, tx, rec, started, opts.reattach);
     }
     if c.server.is_some() {
@@ -101,6 +115,35 @@ pub(super) fn start(
         }
     }
     Ok(Conn { resumed, ..c })
+}
+
+fn fork_or_fresh(
+    source: &str,
+    tx: &UnboundedSender<Update>,
+    call: impl FnOnce(&str, Value) -> Result<Value, String>,
+) -> Option<Value> {
+    match fork_session(source, call) {
+        Ok(info) => Some(info),
+        Err(e) => {
+            let text = format!(
+                "Could not fork the source conversation natively ({e}). Started a fresh session with its history."
+            );
+            let _ =
+                tx.unbounded_send(Update::Notice(Notice::new("info-fork", NoticeKind::Info, text)));
+            None
+        }
+    }
+}
+
+fn fork_session(
+    source: &str,
+    call: impl FnOnce(&str, Value) -> Result<Value, String>,
+) -> Result<Value, String> {
+    let info = call(&format!("/api/session/{source}/fork"), json!({"before": null}))?;
+    if info["data"]["id"].as_str().is_none_or(str::is_empty) {
+        return Err("fork returned no session id".into());
+    }
+    Ok(info)
 }
 
 /// The model in use as `provider/id`; the seeded one (from the options) wins over the stale session info.

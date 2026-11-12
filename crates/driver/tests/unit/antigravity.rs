@@ -145,6 +145,7 @@ fn text_turn_streams_deltas_and_per_call_usage() {
     assert_eq!(
         feed(&mut s, TEXT_TURN),
         [
+            Update::Accepted,
             Update::Delta("OK".into()),
             Update::Delta("\n".into()),
             Update::Usage(13854),
@@ -619,7 +620,7 @@ fn steers_are_marked_at_their_user_input_step_and_results_pair_up() {
     let mut s = State::default();
     on_prompt(&mut s, "count");
     on_steer(&mut s, "also say done");
-    assert_eq!(feed(&mut s, USER_INPUT), []);
+    assert_eq!(feed(&mut s, USER_INPUT), [Update::Accepted]);
     assert_eq!(feed(&mut s, USER_INPUT), [Update::Steered("also say done".into())]);
     assert_eq!(feed(&mut s, RESULT_OK), [], "the steer's own agy turn is still running");
     assert_eq!(feed(&mut s, RESULT_OK), [Update::Final(String::new())]);
@@ -1383,4 +1384,13 @@ fn an_oversized_stream_line_warns_and_the_next_event_still_maps() {
     let out = drain(&mut rx);
     assert!(out.iter().any(|u| matches!(u, Update::Warning(w) if w.contains("16 MB"))), "{out:?}");
     assert!(delta(&out).contains("after"), "{out:?}");
+}
+
+#[test]
+fn completed_user_input_accepts_prompt_once() {
+    let mut s = State::default();
+    on_prompt(&mut s, "hello");
+    let v: Value = serde_json::from_str(USER_INPUT).unwrap();
+    assert_eq!(map_event(&mut s, &v), [Update::Accepted]);
+    assert_eq!(map_event(&mut s, &v), []);
 }

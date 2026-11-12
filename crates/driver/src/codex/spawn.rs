@@ -456,6 +456,9 @@ pub(crate) fn start_turn(s: &mut State, text: &str, images: &[Attachment]) -> Va
 }
 
 pub(crate) fn turn_started(s: &mut State, id: &str) -> Vec<Update> {
+    if s.turn_id.is_some() {
+        return vec![];
+    }
     s.turn_id = Some(id.to_string());
     if let Naming::Prompt(prompt) = &mut s.naming {
         let prompt = std::mem::take(prompt);
@@ -463,7 +466,7 @@ pub(crate) fn turn_started(s: &mut State, id: &str) -> Vec<Update> {
         let line = s.rpc("model/list", json!({}), Some(Call::Models(prompt)));
         s.outbox.push(line);
     }
-    let mut out = vec![];
+    let mut out = vec![Update::Accepted];
     if s.cancelled {
         s.stale.insert(id.to_string());
         let line = interrupt(s);

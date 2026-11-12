@@ -265,6 +265,18 @@ impl PiDriver {
         *me.child.guard() = Some(child);
         if let Err(e) = me.handshake(&opts) {
             let why = me.state.guard().stderr.fatal(&format!("pi didn't start: {e}"));
+            if opts.fork && !opts.resume.is_empty() {
+                me.die(why.clone());
+                shut(&me.child, &me.stdin);
+                let _ = me.tx.unbounded_send(Update::Notice(Notice::new(
+                    "info-fork", NoticeKind::Info,
+                    format!("Could not fork the source conversation natively ({why}). Started a fresh session with its history."),
+                )));
+                let mut fresh = opts;
+                fresh.resume.clear();
+                fresh.fork = false;
+                return Self::launch(fresh, me.tx.clone(), approve);
+            }
             me.die(why);
         }
         me
@@ -278,7 +290,7 @@ impl PiDriver {
     fn handshake(&mut self, opts: &DriverStartOptions) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(30);
         self.request(json!({"type": "get_state"}), deadline)?;
-        self.resumed = Path::new(&opts.resume).is_file();
+        self.resumed = (opts.fork && !opts.resume.is_empty()) || Path::new(&opts.resume).is_file();
         self.startup("startup-spawn", "Starting pi", NoticeState::Done);
         if !opts.resume.is_empty() {
             self.startup("startup-session", "Loading session", NoticeState::Done);
@@ -595,6 +607,7 @@ impl PiDriver {
     fn respawn(&mut self) {
         let mut opts = self.opts.clone();
         opts.effort = self.effort.clone();
+        opts.fork = false;
         if !self.session.is_empty() {
             opts.resume = self.session.clone();
         }
@@ -706,7 +719,9 @@ fn launch_args_with(opts: &DriverStartOptions, approve: bool, ext: Option<&Path>
     if let Some((_, path)) = lead {
         args.extend(["-e".into(), path.to_string_lossy().into_owned()]);
     }
-    if Path::new(&opts.resume).is_file() {
+    if opts.fork && !opts.resume.is_empty() {
+        args.extend(["--fork".into(), opts.resume.clone()]);
+    } else if Path::new(&opts.resume).is_file() {
         args.extend(["--session".into(), opts.resume.clone()]);
     }
     if approve {
@@ -971,7 +986,7 @@ fn map_event(s: &mut State, v: &Value) -> Vec<Update> {
             }
             // extensions start runs unawaited, so one may still follow the ack
             s.grace = v["data"]["disposition"] == "handled" && !s.running;
-            vec![]
+            vec![Update::Accepted]
         }
         "message_start" if v["message"]["role"] == "user" => {
             let blocks = v["message"]["content"].as_array().into_iter().flatten();

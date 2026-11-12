@@ -40,8 +40,15 @@ get the same text inline in the first prompt.
 
 - Cap: `AETHER_CONTEXT_HANDOFF_TOKEN_CAP` (default 16,000, clamped to
   1,024–64,000), and never more than 64,000 bytes.
-- Window: the window reported by the last reply from the same model, else
-  128,000.
+- Window: the resumed session's `handoff_seen` window, else the latest earlier
+  reply reporting a window for the same model, else the learned per-model
+  window in settings. For an unknown Claude model use 1,000,000 when its id
+  contains `[1m]`, otherwise 200,000. Anything still unknown uses 128,000.
+- Replies reporting a window update `model_windows` in settings for the reply's
+  model. At startup, `models[].slug` and `context_window` from
+  `$CODEX_HOME/models_cache.json` (default `~/.codex/models_cache.json`) seed
+  missing entries without replacing learned values. Missing or invalid files
+  are ignored.
 - Subtract what the session already holds (reported context tokens, or an
   estimate from the saved transcript and attachments), the new message
   (JSON-escaped bytes), 8,192 per image and 4,096 per other attachment, and a
@@ -58,7 +65,9 @@ conversation. Shorten it or pick a larger-context model."
 
 `read_history` (offset, limit, max_chars, text_offset) returns any message in
 full with its tool calls. A long message is read in pages by following
-`next_text_offset`.
+`next_text_offset`. Use `view="items"` and `after_position=next_position` to
+page handoff items, or `item=<id>` to read one item and follow
+`text_offset=next_text_offset` for long text.
 
 ## Switching agents in place
 
@@ -73,26 +82,31 @@ full with its tool calls. A long message is read in pages by following
   resume fails, or nothing fits in the resumed session, a fresh session gets
   the full history instead.
 
+Rewind and edit clear the active CLI session, but retain inactive sessions whose
+`seen <= from`, since all their messages survive the truncation. The same rule
+retains `handoff_seen`, including its pending flag. Entries with `seen > from`
+are dropped. `/clear` still clears all session records.
+
 ## Delivery
 
-The pending delta (`handoff_seen`) is marked `pending` at send and cleared on
-the first agent output.
+The pending delta (`handoff_seen`) is marked `pending` at send and cleared when
+the driver confirms that the native session accepted the prompt
+(`Update::Accepted`), or on the first agent output, which implies it.
 
-- A turn that errors before any output leaves it unsent, so the next send
-  retries it. For Codex, which took the delta into its thread natively, the
-  next send starts a fresh session instead, so the history is not injected
-  twice.
+- A failed turn the driver never accepted is included in the next delta. An
+  accepted turn is not re-delivered if it later fails; a turn that finished
+  normally is never treated as missed.
+- For Codex, a pending injected delta followed by failure before acceptance
+  forces a fresh session so the history cannot be injected twice.
 - A delta still pending at the next send means delivery is uncertain (the app
   quit mid-turn): the next send starts a fresh session with the full history.
-- A failed turn with no agent output was never received by the native
-  session; it is re-delivered as part of the next delta.
 
 ## Copies and forks
 
 - "Continue in new chat" copies the chat onto another agent; the copy gets the
   budgeted full history on its first send.
 - Duplicate on the same agent forks the native session when the agent
-  supports it (Claude `--fork-session`, Codex `thread/fork`) and the source is
+  supports it (Claude `--fork-session`, Codex `thread/fork`, Pi `--fork`, OpenCode session fork) and the source is
   idle. If the fork fails, the copy starts fresh with the portable history and
   shows "Could not fork the source conversation natively (…). Started a fresh
   session with its history."
@@ -113,10 +127,11 @@ command, the agent picker in the composer, and the sidebar chat menu
 
 ## Limits
 
-- Missed-turn detection is a heuristic (failed, no output), not exact
-  per-turn acceptance tracking.
-- Model windows are known only from earlier replies; a fresh target without
-  one assumes 128,000.
-- Native fork covers Claude and Codex; Pi, OpenCode and Antigravity always get
+- Item positions reflect the current history and can change if the transcript is rewound.
+
+- Acceptance depends on each CLI reporting that it took the prompt.
+- Unreported model windows rely on the cached catalog or Claude fallback;
+  other unknown models still assume 128,000.
+- Native fork covers Claude, Codex, Pi and OpenCode; Antigravity always gets
   the portable history.
-- Rewinding or editing a message drops all remembered agent sessions.
+- Rewind cannot reuse sessions that have seen messages removed from the transcript.

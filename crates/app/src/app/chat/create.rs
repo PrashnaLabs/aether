@@ -66,7 +66,13 @@ pub(super) fn new_chat_folder(
 }
 
 pub(crate) fn native_fork_source(source: &Chat, handoff: bool) -> String {
-    if !handoff && matches!(source.provider, Provider::Claude | Provider::Codex) && !source.busy() {
+    if !handoff
+        && matches!(
+            source.provider,
+            Provider::Claude | Provider::Codex | Provider::Pi | Provider::OpenCode
+        )
+        && !source.busy()
+    {
         source.cli_session.clone()
     } else {
         String::new()
