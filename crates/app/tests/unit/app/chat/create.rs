@@ -566,6 +566,14 @@ fn handoff_delivery_tracks_output_and_failed_turns(cx: &mut gpui_kit::TestAppCon
             app.apply(0, 3, run, Update::Error("failed".into()), window, cx);
             app.finish_run(0, 3, run, epoch, false, window, cx);
             assert_eq!(app.chats[0].handoff_seen.as_ref().unwrap().seen, 2);
+
+            app.chats[0].provider = Provider::Codex;
+            app.chats[0].handoff_seen.as_mut().unwrap().pending = true;
+            app.chats[0].messages[3] = Message::assistant();
+            app.apply(0, 3, run, Update::Error("failed".into()), window, cx);
+            app.finish_run(0, 3, run, epoch, false, window, cx);
+            assert!(app.chats[0].cli_session.is_empty());
+            assert!(app.chats[0].handoff_seen.is_none());
         })
         .unwrap();
 }

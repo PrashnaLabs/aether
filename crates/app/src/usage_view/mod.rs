@@ -28,7 +28,7 @@ use daily::{usage_metric_strip, usage_quality_panel};
 use format::{format_count, format_day_short, format_month_short, window_choice_label};
 use skeleton::usage_skeleton;
 
-/// Rendered chart height, matching Waku and T3 Code's `h-56` plot.
+/// Rendered chart height, matching Waku's `h-56` plot.
 const CHART_HEIGHT: f32 = 224.0;
 /// Sliver above the top gridline so a peak's 2px stroke is not shaved off.
 const CHART_PLOT_TOP: f32 = 8.0;

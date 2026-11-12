@@ -608,7 +608,14 @@ impl ChatApp {
             reply.finish();
             failed = reply.failed;
             let expired: Vec<u64> = reply.requests.iter().map(|r| r.id).collect();
-            if failed
+            let injected_delta = chat.provider == Provider::Codex
+                && chat.handoff_seen.as_ref().is_some_and(|h| h.pending);
+            if failed && !has_output && chat.run == run && injected_delta {
+                // codex took the delta into its thread natively; resending would duplicate it
+                self.agent.close_session(&chat.id.to_string());
+                chat.cli_session.clear();
+                chat.handoff_seen = None;
+            } else if failed
                 && !has_output
                 && chat.run == run
                 && chat.provider != Provider::OpenRouter
