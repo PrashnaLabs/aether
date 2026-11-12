@@ -172,6 +172,20 @@ impl ChatApp {
             .map(|t| t.question.clone())
             .unwrap_or_default();
         let api_key = self.api_key.clone().unwrap_or_default();
+        let handoff: Vec<_> = hist
+            .iter()
+            .enumerate()
+            .map(|(i, (role, text))| aether_agent::handoff::HistoricalMessage {
+                role: *role,
+                kind: if *role == Role::User { "user_message" } else { "assistant_message" },
+                text: text.clone(),
+                chat: id,
+                message: i,
+                item: i.to_string(),
+                model: None,
+                status: "completed".into(),
+            })
+            .collect();
         let Reply { mut updates, cancel } = self.agent.send(
             &key,
             btw_prompt(&self.btw[&id], &question),
@@ -179,7 +193,7 @@ impl ChatApp {
             &settings,
             &api_key,
             Vec::new(),
-            &hist,
+            &handoff,
             &session,
         );
         match self.btw.get_mut(&id) {

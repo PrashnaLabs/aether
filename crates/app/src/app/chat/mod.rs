@@ -73,6 +73,112 @@ fn seed_history(messages: &[Message]) -> Vec<(Role, String)> {
         .collect()
 }
 
+pub(super) fn handoff_history(
+    messages: &[Message],
+    chat: i64,
+) -> Vec<aether_agent::handoff::HistoricalMessage> {
+    use aether_agent::handoff::HistoricalMessage;
+    use aether_core::{PlanStatus, ToolDetail, ToolStatus};
+    let mut out = Vec::new();
+    for (i, m) in messages.iter().enumerate() {
+        let status = if m.role == Role::User {
+            "completed"
+        } else if m.failed {
+            "failed"
+        } else if m.ended_at_ms.is_none() {
+            "running"
+        } else if m
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::Tool(t) if t.status == ToolStatus::Stopped))
+        {
+            "interrupted"
+        } else {
+            "completed"
+        };
+        let mut push = |role, kind, text: String, item: String| {
+            out.push(HistoricalMessage {
+                role,
+                kind,
+                text,
+                chat,
+                message: i,
+                item,
+                model: m.model.clone(),
+                status: status.into(),
+            })
+        };
+        if m.role == Role::User {
+            push(Role::User, "user_message", plain_text(m), i.to_string());
+            continue;
+        }
+        for (k, step) in m.steps.iter().enumerate() {
+            if let Step::Tool(t) = step {
+                let value = match &t.detail {
+                    ToolDetail::Command { command, exit_code, output, .. } => Some((
+                        "command_execution",
+                        format!(
+                            "Command: {command}\nExit code: {}\n{output}",
+                            exit_code.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
+                        ),
+                    )),
+                    ToolDetail::Edit { path, .. } => {
+                        Some(("file_change", format!("File change: {path}")))
+                    }
+                    ToolDetail::Plan { items } => Some((
+                        "proposed_plan",
+                        items
+                            .iter()
+                            .map(|item| {
+                                let status = match item.status {
+                                    PlanStatus::Pending => "pending",
+                                    PlanStatus::Active => "active",
+                                    PlanStatus::Done => "done",
+                                    PlanStatus::Cancelled => "cancelled",
+                                    PlanStatus::Unknown => "unknown",
+                                };
+                                format!("- [{status}] {}", item.text)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )),
+                    _ => None,
+                };
+                if let Some((kind, text)) = value {
+                    push(Role::Assistant, kind, text, format!("{i}.{k}"));
+                }
+            }
+        }
+        if !m.text.is_empty() {
+            push(Role::Assistant, "assistant_message", m.text.clone(), i.to_string());
+        }
+        if let Some(error) = &m.error {
+            push(Role::Assistant, "error", error.clone(), format!("{i}.error"));
+        }
+    }
+    out
+}
+
+pub(super) fn handoff_selection(
+    messages: &[Message],
+    chat: i64,
+    tool: bool,
+) -> aether_agent::handoff::Selection {
+    use aether_agent::handoff::{coverage, select_history, token_cap};
+    let items = handoff_history(messages, chat);
+    let first = items.first();
+    let last = items.last();
+    let note = coverage(
+        chat,
+        first.map_or(0, |m| m.message),
+        last.map_or(0, |m| m.message),
+        first.map(|m| m.item.as_str()),
+        last.map(|m| m.item.as_str()),
+        tool,
+    );
+    select_history(&items, &note, 0, token_cap())
+}
+
 fn one_line(s: &str, max: usize) -> String {
     let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
     match flat.char_indices().nth(max) {
@@ -556,6 +662,8 @@ impl ChatApp {
                 provider: chat.provider,
                 provider_model: chat.provider_model.clone(),
                 cli_session: chat.cli_session.clone(),
+                agent_sessions: chat.agent_sessions.clone(),
+                handoff_seen: chat.handoff_seen.clone(),
                 access: chat.access,
                 effort: chat.effort.clone(),
                 cwd: chat.cwd.clone(),

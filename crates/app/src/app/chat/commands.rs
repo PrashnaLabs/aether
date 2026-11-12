@@ -15,6 +15,8 @@ impl ChatApp {
         chat.title = "New chat".into();
         chat.epoch += 1;
         chat.cli_session.clear();
+        chat.agent_sessions.clear();
+        chat.handoff_seen = None;
         self.agent.close_session(&chat.id.to_string());
         self.persist(ix);
         self.reset_rows(cx);

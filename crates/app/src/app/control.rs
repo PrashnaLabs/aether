@@ -467,17 +467,16 @@ impl ChatApp {
         };
         let limit = int("limit", 5, 1, 20);
         let max = int("max_chars", 4_000, 500, 20_000);
+        let text_offset = int("text_offset", 0, 0, i64::MAX);
         let items: Vec<Value> = messages
             .iter()
             .enumerate()
             .skip(offset)
             .take(limit)
             .map(|(i, m)| {
-                let mut text: String = m.text.chars().take(max).collect();
-                let more = m.text.chars().count().saturating_sub(max);
-                if more > 0 {
-                    text.push_str(&format!("… ({more} more chars)"));
-                }
+                let mut chars = m.text.chars().skip(text_offset);
+                let text: String = chars.by_ref().take(max).collect();
+                let has_more = chars.next().is_some();
                 let tools: Vec<String> = m
                     .steps
                     .iter()
@@ -488,11 +487,16 @@ impl ChatApp {
                     .collect();
                 let role = if m.role == Role::User { "user" } else { "assistant" };
                 let mut item = json!({"n": i, "role": role, "text": text});
-                if !tools.is_empty() {
+                if text_offset == 0 && !tools.is_empty() {
                     item["tools"] = tools.into();
                 }
-                if let Some(e) = &m.error {
+                if text_offset == 0
+                    && let Some(e) = &m.error
+                {
                     item["error"] = e.lines().next().unwrap_or_default().into();
+                }
+                if has_more {
+                    item["next_text_offset"] = (text_offset + max).into();
                 }
                 item
             })

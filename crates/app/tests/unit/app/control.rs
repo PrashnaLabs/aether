@@ -294,6 +294,68 @@ fn read_history_pages_this_chats_messages_with_tools(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn read_history_pages_long_message_text(cx: &mut TestAppContext) {
+    use aether_core::{ToolCall, ToolDetail, Update};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let text = "abcdefghij".repeat(75);
+            let reply = &mut app.chats[1].messages[1];
+            reply.text = text.clone();
+            reply.error = Some("failed\nmore detail".into());
+            reply.apply(Update::Tool(ToolCall::new(
+                "1",
+                "T",
+                ToolDetail::Read { path: "README.md".into(), range: None },
+            )));
+            let first =
+                app.read_history(1, &json!({"offset": 1, "limit": 1, "max_chars": 500})).unwrap();
+            let first = &first["messages"][0];
+            assert_eq!(first["next_text_offset"], 500);
+            assert_eq!(first["tools"], json!(["- Read README.md"]));
+            assert_eq!(first["error"], "failed");
+            let last = app
+                .read_history(
+                    1,
+                    &json!({"offset": 1, "limit": 1, "max_chars": 500,
+                    "text_offset": first["next_text_offset"]}),
+                )
+                .unwrap();
+            let last = &last["messages"][0];
+            assert!(last.get("next_text_offset").is_none());
+            assert!(last.get("tools").is_none());
+            assert!(last.get("error").is_none());
+            assert_eq!(
+                format!("{}{}", first["text"].as_str().unwrap(), last["text"].as_str().unwrap()),
+                text
+            );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn read_history_slices_multibyte_text_by_character(cx: &mut TestAppContext) {
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            app.chats[1].messages[1].text = format!("é{}終", "🦀".repeat(500));
+            let first = app
+                .read_history(
+                    1,
+                    &json!({"offset": 1, "limit": 1, "max_chars": 500, "text_offset": 1}),
+                )
+                .unwrap();
+            assert_eq!(first["messages"][0]["text"], "🦀".repeat(500));
+            assert_eq!(first["messages"][0]["next_text_offset"], 501);
+            let last =
+                app.read_history(1, &json!({"offset": 1, "limit": 1, "text_offset": 501})).unwrap();
+            assert_eq!(last["messages"][0]["text"], "終");
+            assert!(last["messages"][0].get("next_text_offset").is_none());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
     let window = app(cx);
     window

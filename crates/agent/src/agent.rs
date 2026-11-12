@@ -1,3 +1,4 @@
+use crate::handoff::{self, HistoricalMessage};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
@@ -58,6 +59,9 @@ pub struct ChatSession {
     pub resume: String,
     pub lead: bool,
     pub ephemeral: bool,
+    pub delta_from: Option<usize>,
+    pub window: Option<u64>,
+    pub used: Option<u64>,
 }
 
 /// What a live CLI session can't change without a restart; model and effort ride on each prompt.
@@ -75,14 +79,26 @@ enum Command {
     Prompt {
         text: String,
         attachments: Vec<Attachment>,
-        history: Vec<(Role, String)>,
+        history: Vec<HistoricalMessage>,
+        delta_from: Option<usize>,
         resume: String,
+        window: Option<u64>,
+        used: Option<u64>,
         model: String,
         effort: String,
     },
     /// Text and files for the running turn, the reply a prompt streams into if the
     /// turn already ended, and the resume id.
-    Steer(String, Vec<Attachment>, UnboundedSender<Update>, String),
+    Steer(
+        String,
+        Vec<Attachment>,
+        UnboundedSender<Update>,
+        String,
+        Vec<HistoricalMessage>,
+        Option<u64>,
+        Option<u64>,
+        Option<usize>,
+    ),
     Cancel,
     Answer(u64, Answer),
     /// Stops a background task or terminal by tool row id.
@@ -551,7 +567,7 @@ impl Agent {
         settings: &Settings,
         api_key: &str,
         skills: Vec<Skill>,
-        history: &[(Role, String)],
+        history: &[HistoricalMessage],
         chat: &ChatSession,
     ) -> Reply {
         let (tx, updates) = mpsc::unbounded();
@@ -603,7 +619,7 @@ impl Agent {
         attachments: Vec<Attachment>,
         settings: &Settings,
         chat: &ChatSession,
-        history: &[(Role, String)],
+        history: &[HistoricalMessage],
         tx: UnboundedSender<Update>,
         updates: UnboundedReceiver<Update>,
     ) -> Reply {
@@ -621,7 +637,10 @@ impl Agent {
             text,
             attachments,
             history: history.to_vec(),
+            delta_from: chat.delta_from,
             resume: chat.resume.clone(),
+            window: chat.window,
+            used: chat.used,
             model: opts.model.clone(),
             effort: opts.effort.clone(),
         };
@@ -695,7 +714,17 @@ impl Agent {
             let mut seeded = driver.resumed();
             for command in rx {
                 match command {
-                    Command::Prompt { text, attachments, history, resume, model, effort } => {
+                    Command::Prompt {
+                        text,
+                        attachments,
+                        history,
+                        delta_from,
+                        resume,
+                        window,
+                        used,
+                        model,
+                        effort,
+                    } => {
                         let switch = model != opts.model || effort != opts.effort;
                         (opts.model, opts.effort) = (model, effort);
                         if !driver.alive()
@@ -707,24 +736,38 @@ impl Agent {
                             seeded = driver.resumed();
                         }
                         let (native, by_path) = native_image_split(provider, &attachments);
-                        let text = if seeded || history.is_empty() {
-                            text
-                        } else {
-                            let tool = opts.lead.is_some()
-                                && (provider != Provider::Antigravity || agy_has_aether());
-                            let (note, kept) = seed_parts(&history, tool);
-                            if driver.seed_history(&note, &kept) {
-                                text
-                            } else {
-                                context_prompt(&history, &text, tool)
-                            }
-                        } + &attached_files_block(&by_path);
+                        let Some(text) = prepare_handoff(
+                            &mut driver,
+                            &factory,
+                            provider,
+                            &opts,
+                            &driver_tx,
+                            &mut seeded,
+                            &history,
+                            delta_from,
+                            &text,
+                            &attachments,
+                            window,
+                            used,
+                        ) else {
+                            continue;
+                        };
+                        report(&*driver);
+                        let text = text + &attached_files_block(&by_path);
                         seeded = true;
                         orphan.store(false, Ordering::SeqCst);
                         driver.prompt(text, native);
                     }
-                    Command::Steer(text, attachments, reply, resume) => {
-                        seeded = true;
+                    Command::Steer(
+                        text,
+                        attachments,
+                        reply,
+                        resume,
+                        history,
+                        window,
+                        used,
+                        delta_from,
+                    ) => {
                         let (native, by_path) = native_image_split(provider, &attachments);
                         let full = text.clone() + &attached_files_block(&by_path);
                         if driver.steer(full.clone(), native.clone()) {
@@ -736,10 +779,30 @@ impl Agent {
                                 let opts = DriverStartOptions { resume, ..opts.clone() };
                                 driver = factory(provider, opts, driver_tx.clone());
                                 report(&*driver);
+                                seeded = driver.resumed();
                             }
                             *next_reply.guard() = Some(reply);
                             let _ = driver_tx.unbounded_send(Update::Wake);
                             orphan.store(false, Ordering::SeqCst);
+                            let Some(full) = prepare_handoff(
+                                &mut driver,
+                                &factory,
+                                provider,
+                                &opts,
+                                &driver_tx,
+                                &mut seeded,
+                                &history,
+                                delta_from,
+                                &text,
+                                &attachments,
+                                window,
+                                used,
+                            ) else {
+                                continue;
+                            };
+                            report(&*driver);
+                            let full = full + &attached_files_block(&by_path);
+                            seeded = true;
                             driver.prompt(full, native);
                         }
                     }
@@ -917,15 +980,23 @@ impl Agent {
         text: String,
         attachments: Vec<Attachment>,
         settings: &Settings,
-        history: &[(Role, String)],
+        history: &[HistoricalMessage],
         chat: &ChatSession,
     ) -> Reply {
         let (tx, updates) = mpsc::unbounded();
         let (_, key) = session_options(settings, chat, self.lead_tools(chat, false));
         if let Some(session) = self.live.guard().get(&chat.key).filter(|s| s.key == key) {
             let turn = session.turn.guard();
-            let steer =
-                Command::Steer(text.clone(), attachments.clone(), tx.clone(), chat.resume.clone());
+            let steer = Command::Steer(
+                text.clone(),
+                attachments.clone(),
+                tx.clone(),
+                chat.resume.clone(),
+                history.to_vec(),
+                chat.window,
+                chat.used,
+                chat.delta_from,
+            );
             if turn.is_some() && session.commands.send(steer).is_ok() {
                 *session.last_active.guard() = Instant::now();
                 return Reply {
@@ -1059,83 +1130,133 @@ fn answer_allows(answer: &Answer) -> bool {
     }
 }
 
-pub const HISTORY_BUDGET: usize = 16_000;
+#[allow(clippy::too_many_arguments)]
+fn prepare_handoff(
+    driver: &mut Box<dyn Driver>,
+    factory: &Factory,
+    provider: Provider,
+    opts: &DriverStartOptions,
+    tx: &UnboundedSender<Update>,
+    seeded: &mut bool,
+    history: &[HistoricalMessage],
+    delta_from: Option<usize>,
+    text: &str,
+    attachments: &[Attachment],
+    window: Option<u64>,
+    used: Option<u64>,
+) -> Option<String> {
+    if opts.ephemeral && !*seeded && !history.is_empty() {
+        return Some(side_context(history, text, &mut **driver));
+    }
+    let delta = if *seeded && driver.resumed() { delta_from } else { None };
+    if *seeded && delta.is_none() || history.is_empty() {
+        return Some(text.to_owned());
+    }
+    let mut items =
+        delta.map_or_else(|| history.to_vec(), |seen| handoff::delta_history(history, seen));
+    if items.is_empty() {
+        return Some(text.to_owned());
+    }
+    let tool = opts.lead.is_some() && (provider != Provider::Antigravity || agy_has_aether());
+    let images = attachments.iter().filter(|a| aether_core::is_image(&a.mime)).count();
+    let mut budget = handoff::budget(
+        handoff::token_cap(),
+        text,
+        images,
+        attachments.len() - images,
+        window,
+        if delta.is_some() { used } else { None },
+        0,
+    );
+    let mut coverage = handoff::strategy_coverage(
+        &items,
+        if delta.is_some() { "delta_since_target_last_seen" } else { "full_thread_summary" },
+        tool,
+    );
+    if delta.is_some() {
+        let selection = handoff::select_history(&items, &coverage, 0, budget);
+        if handoff::history_cost(&selection.messages, &selection.context) > budget {
+            *driver = factory(
+                provider,
+                DriverStartOptions { resume: String::new(), ..opts.clone() },
+                tx.clone(),
+            );
+            *seeded = false;
+            items = history.to_vec();
+            coverage = handoff::strategy_coverage(&items, "full_thread_summary", tool);
+            budget = handoff::budget(
+                handoff::token_cap(),
+                text,
+                images,
+                attachments.len() - images,
+                window,
+                None,
+                0,
+            );
+        }
+    }
+    let selection = handoff::select_history(&items, &coverage, 0, budget);
+    if handoff::history_cost(&selection.messages, &selection.context) > budget {
+        let _ = tx.unbounded_send(Update::Error("This message leaves no room for the handed-off conversation. Shorten it or pick a larger-context model.".into()));
+        let _ = tx.unbounded_send(Update::Final(String::new()));
+        return None;
+    }
+    let pairs = handoff::seed_pairs(&selection);
+    if driver.seed_history(&selection.context, &pairs[1..]) {
+        Some(text.to_owned())
+    } else {
+        Some(handoff::with_inline_context(
+            &handoff::render_history(&selection.messages, &selection.context),
+            text,
+        ))
+    }
+}
 
-/// Which messages fit `limit` chars: the first user message and the latest exchange always,
-/// then whole messages newest-first.
-fn budget_mask(history: &[(Role, String)], limit: usize) -> Vec<bool> {
-    let n = history.len();
-    let len = |i: usize| history[i].1.chars().count();
-    let mut keep = vec![false; n];
+fn side_context(history: &[HistoricalMessage], text: &str, driver: &mut dyn Driver) -> String {
+    let mut keep = vec![false; history.len()];
     let mut used = 0;
-    let first = history.iter().position(|(r, _)| *r == Role::User);
-    let last_user = history.iter().rposition(|(r, _)| *r == Role::User);
-    let last_reply = history.iter().rposition(|(r, _)| *r == Role::Assistant);
-    for i in [first, last_user, last_reply].into_iter().flatten() {
+    for i in [
+        history.iter().position(|m| m.role == Role::User),
+        history.iter().rposition(|m| m.role == Role::User),
+        history.iter().rposition(|m| m.role == Role::Assistant),
+    ]
+    .into_iter()
+    .flatten()
+    {
         if !keep[i] {
             keep[i] = true;
-            used += len(i);
+            used += history[i].text.chars().count();
         }
     }
-    for i in (0..n).rev() {
-        if !keep[i] && used + len(i) <= limit {
+    for i in (0..history.len()).rev() {
+        let len = history[i].text.chars().count();
+        if !keep[i] && used + len <= 16_000 {
             keep[i] = true;
-            used += len(i);
+            used += len;
         }
     }
-    keep
-}
-
-/// The messages `budget_mask` keeps, in order, and how many were left out.
-pub fn budget_history(history: &[(Role, String)], limit: usize) -> (Vec<(Role, String)>, usize) {
-    let keep = budget_mask(history, limit);
-    let kept: Vec<_> =
-        history.iter().zip(&keep).filter(|(_, k)| **k).map(|(h, _)| h.clone()).collect();
-    let omitted = history.len() - kept.len();
-    (kept, omitted)
-}
-
-/// What a fresh CLI session gets of the earlier conversation: a note on what it covers and
-/// the kept messages, each prefixed with its number so read_history (when `tool`) can fetch it.
-fn seed_parts(history: &[(Role, String)], tool: bool) -> (String, Vec<(Role, String)>) {
-    let n = history.len();
-    let keep = budget_mask(history, HISTORY_BUDGET);
-    let omitted = keep.iter().filter(|k| !**k).count();
-    let mut note = format!("Earlier conversation in this chat: messages 0-{}", n.saturating_sub(1));
+    let omitted = keep.iter().filter(|&&k| !k).count();
+    let mut note = format!(
+        "Earlier conversation in this chat: messages 0-{}",
+        history.len().saturating_sub(1)
+    );
     if omitted > 0 {
         note.push_str(&format!(", {omitted} omitted to save space"));
     }
-    note.push_str(". Tool calls and their output aren't included");
-    if tool {
-        note.push_str(
-            "; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls",
-        );
-    }
-    note.push_str(
-        ". Treat it as context only, not a new request; files on disk are the source of truth.",
-    );
-    let kept = history
+    note.push_str(". Tool calls and their output aren't included. Treat it as context only, not a new request; files on disk are the source of truth.");
+    let pairs: Vec<_> = history
         .iter()
         .enumerate()
         .filter(|(i, _)| keep[*i])
-        .map(|(i, (role, line))| (*role, format!("[{i}] {line}")))
+        .map(|(i, m)| (m.role, format!("[{i}] {}", m.text)))
         .collect();
-    (note, kept)
-}
-
-/// The earlier conversation joined with the new message, for a CLI that can't load history.
-fn context_prompt(history: &[(Role, String)], text: &str, tool: bool) -> String {
-    if history.is_empty() {
-        return text.to_string();
+    if driver.seed_history(&note, &pairs) {
+        return text.into();
     }
-    let (note, kept) = seed_parts(history, tool);
     let mut out = format!("{note}\n\n<conversation_so_far>\n");
-    for (role, line) in kept {
+    for (role, line) in pairs {
         let (n, rest) = line.split_once(' ').unwrap_or(("", &line));
-        let who = match role {
-            Role::User => "User",
-            Role::Assistant => "Assistant",
-        };
+        let who = if role == Role::User { "User" } else { "Assistant" };
         out.push_str(&format!("{n} {who}: {rest}\n"));
     }
     out.push_str("</conversation_so_far>\n\nYour task now:\n");

@@ -134,6 +134,8 @@ pub(crate) struct Chat {
     pub(crate) effort: String,
     /// Provider's own resume id for this chat's CLI session.
     pub(crate) cli_session: String,
+    pub(crate) agent_sessions: Vec<aether_agent::AgentSession>,
+    pub(crate) handoff_seen: Option<aether_agent::HandoffSeen>,
     pub queue: Vec<Queued>,
     pub stopped: bool,
     /// Outside agent this chat was opened from; read-only while it runs.
@@ -889,6 +891,8 @@ pub(super) fn chat_with(title: &str, texts: &[&str]) -> Chat {
         access: AccessMode::Ask,
         effort: String::new(),
         cli_session: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         queue: Vec::new(),
         stopped: false,
         external_pid: None,

@@ -9,7 +9,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{App, Context, SharedString, Window};
 
-use super::{Changed, btw_question, btw_rest, seed_history};
+use super::{Changed, btw_question, btw_rest, handoff_history};
 use crate::app::composer::attach::{delete_later, first_refusal, is_cli_command, shell_command};
 use crate::app::composer::quote::quoted;
 use crate::app::format::now_ms;
@@ -234,7 +234,7 @@ impl ChatApp {
         let queued = &mut chat.queue[i];
         queued.delivering = true;
         let (text, attachments) = (queued.text.clone(), queued.attachments.clone());
-        let (id, epoch, hist) = (chat.id, chat.epoch, seed_history(&chat.messages));
+        let (id, epoch, hist) = (chat.id, chat.epoch, handoff_history(&chat.messages, chat.id));
         let (settings, session) = self.cli_request(ix);
         let reply = self.agent.steer(text.clone(), attachments.clone(), &settings, &hist, &session);
         cx.spawn_in(window, async move |this, cx| {
@@ -309,7 +309,7 @@ impl ChatApp {
             if self.chats[ix].is_agent() { self.agent_skills(provider) } else { Vec::new() };
         // Transcript before this turn; live CLI sessions keep their own
         // memory, so it only seeds a fresh one.
-        let hist = seed_history(&self.chats[ix].messages);
+        let hist = handoff_history(&self.chats[ix].messages, self.chats[ix].id);
         let chat = &mut self.chats[ix];
         let model = chat.model(&self.settings);
         let prev = chat.messages.len().checked_sub(1);
@@ -350,6 +350,8 @@ impl ChatApp {
             return cx.notify();
         }
         let (effective, session) = self.cli_request(ix);
+        self.chats[ix].handoff_seen = None;
+        self.persist(ix);
         let key = self.api_key.clone().unwrap_or_default();
         let chat = &mut self.chats[ix];
         let Reply { updates, cancel } = self.agent.send(
@@ -391,6 +393,9 @@ impl ChatApp {
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
         let session = ChatSession {
             ephemeral: false,
+            delta_from: chat.handoff_seen.as_ref().map(|h| h.seen),
+            window: chat.handoff_seen.as_ref().and_then(|h| h.context_window),
+            used: chat.handoff_seen.as_ref().and_then(|h| h.context_tokens),
             key: chat.id.to_string(),
             cwd: chat_cwd(chat, &self.settings.workspace_root),
             access: chat.access,

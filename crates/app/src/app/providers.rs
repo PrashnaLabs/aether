@@ -435,16 +435,51 @@ impl ChatApp {
         if let Some(last) = chat.messages.last_mut() {
             last.handoff = Some(handoff);
         }
+        if chat.provider != Provider::OpenRouter && !chat.cli_session.is_empty() {
+            let usage = chat.messages.iter().rev().find(|m| {
+                m.role == aether_core::Role::Assistant
+                    && (m.context_tokens.is_some() || m.context_window.is_some())
+            });
+            chat.agent_sessions.retain(|s| s.provider != chat.provider);
+            chat.agent_sessions.push(aether_agent::AgentSession {
+                provider: chat.provider,
+                session: chat.cli_session.clone(),
+                seen: chat.handoff_seen.as_ref().map_or(chat.messages.len(), |h| h.seen),
+                context_tokens: chat
+                    .handoff_seen
+                    .as_ref()
+                    .map_or_else(|| usage.and_then(|m| m.context_tokens), |h| h.context_tokens),
+                context_window: chat
+                    .handoff_seen
+                    .as_ref()
+                    .map_or_else(|| usage.and_then(|m| m.context_window), |h| h.context_window),
+            });
+        }
+        chat.cli_session.clear();
+        chat.handoff_seen = None;
+        if provider != Provider::OpenRouter
+            && let Some(pos) = chat
+                .agent_sessions
+                .iter()
+                .position(|s| s.provider == provider && !s.session.is_empty())
+        {
+            let saved = chat.agent_sessions.remove(pos);
+            chat.cli_session = saved.session;
+            chat.handoff_seen = Some(aether_agent::HandoffSeen {
+                seen: saved.seen,
+                context_tokens: saved.context_tokens,
+                context_window: saved.context_window,
+            });
+        }
         chat.provider = provider;
         chat.provider_model = model;
         chat.access = super::chat::fit_access(provider, chat.access);
         chat.effort.clear();
-        chat.cli_session.clear();
         chat.external_pid = None;
         if let Some(session) = session {
             chat.session = session.clone();
-            let hist = super::chat::history(&chat.messages);
-            let seed = aether_agent::budget_history(&hist, aether_agent::HISTORY_BUDGET).0;
+            let selection = super::chat::handoff_selection(&chat.messages, chat.id, false);
+            let seed = aether_agent::handoff::seed_pairs(&selection);
             if let Err(e) = self.agent.fork_session(&session, &seed) {
                 eprintln!("aether: couldn't seed the OpenRouter session: {e}");
             }

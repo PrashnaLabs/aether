@@ -453,12 +453,18 @@ fn switching_agents_keeps_the_chat_and_marks_the_handoff(cx: &mut gpui_kit::Test
                 (h.from, h.from_model.as_str(), h.to, h.to_model.as_str()),
                 (Provider::Claude, "sonnet", Provider::Codex, "gpt-x")
             );
-            let session = chat.session.clone();
+            app.chats[0].cli_session = "codex-ses".into();
+            app.chats[0].messages.push(Message::user("more"));
+            app.switch_agent(0, Provider::Claude, "sonnet".into(), window, cx);
+            assert_eq!(app.chats[0].cli_session, "claude-ses");
+            assert_eq!(app.chats[0].handoff_seen.as_ref().unwrap().seen, 2);
+            app.switch_agent(0, Provider::Codex, "gpt-x".into(), window, cx);
+            let session = app.chats[0].session.clone();
             app.switch_agent(0, Provider::OpenRouter, "x/y".into(), window, cx);
-            let h = app.chats[0].messages[1].handoff.clone().unwrap();
+            let h = app.chats[0].messages.last().unwrap().handoff.clone().unwrap();
             assert_eq!(
                 (h.from, h.to),
-                (Provider::Claude, Provider::OpenRouter),
+                (Provider::Codex, Provider::OpenRouter),
                 "a switch with no new messages keeps the first source"
             );
             assert_ne!(

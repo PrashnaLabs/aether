@@ -195,6 +195,8 @@ impl ChatApp {
                 provider: c.provider,
                 provider_model: c.provider_model.clone(),
                 cli_session: c.cli_session.clone(),
+                agent_sessions: vec![],
+                handoff_seen: None,
                 access: c.access_mode(),
                 effort: c.effort_level().to_owned(),
                 cwd: c.cwd_str().to_owned(),

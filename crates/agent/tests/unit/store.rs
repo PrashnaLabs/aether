@@ -21,6 +21,18 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         provider: Provider::Claude,
         provider_model: "sonnet".into(),
         cli_session: "sid".into(),
+        agent_sessions: vec![AgentSession {
+            provider: Provider::Codex,
+            session: "saved".into(),
+            seen: 3,
+            context_tokens: Some(20),
+            context_window: Some(100),
+        }],
+        handoff_seen: Some(HandoffSeen {
+            seen: 4,
+            context_tokens: Some(30),
+            context_window: Some(200),
+        }),
         access: AccessMode::Auto,
         effort: "high".into(),
         cwd: "/tmp/p".into(),
@@ -43,6 +55,8 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         provider: Provider::OpenRouter,
         provider_model: String::new(),
         cli_session: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -65,6 +79,8 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
     let chats = store.load().unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(chats.iter().map(|c| c.id).collect::<Vec<_>>(), [3, 7]);
+    assert_eq!(chats[1].agent_sessions, chat.agent_sessions);
+    assert_eq!(chats[1].handoff_seen, chat.handoff_seen);
     assert_eq!(chats[1].title, "Renamed");
     assert!(chats[1].pinned);
     assert_eq!(chats[1].provider, Provider::Claude);
@@ -169,6 +185,8 @@ fn ids_include_every_row() {
             provider: Provider::Claude,
             provider_model: String::new(),
             cli_session: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             access: AccessMode::Ask,
             effort: String::new(),
             cwd: String::new(),
@@ -205,6 +223,8 @@ fn flush_returns_once_queued_saves_are_written() {
             provider: Provider::Claude,
             provider_model: String::new(),
             cli_session: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             access: AccessMode::Ask,
             effort: String::new(),
             cwd: String::new(),
@@ -251,6 +271,8 @@ fn parent_and_lead_round_trip() {
         provider: Provider::Claude,
         provider_model: String::new(),
         cli_session: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -315,6 +337,8 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         provider: Provider::Claude,
         provider_model: String::new(),
         cli_session: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -337,6 +361,8 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         provider: Provider::Claude,
         provider_model: String::new(),
         cli_session: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),

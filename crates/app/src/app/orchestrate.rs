@@ -986,6 +986,8 @@ impl ChatApp {
             access,
             effort: a.effort.clone(),
             cli_session: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: None,

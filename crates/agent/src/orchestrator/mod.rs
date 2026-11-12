@@ -256,14 +256,15 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "read_history",
-            "description": "Read earlier messages of this chat (or, for a lead, any chat) in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted.",
+            "description": "Read earlier messages of this chat (or, for a lead, any chat) in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted. Follow next_text_offset to continue long messages.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": {"type": "integer", "description": "Leads only: another chat's id from list_chats (default: this chat)"},
                     "offset": {"type": "integer", "description": "First message number (default 0); negative counts back from the end, so -3 reads the last 3"},
                     "limit": {"type": "integer", "description": "How many messages, 1 to 20 (default 5)"},
-                    "max_chars": {"type": "integer", "description": "Cap per message, 500 to 20000 (default 4000)"}
+                    "max_chars": {"type": "integer", "description": "Cap per message, 500 to 20000 (default 4000)"},
+                    "text_offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Character offset into each message's text, for reading the rest of a long message; use the next_text_offset a previous call returned"}
                 }
             }
         },

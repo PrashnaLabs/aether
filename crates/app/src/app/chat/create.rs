@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use aether_agent::{ExternalAgent, HISTORY_BUDGET, SavedChat, budget_history};
+use aether_agent::{ExternalAgent, SavedChat};
 use aether_core::{
     Message, NoticeKind, NoticeState, Provider, RequestStatus, Role, Step, ToolStatus,
     attachments_dir,
@@ -237,10 +237,16 @@ impl ChatApp {
             self.chats.iter().map(|c| c.id),
             now_ms(),
         );
+        let source_id = source.id;
         let session = self.next_session_id();
         if self
             .agent
-            .fork_session(&session, &budget_history(&history(&messages), HISTORY_BUDGET).0)
+            .fork_session(
+                &session,
+                &aether_agent::handoff::seed_pairs(&super::handoff_selection(
+                    &messages, source_id, false,
+                )),
+            )
             .is_err()
         {
             return;
@@ -266,6 +272,8 @@ impl ChatApp {
                 access,
                 effort,
                 cli_session: String::new(),
+                agent_sessions: vec![],
+                handoff_seen: None,
                 queue: Vec::new(),
                 stopped: false,
                 external_pid: None,
@@ -412,6 +420,8 @@ impl ChatApp {
             access: self.settings.default_access(default_provider),
             effort: String::new(),
             cli_session: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: None,
@@ -487,6 +497,8 @@ impl ChatApp {
             access: self.settings.default_access(Provider::OpenRouter),
             effort: String::new(),
             cli_session: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: None,
@@ -541,6 +553,8 @@ impl ChatApp {
             provider,
             provider_model,
             cli_session,
+            agent_sessions,
+            handoff_seen,
             access,
             effort,
             cwd,
@@ -585,6 +599,8 @@ impl ChatApp {
                 access: fit_access(provider, access),
                 effort,
                 cli_session,
+                agent_sessions,
+                handoff_seen,
                 stopped: false,
                 external_pid: None,
                 turn_at: 0,
@@ -697,6 +713,8 @@ impl ChatApp {
             access: self.settings.default_access(a.provider),
             effort: String::new(),
             cli_session: a.session,
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: a.pid,
