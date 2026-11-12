@@ -114,6 +114,7 @@ fn list_defaults_to_the_leads_project(cx: &mut TestAppContext) {
                 (row["project"].as_str(), row["state"].as_str()),
                 (Some("proj"), Some("running"))
             );
+            assert_eq!((&row["queued"], &row["cost"]), (&json!(0), &json!(0.0)));
         })
         .unwrap();
 }

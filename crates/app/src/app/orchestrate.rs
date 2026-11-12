@@ -9,6 +9,7 @@ use aether_ui::ChatStatus;
 use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
+use super::format::chat_spend;
 use super::{
     Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir,
 };
@@ -198,6 +199,18 @@ const MAX_QUEUED_SPAWNS: usize = 32;
 
 const SEP: &str = "\n\n---\n\n";
 
+const FROM_TAG: &str = "[from ";
+const MAX_AGENT_STREAK: usize = 6;
+
+pub(super) fn agent_streak(chat: &Chat) -> usize {
+    let users = chat.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text.as_str());
+    users
+        .chain(chat.queue.iter().map(|q| q.text.as_str()))
+        .rev()
+        .take_while(|t| t.starts_with(FROM_TAG))
+        .count()
+}
+
 pub(super) fn unread(deliveries: Vec<Delivery>, chats: &[Chat]) -> Vec<Delivery> {
     deliveries
         .into_iter()
@@ -327,6 +340,7 @@ impl ChatApp {
                     "provider": c.provider.key(),
                     "model": c.provider_model,
                     "status": child_status(c),
+                    "cost": chat_spend(c, &self.model_prices),
                 })
             })
             .collect();
@@ -594,6 +608,18 @@ impl ChatApp {
             return Err(r#"missing "text""#.into());
         }
         let id = self.chats[ix].id;
+        let text = if child {
+            text
+        } else {
+            let n = agent_streak(&self.chats[ix]);
+            if n >= MAX_AGENT_STREAK {
+                return Err(format!(
+                    "agent-to-agent loop guard: chat {id} got {n} agent messages in a row with no message from the user; ask the user before sending more"
+                ));
+            }
+            let lead = &self.chats[lead_ix];
+            format!("{FROM_TAG}{} #{}] {text}", lead.title, lead.id)
+        };
         if self.chats[ix].messages.is_empty() && self.chats[ix].worktree_error.is_some() {
             return Err(format!("agent {id} has no worktree; spawn a new one"));
         }

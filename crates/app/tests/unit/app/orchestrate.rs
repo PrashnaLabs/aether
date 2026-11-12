@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::app::orchestrate::{
-    SpawnArgs, child_access, child_prompt, child_status, clip, delivery_text,
+    SpawnArgs, agent_streak, child_access, child_prompt, child_status, clip, delivery_text,
     needs_agy_registration, spawned_child, stranded_texts, unread,
 };
 use crate::board::model::Col;
@@ -220,6 +220,7 @@ fn list_agents_shows_installed_clis_and_own_children_only(cx: &mut TestAppContex
             assert_eq!(children[0]["provider"], "codex");
             assert_eq!(children[0]["model"], "gpt-5");
             assert_eq!(children[0]["status"], "idle");
+            assert_eq!(children[0]["cost"], 0.0);
         })
         .unwrap();
 }
@@ -403,6 +404,42 @@ fn message_agent_queues_behind_busy_child(cx: &mut TestAppContext) {
             assert_eq!(v, Err(r#"missing "text""#.into()));
         })
         .unwrap();
+}
+
+#[gpui_kit::test]
+fn message_agent_tags_other_chats_and_guards_loops(cx: &mut TestAppContext) {
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            app.chats.push(lead_chat(20));
+            app.chats[2].cancel = Some(aether_agent::Cancel::inert());
+            for _ in 0..6 {
+                app.message_agent(1, &json!({"id": 20, "text": "hi"}), window, cx).unwrap();
+            }
+            assert_eq!(app.chats[2].queue[0].text, "[from lead #10] hi");
+            assert_eq!(
+                app.message_agent(1, &json!({"id": 20, "text": "hi"}), window, cx),
+                Err("agent-to-agent loop guard: chat 20 got 6 agent messages in a row with no message from the user; ask the user before sending more".into())
+            );
+        })
+        .unwrap();
+}
+
+#[test]
+fn agent_streak_counts_trailing_tagged_user_messages() {
+    let tagged = "[from a #1] x";
+    let mut chat = chat_with("c", &[tagged, "ok", "human", "ok", tagged, "ok", tagged, "ok"]);
+    assert_eq!(agent_streak(&chat), 2);
+    chat.queue.push(Queued {
+        text: tagged.into(),
+        attachments: vec![],
+        delivering: false,
+        from_children: false,
+        deliveries: vec![],
+    });
+    assert_eq!(agent_streak(&chat), 3);
+    chat.queue[0].text = "human".into();
+    assert_eq!(agent_streak(&chat), 0);
 }
 
 #[gpui_kit::test]

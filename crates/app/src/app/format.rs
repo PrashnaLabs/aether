@@ -22,6 +22,20 @@ pub(super) fn message_cost(message: &Message, prices: &HashMap<String, (f64, f64
     )
 }
 
+/// Micros spent on one reply: reported, else estimated from token prices (flagged true).
+pub(super) fn reply_spend(message: &Message, prices: &HashMap<String, (f64, f64)>) -> (u64, bool) {
+    match message.cost_micros {
+        0 => (message_cost(message, prices).map_or(0, |c| (c * 1e6) as u64), true),
+        micros => (micros, false),
+    }
+}
+
+/// Dollars spent across a chat, rounded to cents.
+pub(super) fn chat_spend(chat: &Chat, prices: &HashMap<String, (f64, f64)>) -> f64 {
+    let micros: u64 = chat.messages.iter().map(|m| reply_spend(m, prices).0).sum();
+    (micros as f64 / 1e4).round() / 100.
+}
+
 /// Formats dollars compactly: $0.0234, $1.5.
 pub(super) fn format_cost(cost: f64) -> String {
     if cost <= 0. {

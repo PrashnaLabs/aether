@@ -273,7 +273,7 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "list_chats",
-            "description": "List Aether chats matching a filter, with id, title, project, provider, state and last activity.",
+            "description": "List Aether chats matching a filter, with id, title, project, provider, model, state, queued message count, cost in USD and last activity.",
             "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats; all fields optional")}}
         },
         {

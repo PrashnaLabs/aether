@@ -6,7 +6,7 @@ use aether_ui::{FoldLine, FootFacts, TurnFooter, TurnOutcome, tool_counts};
 use gpui_kit::{AnyElement, div, prelude::*};
 
 use crate::app::ChatApp;
-use crate::app::format::{cost_text, format_time, message_cost};
+use crate::app::format::{cost_text, format_time, reply_spend};
 use crate::app::sidebar::model_label;
 
 fn foot_facts(
@@ -17,10 +17,8 @@ fn foot_facts(
 ) -> FootFacts {
     let (tools, subagents) = tool_counts(&message.steps);
     let model = message.served_model.clone().or(message.model.clone());
-    let cost = match message.cost_micros {
-        0 => message_cost(message, prices).and_then(|c| cost_text((c * 1e6) as u64, true)),
-        micros => cost_text(micros, false),
-    };
+    let (micros, estimated) = reply_spend(message, prices);
+    let cost = cost_text(micros, estimated);
     FootFacts {
         outcome: TurnOutcome::of(message, stopped),
         duration_ms: message.elapsed_ms,

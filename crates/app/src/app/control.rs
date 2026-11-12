@@ -8,6 +8,7 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{Context, SharedString, Window};
 use serde_json::{Value, json};
 
+use super::format::chat_spend;
 use super::{Bulk, CLIS, Chat, ChatApp, Delivery, now_ms, project_dir};
 use crate::board::model::{BoardCard, Col, shown};
 
@@ -206,7 +207,10 @@ impl ChatApp {
                     "title": c.title.as_ref(),
                     "project": folder(&project_dir(c, root)),
                     "provider": c.provider.key(),
+                    "model": c.provider_model,
                     "state": state_of(c, self.chat_running(ix)),
+                    "queued": c.queue.len(),
+                    "cost": chat_spend(c, &self.model_prices),
                     "last_active": age_label(now - last_active(c)),
                     "pinned": c.pinned,
                     "archived": c.archived,
