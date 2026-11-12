@@ -7,7 +7,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex, v_flex};
 use gpui_kit::{AnyElement, Context, SharedString, Window, div, prelude::*, px};
 
-use super::seed_history;
+use super::handoff_history;
 use crate::app::ChatApp;
 use crate::side_panel::Surface;
 
@@ -53,24 +53,18 @@ fn side_prompt(question: &str) -> String {
     )
 }
 
-/// Follow-ups carry earlier turns so the side session stays coherent.
-fn btw_prompt(thread: &BtwThread, question: &str) -> String {
-    let prior: Vec<String> =
-        thread.turns.iter().map(|t| format!("Q: {}\nA: {}", t.question, t.answer)).collect();
-    let question = if prior.is_empty() {
-        question.to_string()
-    } else {
-        format!("{}\n\nFollow-up: {question}", prior.join("\n\n"))
-    };
-    side_prompt(&question)
+fn btw_prompt(prior: &[BtwTurn], question: &str) -> String {
+    let prompt = side_prompt(question);
+    if prior.is_empty() {
+        return prompt;
+    }
+    let turns = prior
+        .iter()
+        .map(|t| format!("User: {}\nAssistant: {}", t.question, t.answer))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("Earlier in this side chat:\n{turns}\n\n{prompt}")
 }
-
-fn side_history(mut history: Vec<(Role, String)>) -> Vec<(Role, String)> {
-    history.drain(..history.len().saturating_sub(HISTORY_CAP));
-    history
-}
-
-const HISTORY_CAP: usize = 40;
 
 fn btw_key(chat: i64) -> String {
     format!("btw:{chat}")
@@ -106,7 +100,7 @@ impl ChatApp {
             thread.running = false;
             return cx.notify();
         }
-        let prompt = btw_prompt(thread, &question);
+        let prompt = btw_prompt(&thread.turns[..turn], &question);
         let native = self.agent.side_question(&chat.id.to_string(), &prompt);
         match native {
             Some(Reply { mut updates, .. }) => {
@@ -138,7 +132,11 @@ impl ChatApp {
         let Some(ix) = self.chats.iter().position(|c| c.id == id) else { return };
         let chat = &self.chats[ix];
         let key = btw_key(id);
-        let mut hist = side_history(seed_history(&chat.messages));
+        let context = aether_agent::handoff::make_side_chat_context(
+            chat.id,
+            &handoff_history(&chat.messages, chat.id),
+        );
+        let mut hist = vec![(Role::User, context.clone())];
         if let Some(thread) = self.btw.get(&id) {
             for prior in thread.turns.iter().take(turn) {
                 hist.push((Role::User, prior.question.clone()));
@@ -151,6 +149,7 @@ impl ChatApp {
         session.key = key.clone();
         session.access = AccessMode::ReadOnly;
         session.resume.clear();
+        session.fork = false;
         session.lead = false;
         session.ephemeral = true;
         if chat.provider == Provider::OpenRouter
@@ -172,28 +171,21 @@ impl ChatApp {
             .map(|t| t.question.clone())
             .unwrap_or_default();
         let api_key = self.api_key.clone().unwrap_or_default();
-        let handoff: Vec<_> = hist
-            .iter()
-            .enumerate()
-            .map(|(i, (role, text))| aether_agent::handoff::HistoricalMessage {
-                role: *role,
-                kind: if *role == Role::User { "user_message" } else { "assistant_message" },
-                text: text.clone(),
-                chat: id,
-                message: i,
-                item: i.to_string(),
-                model: None,
-                status: "completed".into(),
-            })
-            .collect();
         let Reply { mut updates, cancel } = self.agent.send(
             &key,
-            btw_prompt(&self.btw[&id], &question),
+            if chat.provider == Provider::OpenRouter {
+                side_prompt(&question)
+            } else {
+                aether_agent::handoff::with_inline_context(
+                    &context,
+                    &btw_prompt(&self.btw[&id].turns[..turn], &question),
+                )
+            },
             Vec::new(),
             &settings,
             &api_key,
             Vec::new(),
-            &handoff,
+            &[],
             &session,
         );
         match self.btw.get_mut(&id) {

@@ -54,23 +54,21 @@ fn plain_text(m: &Message) -> String {
     text
 }
 
-/// Transcript that seeds a fresh CLI session: one entry per message so the numbers match
-/// read_history; a reply with only tool calls says so.
-fn seed_history(messages: &[Message]) -> Vec<(Role, String)> {
+pub(super) fn native_context_estimate(messages: &[Message], chat: i64, seen: usize) -> u64 {
+    let messages = &messages[..seen.min(messages.len())];
+    let text =
+        handoff_history(messages, chat).iter().map(|item| item.text.len() as u64).sum::<u64>();
     messages
         .iter()
-        .map(|m| {
-            let text = plain_text(m);
-            let text = if !text.trim().is_empty() {
-                text
-            } else if m.steps.iter().any(|s| matches!(s, Step::Tool(_))) {
-                "(tool calls only)".into()
+        .filter(|message| message.role == Role::User)
+        .flat_map(|message| &message.attachments)
+        .fold(text, |total, attachment| {
+            total.saturating_add(if aether_core::is_image(&attachment.mime) {
+                8_192
             } else {
-                "(no text)".into()
-            };
-            (m.role, text)
+                4_096
+            })
         })
-        .collect()
 }
 
 pub(super) fn handoff_history(
@@ -662,6 +660,7 @@ impl ChatApp {
                 provider: chat.provider,
                 provider_model: chat.provider_model.clone(),
                 cli_session: chat.cli_session.clone(),
+                fork_from: chat.fork_from.clone(),
                 agent_sessions: chat.agent_sessions.clone(),
                 handoff_seen: chat.handoff_seen.clone(),
                 access: chat.access,

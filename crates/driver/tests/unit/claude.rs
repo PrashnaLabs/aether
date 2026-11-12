@@ -886,6 +886,7 @@ fn full_access_args_start_fresh_session() {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -913,6 +914,7 @@ fn launch_args_let_claude_read_attachments() {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -951,6 +953,7 @@ fn auto_access_uses_auto_permission_mode_without_bypass() {
         effort: String::new(),
         access: AccessMode::Auto,
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1021,6 +1024,7 @@ fn live_claude_smoke() {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: resume.into(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1108,6 +1112,7 @@ fn live_wake_smoke() {
         effort: String::new(),
         access: AccessMode::Full,
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1186,6 +1191,7 @@ fn ask_opts() -> DriverStartOptions {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -2053,6 +2059,7 @@ fn test_opts() -> DriverStartOptions {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -2261,4 +2268,14 @@ fn process_exit_fails_pending_side_questions() {
     s.sides.insert("aether-btw-3".into(), tx);
     on_exit(&mut s, "gone".into());
     assert_eq!(rx.try_recv().unwrap(), Update::Error("gone".into()));
+}
+
+#[test]
+fn native_fork_launches_with_resume_and_fork_flag() {
+    let opts = DriverStartOptions { resume: "source".into(), fork: true, ..test_opts() };
+    let (args, id, resumed, _) = launch_args(&opts);
+    assert!(args.windows(2).any(|pair| pair == ["--resume", "source"]));
+    assert!(args.iter().any(|arg| arg == "--fork-session"));
+    assert_eq!(id, "source");
+    assert!(resumed);
 }

@@ -51,6 +51,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),

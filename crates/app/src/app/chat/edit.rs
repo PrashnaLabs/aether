@@ -223,6 +223,7 @@ impl ChatApp {
         }
         chat.session = session;
         chat.cli_session.clear();
+        chat.fork_from.clear();
         chat.agent_sessions.clear();
         chat.handoff_seen = None;
         self.agent.close_session(&chat.id.to_string());

@@ -95,6 +95,7 @@ fn opencode_and_saved_chats_convert_into_usage_records() {
         provider: Provider::OpenRouter,
         provider_model: "anthropic/claude-sonnet-4-5".into(),
         cli_session: String::new(),
+        fork_from: String::new(),
         agent_sessions: vec![],
         handoff_seen: None,
         access: AccessMode::Ask,

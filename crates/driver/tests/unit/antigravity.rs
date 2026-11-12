@@ -81,6 +81,7 @@ fn opts(model: &str, effort: &str, access: AccessMode) -> DriverStartOptions {
         effort: effort.into(),
         access,
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),

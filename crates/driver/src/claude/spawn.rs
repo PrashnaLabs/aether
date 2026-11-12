@@ -74,7 +74,9 @@ impl ClaudeDriver {
                 chosen: opts.model.clone(),
                 ..State::default()
             }));
-            let _ = me.tx.unbounded_send(Update::Session(id.clone()));
+            if !opts.fork || !resumed {
+                let _ = me.tx.unbounded_send(Update::Session(id.clone()));
+            }
             if let Some(n) = note.take() {
                 me.notice(n);
             }
@@ -93,11 +95,28 @@ impl ClaudeDriver {
                     let _ = me.tx.unbounded_send(Update::Warning(why.into()));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    let fix = resume_fix(&me.state.guard().stderr);
+                    let fix = if opts.fork {
+                        Some(ResumeFix::Fresh(me.state.guard().stderr.fatal("")))
+                    } else {
+                        resume_fix(&me.state.guard().stderr)
+                    };
                     match fix {
                         Some(fix) if attempt == 0 => {
                             me.stop_child();
+                            if opts.fork {
+                                args.retain(|a| a != "--fork-session");
+                            }
                             (args, id, resumed, note) = apply_fix(args, fix);
+                            if opts.fork {
+                                let reason = me.state.guard().stderr.fatal("");
+                                note = Some(Notice::new(
+                                    "info-fork",
+                                    NoticeKind::Info,
+                                    format!(
+                                        "Could not fork the source conversation natively ({reason}). Started a fresh session with its history."
+                                    ),
+                                ));
+                            }
                             continue;
                         }
                         _ => {
@@ -359,10 +378,14 @@ pub(crate) fn launch_args(
             Err(e) => eprintln!("aether: lead tools unavailable: {e}"),
         }
     }
-    let resumed = !opts.resume.is_empty() && session_exists(&opts.resume);
+    let resumed = !opts.resume.is_empty() && (opts.fork || session_exists(&opts.resume));
     let note = lost_resume(&opts.resume, resumed);
     let id = if resumed { opts.resume.clone() } else { new_uuid() };
     args.extend([if resumed { "--resume" } else { "--session-id" }.to_string(), id.clone()]);
+    if opts.fork && resumed {
+        let (args, id, resumed, _) = apply_fix(args, ResumeFix::Fork);
+        return (args, id, resumed, note);
+    }
     (args, id, resumed, note)
 }
 

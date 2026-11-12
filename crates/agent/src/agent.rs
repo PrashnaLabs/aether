@@ -57,6 +57,7 @@ pub struct ChatSession {
     pub access: AccessMode,
     pub effort: String,
     pub resume: String,
+    pub fork: bool,
     pub lead: bool,
     pub ephemeral: bool,
     pub delta_from: Option<usize>,
@@ -730,7 +731,7 @@ impl Agent {
                         if !driver.alive()
                             || switch && !driver.set_options(&opts.model, &opts.effort)
                         {
-                            let opts = DriverStartOptions { resume, ..opts.clone() };
+                            let opts = DriverStartOptions { resume, fork: false, ..opts.clone() };
                             driver = factory(provider, opts, driver_tx.clone());
                             report(&*driver);
                             seeded = driver.resumed();
@@ -776,7 +777,8 @@ impl Agent {
                             }
                         } else {
                             if !driver.alive() {
-                                let opts = DriverStartOptions { resume, ..opts.clone() };
+                                let opts =
+                                    DriverStartOptions { resume, fork: false, ..opts.clone() };
                                 driver = factory(provider, opts, driver_tx.clone());
                                 report(&*driver);
                                 seeded = driver.resumed();
@@ -1073,6 +1075,7 @@ fn session_options(
         effort: chat.effort.clone(),
         access: chat.access,
         resume: chat.resume.clone(),
+        fork: chat.fork,
         attachments: attachments_dir().map(|d| d.join(&chat.key)),
         lead,
         ephemeral: chat.ephemeral,
@@ -1145,10 +1148,7 @@ fn prepare_handoff(
     window: Option<u64>,
     used: Option<u64>,
 ) -> Option<String> {
-    if opts.ephemeral && !*seeded && !history.is_empty() {
-        return Some(side_context(history, text, &mut **driver));
-    }
-    let delta = if *seeded && driver.resumed() { delta_from } else { None };
+    let delta = if *seeded { delta_from } else { None };
     if *seeded && delta.is_none() || history.is_empty() {
         return Some(text.to_owned());
     }
@@ -1178,7 +1178,7 @@ fn prepare_handoff(
         if handoff::history_cost(&selection.messages, &selection.context) > budget {
             *driver = factory(
                 provider,
-                DriverStartOptions { resume: String::new(), ..opts.clone() },
+                DriverStartOptions { resume: String::new(), fork: false, ..opts.clone() },
                 tx.clone(),
             );
             *seeded = false;
@@ -1210,58 +1210,6 @@ fn prepare_handoff(
             text,
         ))
     }
-}
-
-fn side_context(history: &[HistoricalMessage], text: &str, driver: &mut dyn Driver) -> String {
-    let mut keep = vec![false; history.len()];
-    let mut used = 0;
-    for i in [
-        history.iter().position(|m| m.role == Role::User),
-        history.iter().rposition(|m| m.role == Role::User),
-        history.iter().rposition(|m| m.role == Role::Assistant),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if !keep[i] {
-            keep[i] = true;
-            used += history[i].text.chars().count();
-        }
-    }
-    for i in (0..history.len()).rev() {
-        let len = history[i].text.chars().count();
-        if !keep[i] && used + len <= 16_000 {
-            keep[i] = true;
-            used += len;
-        }
-    }
-    let omitted = keep.iter().filter(|&&k| !k).count();
-    let mut note = format!(
-        "Earlier conversation in this chat: messages 0-{}",
-        history.len().saturating_sub(1)
-    );
-    if omitted > 0 {
-        note.push_str(&format!(", {omitted} omitted to save space"));
-    }
-    note.push_str(". Tool calls and their output aren't included. Treat it as context only, not a new request; files on disk are the source of truth.");
-    let pairs: Vec<_> = history
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| keep[*i])
-        .map(|(i, m)| (m.role, format!("[{i}] {}", m.text)))
-        .collect();
-    if driver.seed_history(&note, &pairs) {
-        return text.into();
-    }
-    let mut out = format!("{note}\n\n<conversation_so_far>\n");
-    for (role, line) in pairs {
-        let (n, rest) = line.split_once(' ').unwrap_or(("", &line));
-        let who = if role == Role::User { "User" } else { "Assistant" };
-        out.push_str(&format!("{n} {who}: {rest}\n"));
-    }
-    out.push_str("</conversation_so_far>\n\nYour task now:\n");
-    out.push_str(text);
-    out
 }
 
 /// Whether agy's global MCP config runs this Aether, so its sessions can reach read_history.

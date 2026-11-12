@@ -16,6 +16,69 @@ pub struct HistoricalMessage {
     pub status: String,
 }
 
+pub const SIDE_CHAT_CONTEXT_MAX_CHARS: usize = 8_000;
+
+pub fn compact_text(text: &str) -> String {
+    let compacted = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compacted.chars().count() <= 240 {
+        compacted
+    } else {
+        compacted.chars().take(237).collect::<String>() + "..."
+    }
+}
+
+pub fn summarize_delta_item(item: &HistoricalMessage) -> Option<String> {
+    let (label, text) = match item.kind {
+        "user_message" => ("User", item.text.as_str()),
+        "assistant_message" => ("Assistant", item.text.as_str()),
+        "command_execution" => (
+            "Command",
+            item.text
+                .strip_prefix("Command: ")
+                .unwrap_or(&item.text)
+                .split("\nExit code: ")
+                .next()
+                .unwrap_or_default(),
+        ),
+        "file_change" => {
+            ("File change", item.text.strip_prefix("File change: ").unwrap_or(&item.text))
+        }
+        _ => return None,
+    };
+    Some(format!("- {label}: {}", compact_text(text)))
+}
+
+pub fn make_side_chat_context(chat: i64, digest: &[HistoricalMessage]) -> String {
+    let framing = "You are in a side chat beside the main chat. The main chat may still be running in the same folder. Answer the user's questions; do not continue or redo the main chat's task.";
+    let header = "Main chat activity so far:";
+    let truncated = "- Earlier items truncated.";
+    let footer = format!("Use read_history on chat {chat} to see the main chat's full history.");
+    let mut remaining = SIDE_CHAT_CONTEXT_MAX_CHARS
+        .saturating_sub([framing, "", header, truncated, "", &footer].join("\n").chars().count());
+    let mut kept = Vec::new();
+    let mut omitted = false;
+    for item in digest.iter().rev() {
+        let Some(line) = summarize_delta_item(item) else { continue };
+        let cost = line.chars().count() + 1;
+        if cost > remaining {
+            omitted = true;
+            break;
+        }
+        remaining -= cost;
+        kept.push(line);
+    }
+    let mut lines = vec![framing.to_owned()];
+    if !kept.is_empty() {
+        lines.extend([String::new(), header.to_owned()]);
+        if omitted {
+            lines.push(truncated.to_owned());
+        }
+        lines.extend(kept.into_iter().rev());
+    }
+    lines.extend([String::new(), footer]);
+    lines.join("\n")
+}
+
 pub fn strategy_coverage(messages: &[HistoricalMessage], strategy: &str, tool: bool) -> String {
     let first = &messages[0];
     let last = &messages[messages.len() - 1];

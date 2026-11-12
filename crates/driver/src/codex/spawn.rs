@@ -169,10 +169,28 @@ impl CodexDriver {
         self.note("startup-session", stage, NoticeState::Running);
         let mut resumed = None;
         if !opts.resume.is_empty() {
-            match self.request("thread/resume", resume_params(opts), deadline) {
+            let (method, params) = session_request(opts);
+            match self.request(method, params, deadline).and_then(|thread| {
+                if opts.fork && thread["thread"]["id"].as_str().is_none_or(str::is_empty) {
+                    Err("thread/fork returned no thread id".into())
+                } else {
+                    Ok(thread)
+                }
+            }) {
                 Ok(thread) => resumed = Some(thread),
                 Err(e) => {
-                    let _ = self.tx.unbounded_send(Update::Notice(resume_notice(&e)));
+                    let notice = if opts.fork {
+                        Notice::new(
+                            "info-fork",
+                            NoticeKind::Info,
+                            format!(
+                                "Could not fork the source conversation natively ({e}). Started a fresh session with its history."
+                            ),
+                        )
+                    } else {
+                        resume_notice(&e)
+                    };
+                    let _ = self.tx.unbounded_send(Update::Notice(notice));
                 }
             }
         }
@@ -349,6 +367,17 @@ pub(crate) fn thread_params(opts: &DriverStartOptions) -> Value {
         p["ephemeral"] = true.into();
     }
     p
+}
+
+pub(crate) fn session_request(opts: &DriverStartOptions) -> (&'static str, Value) {
+    if opts.fork {
+        let mut params = thread_params(opts);
+        params["threadId"] = opts.resume.clone().into();
+        params["excludeTurns"] = true.into();
+        ("thread/fork", params)
+    } else {
+        ("thread/resume", resume_params(opts))
+    }
 }
 
 pub(crate) fn resume_params(opts: &DriverStartOptions) -> Value {

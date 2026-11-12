@@ -67,6 +67,7 @@ fn live_opencode_smoke() {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: resume.into(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),

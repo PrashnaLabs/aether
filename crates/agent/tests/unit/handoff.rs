@@ -91,3 +91,65 @@ fn delta_selects_message_range_and_labels_coverage() {
             .starts_with("Context handoff (delta_since_target_last_seen):\n")
     );
 }
+
+#[test]
+fn side_text_compacts_and_truncates_without_splitting_characters() {
+    assert_eq!(compact_text(" \n hello\t  world \r\n"), "hello world");
+    assert_eq!(compact_text(&"x".repeat(240)), "x".repeat(240));
+    assert_eq!(compact_text(&"x".repeat(241)), format!("{}...", "x".repeat(237)));
+    assert_eq!(compact_text(&"界🧪".repeat(130)), format!("{}界...", "界🧪".repeat(118)));
+}
+
+#[test]
+fn side_digest_summarizes_only_supported_activity() {
+    let mut item = message(0, Role::Assistant, "Command: cargo test\nExit code: 0\nsecret output");
+    item.kind = "command_execution";
+    assert_eq!(summarize_delta_item(&item).as_deref(), Some("- Command: cargo test"));
+    item.kind = "file_change";
+    item.text = "File change: src/main.rs".into();
+    assert_eq!(summarize_delta_item(&item).as_deref(), Some("- File change: src/main.rs"));
+    item.kind = "error";
+    assert_eq!(summarize_delta_item(&item), None);
+}
+
+#[test]
+fn side_context_keeps_recent_items_in_oldest_first_order() {
+    let items: Vec<_> =
+        (0..100).map(|i| message(i, Role::User, &format!("{i:03} {}", "界".repeat(230)))).collect();
+    let context = make_side_chat_context(42, &items);
+    assert!(context.chars().count() <= SIDE_CHAT_CONTEXT_MAX_CHARS);
+    assert!(context.contains("- Earlier items truncated."));
+    assert!(!context.contains("- User: 000"));
+    assert!(context.find("- User: 098").unwrap() < context.find("- User: 099").unwrap());
+    assert!(context.ends_with("Use read_history on chat 42 to see the main chat's full history."));
+    let short = make_side_chat_context(42, &items[..2]);
+    assert!(!short.contains("truncated"));
+    assert!(short.find("- User: 000").unwrap() < short.find("- User: 001").unwrap());
+}
+
+#[test]
+fn side_context_reserves_the_whole_block_at_the_exact_cap() {
+    let framing = "You are in a side chat beside the main chat. The main chat may still be running in the same folder. Answer the user's questions; do not continue or redo the main chat's task.";
+    let reserved = [
+        framing,
+        "",
+        "Main chat activity so far:",
+        "- Earlier items truncated.",
+        "",
+        "Use read_history on chat 1 to see the main chat's full history.",
+    ]
+    .join("\n")
+    .chars()
+    .count();
+    let available = SIDE_CHAT_CONTEXT_MAX_CHARS - reserved;
+    let mut items = vec![message(0, Role::User, &"x".repeat(240))];
+    for i in 0..available / 249 {
+        items.push(message(i + 1, Role::User, &"x".repeat(240)));
+    }
+    let rest = available % 249;
+    assert!(rest >= 9);
+    items.push(message(items.len(), Role::User, &"x".repeat(rest - 9)));
+    let context = make_side_chat_context(1, &items);
+    assert_eq!(context.chars().count(), SIDE_CHAT_CONTEXT_MAX_CHARS);
+    assert!(context.contains("- Earlier items truncated."));
+}

@@ -440,15 +440,18 @@ impl ChatApp {
                 m.role == aether_core::Role::Assistant
                     && (m.context_tokens.is_some() || m.context_window.is_some())
             });
+            let seen = chat.handoff_seen.as_ref().map_or(chat.messages.len(), |h| h.seen);
+            let estimate = super::chat::native_context_estimate(&chat.messages, chat.id, seen);
             chat.agent_sessions.retain(|s| s.provider != chat.provider);
             chat.agent_sessions.push(aether_agent::AgentSession {
                 provider: chat.provider,
                 session: chat.cli_session.clone(),
-                seen: chat.handoff_seen.as_ref().map_or(chat.messages.len(), |h| h.seen),
+                seen,
                 context_tokens: chat
                     .handoff_seen
                     .as_ref()
-                    .map_or_else(|| usage.and_then(|m| m.context_tokens), |h| h.context_tokens),
+                    .map_or_else(|| usage.and_then(|m| m.context_tokens), |h| h.context_tokens)
+                    .or(Some(estimate)),
                 context_window: chat
                     .handoff_seen
                     .as_ref()
@@ -456,6 +459,7 @@ impl ChatApp {
             });
         }
         chat.cli_session.clear();
+        chat.fork_from.clear();
         chat.handoff_seen = None;
         if provider != Provider::OpenRouter
             && let Some(pos) = chat
@@ -466,6 +470,7 @@ impl ChatApp {
             let saved = chat.agent_sessions.remove(pos);
             chat.cli_session = saved.session;
             chat.handoff_seen = Some(aether_agent::HandoffSeen {
+                pending: false,
                 seen: saved.seen,
                 context_tokens: saved.context_tokens,
                 context_window: saved.context_window,

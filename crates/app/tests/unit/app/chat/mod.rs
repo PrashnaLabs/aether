@@ -145,21 +145,6 @@ fn updates_find_tools_inside_activity_groups() {
 }
 
 #[test]
-fn seed_history_keeps_one_entry_per_message() {
-    use aether_core::{ToolCall, ToolDetail};
-    let mut chat = chat_with("c", &["ask", "", "again", "done"]);
-    chat.messages[1].apply(Update::Tool(ToolCall::new(
-        "1",
-        "T",
-        ToolDetail::Read { path: "README.md".into(), range: None },
-    )));
-    let seeded = seed_history(&chat.messages);
-    let texts: Vec<_> = seeded.iter().map(|(_, t)| t.as_str()).collect();
-    assert_eq!(texts, ["ask", "(tool calls only)", "again", "done"]);
-    assert_eq!(history(&chat.messages).len(), 3, "OpenRouter history still skips empty replies");
-}
-
-#[test]
 fn tool_records_show_what_ran_with_output_tails() {
     use aether_core::{ToolCall, ToolDetail, ToolStatus};
     let cmd = ToolCall::new(
@@ -336,4 +321,28 @@ fn crew_options_offer_all_and_finished_without_lead_alone() {
     let busy = crew_options(1, None, &[2]);
     assert_eq!(busy.len(), 1, "with agents running, only the finished ones can go");
     assert_eq!(crew_options(1, Some(&[]), &[]), [("This chat".into(), vec![1])]);
+}
+
+#[test]
+fn native_context_estimate_counts_utf8_and_attachments_before_seen() {
+    let mut user = Message::user("é");
+    user.attachments = vec![
+        aether_core::Attachment {
+            name: "a".into(),
+            path: "a".into(),
+            mime: "image/png".into(),
+            size: 1,
+        },
+        aether_core::Attachment {
+            name: "b".into(),
+            path: "b".into(),
+            mime: "text/plain".into(),
+            size: 1,
+        },
+    ];
+    let messages = vec![user, Message::user("ignored")];
+    let text =
+        handoff_history(&messages[..1], 1).iter().map(|item| item.text.len() as u64).sum::<u64>();
+    assert_eq!(native_context_estimate(&messages, 1, 1), text + 8_192 + 4_096);
+    assert_eq!(native_context_estimate(&messages, 1, 0), 0);
 }

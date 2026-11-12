@@ -65,6 +65,14 @@ pub(super) fn new_chat_folder(
     current.or(recent)
 }
 
+pub(crate) fn native_fork_source(source: &Chat, handoff: bool) -> String {
+    if !handoff && matches!(source.provider, Provider::Claude | Provider::Codex) && !source.busy() {
+        source.cli_session.clone()
+    } else {
+        String::new()
+    }
+}
+
 /// Rows a relaunch left running read as interrupted; OpenCode's shared service keeps working.
 pub(crate) fn restore_messages(provider: Provider, messages: &mut [Message]) {
     for m in messages {
@@ -188,6 +196,7 @@ impl ChatApp {
             m.interrupt(if handoff.is_some() { "Handed off" } else { "Copied" });
             m.finish();
         }
+        let fork_from = native_fork_source(source, handoff.is_some());
         let handoff_from = handoff.is_some().then_some(source.id);
         let (provider, provider_model, access, effort, title) = match handoff {
             Some((target, model)) => {
@@ -272,6 +281,7 @@ impl ChatApp {
                 access,
                 effort,
                 cli_session: String::new(),
+                fork_from,
                 agent_sessions: vec![],
                 handoff_seen: None,
                 queue: Vec::new(),
@@ -420,6 +430,7 @@ impl ChatApp {
             access: self.settings.default_access(default_provider),
             effort: String::new(),
             cli_session: String::new(),
+            fork_from: String::new(),
             agent_sessions: vec![],
             handoff_seen: None,
             queue: Vec::new(),
@@ -497,6 +508,7 @@ impl ChatApp {
             access: self.settings.default_access(Provider::OpenRouter),
             effort: String::new(),
             cli_session: String::new(),
+            fork_from: String::new(),
             agent_sessions: vec![],
             handoff_seen: None,
             queue: Vec::new(),
@@ -553,6 +565,7 @@ impl ChatApp {
             provider,
             provider_model,
             cli_session,
+            fork_from,
             agent_sessions,
             handoff_seen,
             access,
@@ -599,6 +612,7 @@ impl ChatApp {
                 access: fit_access(provider, access),
                 effort,
                 cli_session,
+                fork_from,
                 agent_sessions,
                 handoff_seen,
                 stopped: false,
@@ -713,6 +727,7 @@ impl ChatApp {
             access: self.settings.default_access(a.provider),
             effort: String::new(),
             cli_session: a.session,
+            fork_from: String::new(),
             agent_sessions: vec![],
             handoff_seen: None,
             queue: Vec::new(),

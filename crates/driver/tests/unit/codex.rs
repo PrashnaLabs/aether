@@ -71,6 +71,7 @@ fn opts(access: AccessMode, model: &str, resume: &str) -> DriverStartOptions {
         effort: String::new(),
         access,
         resume: resume.into(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -3015,4 +3016,68 @@ fn injected_history_is_responses_api_messages() {
             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "[1] yo"}]}
         ])
     );
+}
+
+#[test]
+fn native_fork_request_is_persistent_and_keeps_thread_settings() {
+    let options = DriverStartOptions { fork: true, ..opts(AccessMode::Full, "model", "source") };
+    let (method, params) = session_request(&options);
+    assert_eq!(method, "thread/fork");
+    assert_eq!(params["threadId"], "source");
+    assert_eq!(params["model"], "model");
+    assert_eq!(params["excludeTurns"], true);
+    assert!(params.get("ephemeral").is_none());
+    assert_eq!(session_request(&DriverStartOptions { fork: false, ..options }).0, "thread/resume");
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_native_fork_starts_a_fresh_thread_with_notice() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("aether-codex-fork-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("codex");
+    let log = dir.join("requests");
+    let program = format!(
+        r##"#!/usr/bin/python3
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    with open({log:?}, 'a') as f:
+        f.write(method + '\n')
+    if 'id' not in request:
+        continue
+    if method == 'initialize':
+        result = {{'userAgent': 'codex/99.0.0'}}
+    elif method == 'thread/fork':
+        print(json.dumps({{'id': request['id'], 'error': {{'message': 'source unavailable'}}}}), flush=True)
+        continue
+    elif method == 'thread/start':
+        result = {{'thread': {{'id': 'fresh'}}}}
+    else:
+        result = {{}}
+    print(json.dumps({{'id': request['id'], 'result': result}}), flush=True)
+"##,
+        log = log.to_string_lossy()
+    );
+    std::fs::write(&script, program).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let options = DriverStartOptions {
+        binary: script.to_string_lossy().into_owned(),
+        cwd: dir.clone(),
+        fork: true,
+        ..opts(AccessMode::Ask, "", "source")
+    };
+    let driver = CodexDriver::spawn(options, tx);
+    assert!(!driver.resumed());
+    let updates: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(updates.iter().any(|u| matches!(u, Update::Session(id) if id == "fresh")));
+    assert!(updates.iter().any(|u| matches!(u, Update::Notice(n) if n.kind == NoticeKind::Info && n.text.starts_with("Could not fork the source conversation natively"))));
+    let requests = std::fs::read_to_string(&log).unwrap();
+    assert!(requests.find("thread/fork").unwrap() < requests.find("thread/start").unwrap());
+    drop(driver);
+    let _ = std::fs::remove_dir_all(dir);
 }

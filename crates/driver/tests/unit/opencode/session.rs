@@ -22,6 +22,7 @@ fn create_body_carries_location_and_model_ref() {
         effort: "high".into(),
         access: AccessMode::Ask,
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),

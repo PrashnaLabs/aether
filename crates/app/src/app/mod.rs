@@ -134,6 +134,7 @@ pub(crate) struct Chat {
     pub(crate) effort: String,
     /// Provider's own resume id for this chat's CLI session.
     pub(crate) cli_session: String,
+    pub(crate) fork_from: String,
     pub(crate) agent_sessions: Vec<aether_agent::AgentSession>,
     pub(crate) handoff_seen: Option<aether_agent::HandoffSeen>,
     pub queue: Vec<Queued>,
@@ -891,6 +892,7 @@ pub(super) fn chat_with(title: &str, texts: &[&str]) -> Chat {
         access: AccessMode::Ask,
         effort: String::new(),
         cli_session: String::new(),
+        fork_from: String::new(),
         agent_sessions: vec![],
         handoff_seen: None,
         queue: Vec::new(),

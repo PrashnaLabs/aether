@@ -31,6 +31,7 @@ pub struct DriverStartOptions {
     pub effort: String,
     pub access: AccessMode,
     pub resume: String,
+    pub fork: bool,
     /// Opened for a reply left unfinished at quit; one that ended meanwhile is closed out.
     pub reattach: bool,
     /// This chat's attachment folder, where tool result images are saved.
@@ -76,6 +77,7 @@ impl DriverStartOptions {
                     effort: String::new(),
                     access: AccessMode::default(),
                     resume: String::new(),
+                    fork: false,
                     reattach: false,
                     attachments: None,
                     background: Vec::new(),
@@ -91,6 +93,7 @@ impl DriverStartOptions {
             effort: String::new(),
             access: AccessMode::default(),
             resume: String::new(),
+            fork: false,
             reattach: false,
             attachments: None,
             background: Vec::new(),

@@ -517,3 +517,169 @@ fn handoff_switches_in_place_and_the_sidebar_copies(cx: &mut gpui_kit::TestAppCo
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn handoff_delivery_tracks_output_and_failed_turns(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut chat = chat_with("t", &[]);
+            chat.provider = Provider::Claude;
+            chat.cli_session = "session".into();
+            chat.messages = vec![
+                Message::user("earlier"),
+                Message::assistant(),
+                Message::user("missed"),
+                Message::assistant(),
+            ];
+            chat.handoff_seen = Some(aether_agent::HandoffSeen {
+                seen: 1,
+                context_tokens: Some(42),
+                context_window: Some(100_000),
+                pending: true,
+            });
+            app.chats = vec![chat];
+            app.active = 0;
+            let (run, epoch) = (app.chats[0].run, app.chats[0].epoch);
+            app.apply(0, 3, run, Update::Usage(100), window, cx);
+            assert!(app.chats[0].handoff_seen.as_ref().unwrap().pending);
+            app.apply(0, 3, run, Update::Error("failed".into()), window, cx);
+            app.finish_run(0, 3, run, epoch, false, window, cx);
+            let h = app.chats[0].handoff_seen.as_ref().unwrap();
+            assert_eq!((h.seen, h.pending, h.context_tokens), (1, false, Some(42)));
+            app.chats[0].handoff_seen.as_mut().unwrap().pending = true;
+            app.apply(0, 3, run, Update::Delta("answer".into()), window, cx);
+            assert!(app.chats[0].handoff_seen.is_none());
+            app.chats[0].messages[3] = Message::assistant();
+            app.apply(0, 3, run, Update::Error("failed".into()), window, cx);
+            app.finish_run(0, 3, run, epoch, false, window, cx);
+            assert_eq!(app.chats[0].handoff_seen.as_ref().unwrap().seen, 2);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn handoff_send_retries_or_restarts_uncertain_session(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let mut chat = chat_with("t", &["previous"]);
+            chat.provider = Provider::Claude;
+            chat.cwd = "/tmp".into();
+            chat.cli_session = "session".into();
+            chat.handoff_seen = Some(aether_agent::HandoffSeen {
+                seen: 0,
+                context_tokens: None,
+                context_window: None,
+                pending: false,
+            });
+            app.chats = vec![chat];
+            app.active = 0;
+            app.submit_as(0, "retry".into(), vec![], false, window, cx);
+            assert!(app.chats[0].handoff_seen.as_ref().unwrap().pending);
+            assert_eq!(app.cli_request(0).1.delta_from, Some(0));
+            app.chats[0].cancel.take().unwrap().cancel();
+            app.submit_as(0, "restart".into(), vec![], false, window, cx);
+            assert!(app.chats[0].cli_session.is_empty());
+            assert!(app.chats[0].handoff_seen.is_none());
+            assert!(app.cli_request(0).1.resume.is_empty());
+        })
+        .unwrap();
+}
+
+#[test]
+fn native_fork_requires_supported_idle_source_and_no_handoff() {
+    let mut chat = chat_with("t", &["hi"]);
+    chat.cli_session = "source".into();
+    for provider in [Provider::Claude, Provider::Codex] {
+        chat.provider = provider;
+        assert_eq!(native_fork_source(&chat, false), "source");
+        assert!(native_fork_source(&chat, true).is_empty());
+    }
+    chat.provider = Provider::Pi;
+    assert!(native_fork_source(&chat, false).is_empty());
+    chat.provider = Provider::Claude;
+    chat.cli_session.clear();
+    assert!(native_fork_source(&chat, false).is_empty());
+}
+
+#[gpui_kit::test]
+fn duplicate_dispatch_consumes_and_persists_native_fork(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let path = std::env::temp_dir().join(format!("aether-fork-dispatch-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let window = cx.add_window(|window, cx| {
+        let agent = aether_agent::Agent::new().unwrap();
+        let store = agent.open_store(&path).unwrap();
+        ChatApp::with_state(
+            agent,
+            aether_core::Settings::default(),
+            None,
+            Some(store),
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            for provider in [Provider::Claude, Provider::Codex] {
+                let mut source = chat_with("source", &["hello", "reply"]);
+                source.provider = provider;
+                source.cwd = "/tmp".into();
+                source.cli_session = "source-session".into();
+                app.chats = vec![source];
+                app.active = 0;
+                app.duplicate_chat(0, window, cx);
+                let copy = &app.chats[1];
+                let id = copy.id;
+                assert_eq!(copy.fork_from, "source-session");
+                let request = app.cli_request(1).1;
+                assert!(request.fork);
+                assert_eq!(request.resume, "source-session");
+                let store = app.store.as_ref().unwrap();
+                store.flush();
+                assert_eq!(
+                    store.load().unwrap().iter().find(|c| c.id == id).unwrap().fork_from,
+                    "source-session"
+                );
+                app.submit_as(1, "first prompt".into(), vec![], false, window, cx);
+                assert!(app.chats[1].fork_from.is_empty());
+                let store = app.store.as_ref().unwrap();
+                store.flush();
+                assert!(
+                    store.load().unwrap().iter().find(|c| c.id == id).unwrap().fork_from.is_empty()
+                );
+                if let Some(cancel) = app.chats[1].cancel.take() {
+                    cancel.cancel();
+                }
+            }
+        })
+        .unwrap();
+    let _ = std::fs::remove_file(path);
+}

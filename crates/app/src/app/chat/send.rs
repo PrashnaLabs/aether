@@ -35,6 +35,11 @@ fn title_text(m: &Message) -> &str {
 
 const SAVE_EVERY_MS: i64 = 2_000;
 
+fn agent_output(update: &Update) -> bool {
+    matches!(update, Update::Delta(text) | Update::Replace(text) | Update::Thinking(text) | Update::Final(text) if !text.is_empty())
+        || matches!(update, Update::Tool(_))
+}
+
 /// The trailing reply, if it never finished, so a turn the CLI picks back up continues it.
 fn reusable_reply(messages: &[Message]) -> Option<usize> {
     let last = messages.len().checked_sub(1)?;
@@ -349,8 +354,15 @@ impl ChatApp {
             self.list_turn(ix, prev, follow, cx);
             return cx.notify();
         }
+        if self.chats[ix].handoff_seen.as_ref().is_some_and(|h| h.pending) {
+            self.agent.close_session(&self.chats[ix].id.to_string());
+            self.chats[ix].cli_session.clear();
+            self.chats[ix].handoff_seen = None;
+        } else if let Some(handoff) = &mut self.chats[ix].handoff_seen {
+            handoff.pending = true;
+        }
         let (effective, session) = self.cli_request(ix);
-        self.chats[ix].handoff_seen = None;
+        self.chats[ix].fork_from.clear();
         self.persist(ix);
         let key = self.api_key.clone().unwrap_or_default();
         let chat = &mut self.chats[ix];
@@ -391,16 +403,36 @@ impl ChatApp {
         let mut effective = self.settings.clone();
         effective.provider = Some(chat.provider);
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
+        let model = chat.model(&self.settings);
+        let known_window = chat
+            .messages
+            .iter()
+            .rev()
+            .find(|m| {
+                m.role == Role::Assistant
+                    && m.model.as_deref() == Some(model.as_str())
+                    && m.context_window.is_some()
+            })
+            .and_then(|m| m.context_window);
         let session = ChatSession {
             ephemeral: false,
             delta_from: chat.handoff_seen.as_ref().map(|h| h.seen),
-            window: chat.handoff_seen.as_ref().and_then(|h| h.context_window),
+            window: chat.handoff_seen.as_ref().and_then(|h| h.context_window).or_else(|| {
+                (chat.cli_session.is_empty() || chat.handoff_seen.is_some())
+                    .then_some(known_window)
+                    .flatten()
+            }),
             used: chat.handoff_seen.as_ref().and_then(|h| h.context_tokens),
             key: chat.id.to_string(),
             cwd: chat_cwd(chat, &self.settings.workspace_root),
             access: chat.access,
             effort: chat.effort.clone(),
-            resume: chat.cli_session.clone(),
+            resume: if chat.fork_from.is_empty() {
+                chat.cli_session.clone()
+            } else {
+                chat.fork_from.clone()
+            },
+            fork: !chat.fork_from.is_empty(),
             lead: chat.lead,
         };
         (effective, session)
@@ -528,7 +560,9 @@ impl ChatApp {
             epoch,
         };
         cx.spawn_in(window, async move |this, cx| {
+            let mut has_output = false;
             while let Some(update) = updates.next().await {
+                has_output |= agent_output(&update);
                 let applied = this.update_in(cx, |this, window, cx| {
                     if let Some(ix) = target.resolve(&this.chats) {
                         this.apply(ix, reply_ix, run, update, window, cx);
@@ -540,7 +574,7 @@ impl ChatApp {
             }
             this.update_in(cx, |this, window, cx| {
                 if let Some(ix) = target.resolve(&this.chats) {
-                    this.finish_run(ix, reply_ix, run, epoch, window, cx);
+                    this.finish_run(ix, reply_ix, run, epoch, has_output, window, cx);
                 }
             })
             .ok();
@@ -548,12 +582,14 @@ impl ChatApp {
         .detach();
     }
 
-    fn finish_run(
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::app) fn finish_run(
         &mut self,
         ix: usize,
         reply_ix: usize,
         run: u64,
         epoch: u64,
+        has_output: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -572,6 +608,31 @@ impl ChatApp {
             reply.finish();
             failed = reply.failed;
             let expired: Vec<u64> = reply.requests.iter().map(|r| r.id).collect();
+            if failed
+                && !has_output
+                && chat.run == run
+                && chat.provider != Provider::OpenRouter
+                && !chat.cli_session.is_empty()
+            {
+                if let Some(user_ix) =
+                    chat.messages[..reply_ix].iter().rposition(|m| m.role == Role::User)
+                {
+                    let handoff = chat.handoff_seen.get_or_insert(aether_agent::HandoffSeen {
+                        seen: user_ix,
+                        context_tokens: None,
+                        context_window: None,
+                        pending: false,
+                    });
+                    handoff.seen = handoff.seen.min(user_ix);
+                    handoff.pending = false;
+                }
+            } else if failed
+                && !has_output
+                && chat.run == run
+                && let Some(handoff) = &mut chat.handoff_seen
+            {
+                handoff.pending = false;
+            }
             if !watched {
                 chat.unseen = if failed { ChatStatus::Failed } else { ChatStatus::Done };
             }
@@ -745,7 +806,7 @@ impl ChatApp {
         self.persist(ix);
     }
 
-    fn apply(
+    pub(in crate::app) fn apply(
         &mut self,
         ix: usize,
         reply_ix: usize,
@@ -777,8 +838,10 @@ impl ChatApp {
         if matches!(update, Update::Session(_) | Update::Title(_)) {
             return self.apply_cli_meta(ix, update, window, cx);
         }
+        let delivered = agent_output(&update);
         let now = now_ms();
         let chat = &mut self.chats[ix];
+        let cleared = delivered && chat.handoff_seen.take().is_some();
         chat.last_event_ms = now;
         match &update {
             Update::Mode(mode) => {
@@ -795,7 +858,7 @@ impl ChatApp {
         let target = route(&chat.messages, reply_ix, &update);
         let changed = Changed::of(&update, &chat.messages[target]);
         chat.messages[target].apply(update);
-        if save_due(now, chat.saved_ms) {
+        if cleared || save_due(now, chat.saved_ms) {
             chat.saved_ms = now;
             self.persist(ix);
         }

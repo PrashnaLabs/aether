@@ -30,6 +30,7 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS chats (
     handoff_from INTEGER,
     pending_queue TEXT NOT NULL DEFAULT '[]',
     agent_sessions TEXT NOT NULL DEFAULT '[]',
+    fork_from TEXT NOT NULL DEFAULT '',
     handoff_seen TEXT
 )";
 
@@ -65,6 +66,8 @@ pub struct AgentSession {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandoffSeen {
+    #[serde(default)]
+    pub pending: bool,
     pub seen: usize,
     pub context_tokens: Option<u64>,
     pub context_window: Option<u64>,
@@ -81,6 +84,7 @@ pub struct SavedChat {
     pub provider_model: String,
     pub cli_session: String,
     pub agent_sessions: Vec<AgentSession>,
+    pub fork_from: String,
     pub handoff_seen: Option<HandoffSeen>,
     pub access: AccessMode,
     pub effort: String,
@@ -253,6 +257,7 @@ impl Store {
                     "agent_sessions",
                     "ALTER TABLE chats ADD COLUMN agent_sessions TEXT NOT NULL DEFAULT '[]'",
                 ),
+                ("fork_from", "ALTER TABLE chats ADD COLUMN fork_from TEXT NOT NULL DEFAULT ''"),
                 ("handoff_seen", "ALTER TABLE chats ADD COLUMN handoff_seen TEXT"),
                 ("handoff_from", "ALTER TABLE chats ADD COLUMN handoff_from INTEGER"),
                 (
@@ -314,7 +319,7 @@ impl Store {
     /// Every chat whose row and messages still parse, oldest first.
     pub fn load(&self) -> sqlx::Result<Vec<SavedChat>> {
         let rows = self.rt.block_on(
-            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from, pending_queue, agent_sessions, handoff_seen FROM chats ORDER BY id")
+            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from, pending_queue, agent_sessions, handoff_seen, fork_from FROM chats ORDER BY id")
                 .fetch_all(&self.pool),
         )?;
         Ok(rows
@@ -331,6 +336,7 @@ impl Store {
                     provider: parse_provider(&text("provider")?),
                     provider_model: text("provider_model")?,
                     cli_session: text("cli_session")?,
+                    fork_from: text("fork_from")?,
                     agent_sessions: serde_json::from_str(&text("agent_sessions")?)
                         .unwrap_or_default(),
                     handoff_seen: text("handoff_seen").and_then(|s| serde_json::from_str(&s).ok()),
@@ -475,7 +481,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
         .transpose()
         .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
     sqlx::query(
-        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from, pending_queue, agent_sessions, handoff_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from, pending_queue, agent_sessions, handoff_seen, fork_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, messages = excluded.messages,
          pinned = excluded.pinned, archived = excluded.archived,
          provider = excluded.provider, provider_model = excluded.provider_model,
@@ -484,7 +490,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
          worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
          parent = excluded.parent, lead = excluded.lead, lead_seen = excluded.lead_seen,
          pending_deliveries = excluded.pending_deliveries, handoff_from = excluded.handoff_from,
-         pending_queue = excluded.pending_queue, agent_sessions = excluded.agent_sessions, handoff_seen = excluded.handoff_seen",
+         pending_queue = excluded.pending_queue, agent_sessions = excluded.agent_sessions, handoff_seen = excluded.handoff_seen, fork_from = excluded.fork_from",
     )
     .bind(chat.id)
     .bind(&chat.title)
@@ -508,6 +514,7 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     .bind(pending_queue)
     .bind(agent_sessions)
     .bind(handoff_seen)
+    .bind(&chat.fork_from)
     .execute(pool)
     .await?;
     Ok(())

@@ -48,6 +48,7 @@ fn sh_opts() -> DriverStartOptions {
         effort: String::new(),
         access: Default::default(),
         resume: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
