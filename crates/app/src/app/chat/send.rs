@@ -41,6 +41,11 @@ fn handoff_window(chat: &Chat, settings: &Settings, model: &str) -> Option<u64> 
         })
 }
 
+/// Native turn ids from different agents share one transcript; the prefix keeps them apart.
+pub(in crate::app) fn native_turn_key(provider: Provider, id: &str) -> String {
+    format!("{provider:?}:{id}")
+}
+
 fn learn_window(settings: &mut Settings, message: &Message, update: &Update) {
     if let Update::Window(window) = update
         && let Some(model) = message.model.as_ref()
@@ -380,6 +385,8 @@ impl ChatApp {
         let mut sent = Message::user(text.clone());
         sent.attachments = attachments.clone();
         sent.sent_at_ms = Some(chat.turn_at);
+        sent.sent_with =
+            Some(aether_core::SentWith { model: model.clone(), effort: chat.effort.clone() });
         if chat.messages.is_empty() && chat.title == "New chat" {
             chat.title = auto_title(title_text(&sent)).into();
         }
@@ -405,12 +412,14 @@ impl ChatApp {
         if self.chats[ix].handoff_seen.as_ref().is_some_and(|h| h.pending) {
             self.agent.close_session(&self.chats[ix].id.to_string());
             self.chats[ix].cli_session.clear();
+            self.chats[ix].rollback_to.clear();
             self.chats[ix].handoff_seen = None;
         } else if let Some(handoff) = &mut self.chats[ix].handoff_seen {
             handoff.pending = true;
         }
         let (effective, session) = self.cli_request(ix);
         self.chats[ix].fork_from.clear();
+        self.chats[ix].rollback_to.clear();
         self.persist(ix);
         let key = self.api_key.clone().unwrap_or_default();
         let chat = &mut self.chats[ix];
@@ -467,6 +476,7 @@ impl ChatApp {
                 chat.fork_from.clone()
             },
             fork: !chat.fork_from.is_empty(),
+            rollback: chat.rollback_to.clone(),
             lead: chat.lead,
         };
         (effective, session)
@@ -876,6 +886,10 @@ impl ChatApp {
             _ => {}
         }
         let step_done = matches!(&update, Update::Tool(call) if call.status != ToolStatus::Running);
+        let update = match update {
+            Update::NativeTurn(id) => Update::NativeTurn(native_turn_key(chat.provider, &id)),
+            update => update,
+        };
         let target = route(&chat.messages, reply_ix, &update);
         let changed = Changed::of(&update, &chat.messages[target]);
         learn_window(&mut self.settings, &chat.messages[target], &update);

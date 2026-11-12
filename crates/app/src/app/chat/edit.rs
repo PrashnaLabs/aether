@@ -1,4 +1,4 @@
-use aether_core::{Attachment, Role, attachments_dir};
+use aether_core::{Attachment, Message, Provider, Role, attachments_dir};
 use gpui_kit::{Context, Window};
 
 use super::history;
@@ -6,6 +6,77 @@ use crate::app::composer::attach::delete_later;
 use crate::app::worktree::switch_blocks_send;
 use crate::app::{Chat, ChatApp};
 use crate::attachments::copy_all;
+
+fn rewind_target(
+    provider: Provider,
+    messages: &[Message],
+    from: usize,
+    busy: bool,
+    session: &str,
+) -> Option<Option<String>> {
+    if busy || session.is_empty() {
+        return None;
+    }
+    let prefix = super::send::native_turn_key(provider, "");
+    let id = |m: &Message| {
+        (m.role == Role::Assistant)
+            .then_some(m.native_turn.as_deref())
+            .flatten()
+            .and_then(|id| id.strip_prefix(&prefix))
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+    };
+    match provider {
+        Provider::Claude => messages[..from].iter().rev().find_map(&id).map(Some),
+        Provider::Codex | Provider::OpenCode => Some(messages[from..].iter().find_map(id)),
+        _ => None,
+    }
+}
+
+/// The last kept Claude reply a rollback resumes at; later kept messages come from other agents.
+fn claude_kept_through(messages: &[Message], from: usize) -> Option<usize> {
+    let prefix = super::send::native_turn_key(Provider::Claude, "");
+    messages[..from].iter().rposition(|m| {
+        m.role == Role::Assistant
+            && m.native_turn.as_deref().is_some_and(|id| id.starts_with(&prefix))
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn rewind_selects_native_turns_and_fallbacks() {
+    let reply = |provider: Provider, id: &str| {
+        let mut m = Message::assistant();
+        m.native_turn = Some(super::send::native_turn_key(provider, id));
+        m
+    };
+    for provider in [Provider::Codex, Provider::OpenCode] {
+        let messages = vec![
+            Message::user("one"),
+            reply(provider, "a"),
+            Message::user("two"),
+            reply(provider, "b"),
+            reply(provider, "c"),
+        ];
+        assert_eq!(rewind_target(provider, &messages, 2, false, "s"), Some(Some("b".into())));
+        assert_eq!(rewind_target(provider, &messages, 5, false, "s"), Some(None));
+        assert_eq!(rewind_target(provider, &messages, 2, true, "s"), None);
+        assert_eq!(rewind_target(provider, &messages, 2, false, ""), None);
+    }
+    let mixed = vec![
+        Message::user("one"),
+        reply(Provider::Claude, "a"),
+        Message::user("two"),
+        reply(Provider::Codex, "x"),
+        Message::user("three"),
+    ];
+    assert_eq!(rewind_target(Provider::Claude, &mixed, 4, false, "s"), Some(Some("a".into())));
+    assert_eq!(claude_kept_through(&mixed, 4), Some(1));
+    assert_eq!(rewind_target(Provider::Claude, &mixed, 1, false, "s"), None);
+    assert_eq!(rewind_target(Provider::Codex, &mixed, 2, false, "s"), Some(Some("x".into())));
+    assert_eq!(rewind_target(Provider::Pi, &mixed, 2, false, "s"), None);
+    assert_eq!(rewind_target(Provider::Antigravity, &mixed, 2, false, "s"), None);
+}
 
 fn retry_request(
     chats: &[Chat],
@@ -223,13 +294,35 @@ impl ChatApp {
             return;
         }
         let chat = &mut self.chats[ix];
+        let rollback =
+            rewind_target(chat.provider, &chat.messages, from, chat.busy(), &chat.cli_session);
         if let Some(cancel) = chat.cancel.take() {
             cancel.cancel();
         }
         chat.session = session;
-        chat.cli_session.clear();
+        if let Some(Some(id)) = &rollback {
+            chat.rollback_to = id.clone();
+        } else if rollback.is_none() {
+            chat.rollback_to.clear();
+        }
+        if rollback.is_none() {
+            chat.cli_session.clear();
+        }
         chat.fork_from.clear();
         retain_sessions(chat, from);
+        if matches!(rollback, Some(Some(_)))
+            && chat.provider == Provider::Claude
+            && let Some(kept) = claude_kept_through(&chat.messages, from)
+            && kept + 1 < from
+        {
+            let seen = chat.handoff_seen.as_ref().map_or(kept + 1, |h| h.seen.min(kept + 1));
+            chat.handoff_seen = Some(aether_agent::HandoffSeen {
+                seen,
+                context_tokens: None,
+                context_window: None,
+                pending: false,
+            });
+        }
         self.agent.close_session(&chat.id.to_string());
         chat.messages.truncate(from);
         chat.lead_seen = chat.lead_seen.filter(|&seen| seen < from);

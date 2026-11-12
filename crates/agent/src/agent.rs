@@ -57,6 +57,7 @@ pub struct ChatSession {
     pub access: AccessMode,
     pub effort: String,
     pub resume: String,
+    pub rollback: String,
     pub fork: bool,
     pub lead: bool,
     pub ephemeral: bool,
@@ -708,6 +709,7 @@ impl Agent {
             };
             let mut opts = opts;
             let mut driver = factory(provider, opts.clone(), driver_tx.clone());
+            opts.rollback.clear();
             // a respawn serves a prompt; closing out the old reply would end that prompt's turn
             opts.reattach = false;
             opts.background.clear();
@@ -1075,6 +1077,7 @@ fn session_options(
         effort: chat.effort.clone(),
         access: chat.access,
         resume: chat.resume.clone(),
+        rollback: chat.rollback.clone(),
         fork: chat.fork,
         attachments: attachments_dir().map(|d| d.join(&chat.key)),
         lead,

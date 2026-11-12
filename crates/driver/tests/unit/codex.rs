@@ -71,6 +71,7 @@ fn opts(access: AccessMode, model: &str, resume: &str) -> DriverStartOptions {
         effort: String::new(),
         access,
         resume: resume.into(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -162,7 +163,10 @@ fn turn_start_request_and_reply() {
     let plain = start_turn(&mut State::default(), "x", &[]);
     assert!(plain["params"].get("model").is_none() && plain["params"].get("effort").is_none());
     let reply = r#"{"id":2,"result":{"turn":{"id":"01a15159-37a0-7e91-8b17-66a8e86975a5","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}"#;
-    assert_eq!(ev(&mut s, reply), [Update::Accepted]);
+    assert_eq!(
+        ev(&mut s, reply),
+        [Update::Accepted, Update::NativeTurn("01a15159-37a0-7e91-8b17-66a8e86975a5".into())]
+    );
     assert_eq!(s.turn_id.as_deref(), Some("01a15159-37a0-7e91-8b17-66a8e86975a5"));
 
     start_turn(&mut s, "Reply OK.", &[]);
@@ -631,7 +635,10 @@ fn compaction_turn_takes_its_id_from_turn_started() {
     assert_eq!(ev(&mut s, r#"{"id":0,"result":{}}"#), []);
     assert_eq!(s.turn_id, None);
     let started = r#"{"method":"turn/started","params":{"threadId":"01a1516e-4d32-72a1-9898-521541c20fc7","turn":{"id":"01a1516e-6adf-7212-9030-5572adaf7da0","rootTurnId":"01a1516e-6adf-7212-9030-5572adaf7da0","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":1792367553,"completedAt":null,"durationMs":null}}}"#;
-    assert_eq!(ev(&mut s, started), [Update::Accepted]);
+    assert_eq!(
+        ev(&mut s, started),
+        [Update::Accepted, Update::NativeTurn("01a1516e-6adf-7212-9030-5572adaf7da0".into())]
+    );
     assert_eq!(s.turn_id.as_deref(), Some("01a1516e-6adf-7212-9030-5572adaf7da0"));
     let item = r#"{"method":"item/started","params":{"item":{"type":"contextCompaction","id":"01a1516e-6b66-7a30-865e-ffa3b8954b6b"},"threadId":"01a1516e-4d32-72a1-9898-521541c20fc7","turnId":"01a1516e-6adf-7212-9030-5572adaf7da0","startedAtMs":1792367553382}}"#;
     assert_eq!(tool(&ev(&mut s, item)).title, "Compact context");
@@ -3086,9 +3093,67 @@ for line in sys.stdin:
 fn prompt_acceptance_is_emitted_once_for_response_and_notification() {
     let mut s = State { thread: "t".into(), ..State::default() };
     start_turn(&mut s, "hello", &[]);
-    assert_eq!(ev(&mut s, r#"{"id":0,"result":{"turn":{"id":"turn"}}}"#), [Update::Accepted]);
+    assert_eq!(
+        ev(&mut s, r#"{"id":0,"result":{"turn":{"id":"turn"}}}"#),
+        [Update::Accepted, Update::NativeTurn("turn".into())]
+    );
     assert_eq!(
         ev(&mut s, r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn"}}}"#),
         []
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_native_rollback_starts_a_fresh_thread_with_notice() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("aether-codex-revert-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("codex");
+    let log = dir.join("requests");
+    let program = format!(
+        r##"#!/usr/bin/python3
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    with open({log:?}, 'a') as f:
+        f.write(method + '\n')
+    if 'id' not in request:
+        continue
+    if method == 'initialize':
+        result = {{'userAgent': 'codex/99.0.0'}}
+    elif method == 'thread/resume':
+        result = {{'thread': {{'id': 'source'}}}}
+    elif method == 'thread/revert':
+        assert request['params'] == {{'threadId': 'source', 'beforeTurnId': 'turn'}}
+        print(json.dumps({{'id': request['id'], 'error': {{'message': 'source unavailable'}}}}), flush=True)
+        continue
+    elif method == 'thread/start':
+        result = {{'thread': {{'id': 'fresh'}}}}
+    else:
+        result = {{}}
+    print(json.dumps({{'id': request['id'], 'result': result}}), flush=True)
+"##,
+        log = log.to_string_lossy()
+    );
+    std::fs::write(&script, program).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let options = DriverStartOptions {
+        binary: script.to_string_lossy().into_owned(),
+        cwd: dir.clone(),
+        rollback: "turn".into(),
+        ..opts(AccessMode::Ask, "", "source")
+    };
+    let driver = CodexDriver::spawn(options, tx);
+    assert!(!driver.resumed());
+    let updates: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(updates.iter().any(|u| matches!(u, Update::Session(id) if id == "fresh")));
+    assert!(updates.iter().any(|u| matches!(u, Update::Notice(n) if n.kind == NoticeKind::Info && n.text.starts_with("Could not roll back the conversation natively"))));
+    let requests = std::fs::read_to_string(&log).unwrap();
+    assert!(requests.find("thread/revert").unwrap() < requests.find("thread/start").unwrap());
+    drop(driver);
+    let _ = std::fs::remove_dir_all(dir);
 }

@@ -342,6 +342,8 @@ pub enum Update {
     Title(String),
     /// The CLI session's resume id; UI-only.
     Session(String),
+    /// Native id of the current turn, used to roll back.
+    NativeTurn(String),
     /// The CLI started a turn on its own, e.g. woken by finished background work.
     Wake,
     /// Upserts one tool step by `id`.
@@ -483,11 +485,21 @@ pub struct Handoff {
     pub to_model: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SentWith {
+    pub model: String,
+    pub effort: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(default)]
+    pub native_turn: Option<String>,
     pub role: Role,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff: Option<Handoff>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_with: Option<SentWith>,
     pub text: String,
     #[serde(deserialize_with = "lenient_steps")]
     pub steps: Vec<Step>,
@@ -544,8 +556,10 @@ impl Message {
     pub fn user(text: impl Into<String>) -> Self {
         let text = text.into();
         Self {
+            native_turn: None,
             role: Role::User,
             handoff: None,
+            sent_with: None,
             turn_start: text.len(),
             text,
             steps: Vec::new(),
@@ -574,8 +588,10 @@ impl Message {
 
     pub fn assistant() -> Self {
         Self {
+            native_turn: None,
             role: Role::Assistant,
             handoff: None,
+            sent_with: None,
             text: String::new(),
             steps: Vec::new(),
             step_positions: Vec::new(),
@@ -627,6 +643,7 @@ impl Message {
             self.close_thinking();
         }
         match update {
+            Update::NativeTurn(id) => self.native_turn = Some(id),
             Update::Delta(text) if !text.is_empty() => {
                 self.begin_turn();
                 self.text.push_str(&text);

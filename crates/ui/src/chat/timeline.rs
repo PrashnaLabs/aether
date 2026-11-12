@@ -46,6 +46,7 @@ pub enum Block {
     Stopped,
     /// After a message the chat was handed off from: the "Context handoff" divider.
     Handoff,
+    ModelSwitch(String),
     Fold,
     Changes,
     Live,
@@ -78,20 +79,79 @@ pub fn transcript_rows<'a>(
     messages: &[Message],
     view: &dyn Fn(usize) -> ReplyView<'a>,
 ) -> Vec<TranscriptRow> {
-    messages
-        .iter()
-        .enumerate()
-        .flat_map(|(message, m)| {
-            let mut blocks = match m.role {
-                Role::User => vec![Block::User],
-                Role::Assistant => reply_blocks(m, &view(message)),
-            };
-            if m.handoff.is_some() {
-                blocks.push(Block::Handoff);
+    transcript_rows_with(messages, 0, view, &|from, to| {
+        model_switch_label(from, to, &|model| model.to_string(), &|_| None)
+    })
+}
+
+pub fn model_switch_label(
+    from: &aether_core::SentWith,
+    to: &aether_core::SentWith,
+    model_label: &dyn Fn(&str) -> String,
+    default_effort: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let effort = |sent: &aether_core::SentWith| {
+        if sent.effort.is_empty() { default_effort(&sent.model) } else { Some(sent.effort.clone()) }
+    };
+    let (from_effort, to_effort) = (effort(from), effort(to));
+    let model_changed = from.model != to.model;
+    let effort_changed = matches!((&from_effort, &to_effort), (Some(a), Some(b)) if a != b);
+    if !model_changed && !effort_changed {
+        return None;
+    }
+    let describe = |sent: &aether_core::SentWith, effort: Option<String>| {
+        let mut parts = Vec::new();
+        if model_changed {
+            parts.push(model_label(&sent.model));
+        }
+        if effort_changed {
+            parts.push(aether_core::effort_label(effort.as_deref().unwrap_or_default()));
+        }
+        parts.join(" ")
+    };
+    Some(format!("{} → {}", describe(from, from_effort), describe(to, to_effort)))
+}
+
+pub fn transcript_rows_with<'a>(
+    messages: &[Message],
+    start: usize,
+    view: &dyn Fn(usize) -> ReplyView<'a>,
+    switch_label: &dyn Fn(&aether_core::SentWith, &aether_core::SentWith) -> Option<String>,
+) -> Vec<TranscriptRow> {
+    let mut previous = None;
+    let mut rows = Vec::new();
+    for (message, m) in messages.iter().enumerate() {
+        if message < start {
+            if m.role == Role::User {
+                previous = m.sent_with.as_ref();
             }
-            blocks.into_iter().map(move |block| TranscriptRow { message, block })
-        })
-        .collect()
+            if m.handoff.is_some() {
+                previous = None;
+            }
+            continue;
+        }
+        let mut blocks = match m.role {
+            Role::User => {
+                let label = previous
+                    .zip(m.sent_with.as_ref())
+                    .and_then(|(from, to)| switch_label(from, to));
+                previous = m.sent_with.as_ref();
+                let mut blocks = Vec::new();
+                if let Some(label) = label {
+                    blocks.push(Block::ModelSwitch(label));
+                }
+                blocks.push(Block::User);
+                blocks
+            }
+            Role::Assistant => reply_blocks(m, &view(message)),
+        };
+        if m.handoff.is_some() {
+            blocks.push(Block::Handoff);
+            previous = None;
+        }
+        rows.extend(blocks.into_iter().map(|block| TranscriptRow { message, block }));
+    }
+    rows
 }
 
 /// A reply that only compacted: its last compaction row, with no fold or footer around it.

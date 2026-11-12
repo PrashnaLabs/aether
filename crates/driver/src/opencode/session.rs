@@ -88,7 +88,27 @@ pub(super) fn start(
         }
         Ok(info)
     };
-    let info = setup().inspect_err(|_| step(tx, NoticeState::Failed, label))?;
+    let setup_result = setup();
+    if !opts.rollback.is_empty() {
+        let result = match &setup_result {
+            Ok(Some(_)) => rollback_session(&c.session, &opts.rollback, |method, path, body| {
+                c.api.call(method, path, body)
+            }),
+            Ok(None) => Err("session not found".into()),
+            Err(e) => Err(e.clone()),
+        };
+        if let Err(e) = result {
+            let _ = tx.unbounded_send(Update::Notice(Notice::new("info-rollback", NoticeKind::Info,
+                format!("Could not roll back the conversation natively ({e}). Started a fresh session with its history."))));
+            drop(c);
+            let mut fresh = opts.clone();
+            fresh.resume.clear();
+            fresh.rollback.clear();
+            fresh.fork = false;
+            return start(&fresh, state, tx, rec);
+        }
+    }
+    let info = setup_result.inspect_err(|_| step(tx, NoticeState::Failed, label))?;
     let resumed = info.is_some();
     if let Some(notice) = lost_resume(resume, resumed) {
         let _ = tx.unbounded_send(Update::Notice(notice));
@@ -115,6 +135,24 @@ pub(super) fn start(
         }
     }
     Ok(Conn { resumed, ..c })
+}
+
+fn rollback_session(
+    session: &str,
+    message: &str,
+    mut call: impl FnMut(Method, &str, Option<Value>) -> Result<Value, String>,
+) -> Result<(), String> {
+    let path = format!("/api/session/{session}/revert");
+    let result = call(
+        Method::POST,
+        &format!("{path}/stage"),
+        Some(json!({"messageID": message, "files": false})),
+    )
+    .and_then(|_| call(Method::POST, &format!("{path}/commit"), None));
+    if result.is_err() {
+        let _ = call(Method::DELETE, &path, None);
+    }
+    result.map(drop)
 }
 
 fn fork_or_fresh(
@@ -244,6 +282,29 @@ fn apply(
 ) -> bool {
     if let Some(rec) = rec {
         rec.line(&json!({"type": ty, "data": data}).to_string());
+    }
+    if ty == "session.step.started" {
+        let (root, active) = {
+            let s = state.guard();
+            (s.root.clone(), s.active && !s.native_turn_recorded)
+        };
+        if active
+            && data["sessionID"].as_str() == Some(root.as_str())
+            && let Some(id) = data["assistantMessageID"].as_str()
+        {
+            let messages = recent_messages(api, &root);
+            if let Some(parent) = messages["data"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|m| m["id"].as_str() == Some(id))
+                .and_then(|m| m["parentID"].as_str())
+                .filter(|id| !id.is_empty())
+            {
+                state.guard().native_turn_recorded = true;
+                send(Update::NativeTurn(parent.to_string()));
+            }
+        }
     }
     let mut s = state.guard();
     if s.dead.is_some() {

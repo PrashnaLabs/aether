@@ -260,6 +260,9 @@ impl ChatApp {
             Block::Request(i) => self.render_request(message.requests.get(*i)?, view, cx),
             Block::Fatal => self.fatal_row(msg, ix, view),
             Block::Stopped => self.stopped_row(msg, view),
+            Block::ModelSwitch(label) => {
+                aether_ui::ModelSwitchMarker(label.clone()).into_any_element()
+            }
             Block::Handoff => match &message.handoff {
                 Some(h) => aether_ui::HandoffMarker::new(h.clone()).into_any_element(),
                 None => div().into_any_element(),

@@ -82,10 +82,20 @@ page handoff items, or `item=<id>` to read one item and follow
   resume fails, or nothing fits in the resumed session, a fresh session gets
   the full history instead.
 
-Rewind and edit clear the active CLI session, but retain inactive sessions whose
+Rewind and edit retain inactive sessions whose
 `seen <= from`, since all their messages survive the truncation. The same rule
 retains `handoff_seen`, including its pending flag. Entries with `seen > from`
 are dropped. `/clear` still clears all session records.
+
+## Rewind
+
+When an idle chat has a native session, rewind records a rollback point for
+Claude, Codex or OpenCode. Claude forks through the last kept assistant message;
+Codex and OpenCode remove history starting with the first removed turn. If no
+rollback point is available for Claude, or a native rollback fails, the next
+session starts fresh with the portable history. Pi and Antigravity also start
+fresh. Codex and OpenCode keep the session unchanged when no removed reply has
+a native turn ID.
 
 ## Delivery
 

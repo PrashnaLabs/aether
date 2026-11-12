@@ -172,6 +172,7 @@ fn chat(effort: &str) -> ChatSession {
         access: aether_core::AccessMode::Ask,
         effort: effort.into(),
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         lead: false,
     }
@@ -655,6 +656,7 @@ fn missing_chat() -> ChatSession {
         access: aether_core::AccessMode::Ask,
         effort: String::new(),
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         lead: false,
     }

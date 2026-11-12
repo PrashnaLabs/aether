@@ -576,6 +576,25 @@ impl RenderOnce for HandoffMarker {
     }
 }
 
+#[derive(IntoElement)]
+pub struct ModelSwitchMarker(pub String);
+
+impl RenderOnce for ModelSwitchMarker {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let line = cx.theme().border;
+        let rule = || div().flex_1().min_w(px(16.)).h(px(1.)).bg(line);
+        quiet_row(cx)
+            .id("model-switch-marker")
+            .role(gpui_kit::Role::Group)
+            .aria_label(SharedString::from(self.0.clone()))
+            .py(px(6.))
+            .gap(px(10.))
+            .child(rule())
+            .child(div().min_w_0().truncate().child(self.0))
+            .child(rule())
+    }
+}
+
 pub type OnHandoff = Rc<dyn Fn(Provider, &mut Window, &mut App)>;
 
 /// One "Continue in X" item per target, for the failed-reply card.

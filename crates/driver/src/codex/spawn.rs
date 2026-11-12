@@ -177,9 +177,33 @@ impl CodexDriver {
                     Ok(thread)
                 }
             }) {
-                Ok(thread) => resumed = Some(thread),
+                Ok(thread) => {
+                    let reverted = if opts.rollback.is_empty() {
+                        Ok(json!({}))
+                    } else {
+                        self.request(
+                            "thread/revert",
+                            json!({"threadId": opts.resume, "beforeTurnId": opts.rollback}),
+                            deadline,
+                        )
+                    };
+                    match reverted {
+                        Ok(_) => resumed = Some(thread),
+                        Err(e) => {
+                            let _ = self.tx.unbounded_send(Update::Notice(Notice::new("info-rollback", NoticeKind::Info, format!("Could not roll back the conversation natively ({e}). Started a fresh session with its history."))));
+                        }
+                    }
+                }
                 Err(e) => {
-                    let notice = if opts.fork {
+                    let notice = if !opts.rollback.is_empty() {
+                        Notice::new(
+                            "info-rollback",
+                            NoticeKind::Info,
+                            format!(
+                                "Could not roll back the conversation natively ({e}). Started a fresh session with its history."
+                            ),
+                        )
+                    } else if opts.fork {
                         Notice::new(
                             "info-fork",
                             NoticeKind::Info,
@@ -466,7 +490,7 @@ pub(crate) fn turn_started(s: &mut State, id: &str) -> Vec<Update> {
         let line = s.rpc("model/list", json!({}), Some(Call::Models(prompt)));
         s.outbox.push(line);
     }
-    let mut out = vec![Update::Accepted];
+    let mut out = vec![Update::Accepted, Update::NativeTurn(id.to_string())];
     if s.cancelled {
         s.stale.insert(id.to_string());
         let line = interrupt(s);

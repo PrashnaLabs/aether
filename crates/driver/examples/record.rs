@@ -16,6 +16,7 @@ const USAGE: &str = "usage: record --provider claude|codex|opencode|pi|agy --pro
   --access M              ask|read-only|auto-edit|auto|full (default ask)
   --model ID, --effort E, --resume ID
   --fork                  fork the --resume session instead of continuing it
+  --rollback ID           roll the --resume session back natively to ID first
   --seed TEXT             inject TEXT as native history before the first prompt (repeatable)
   --answer A              allow|deny|always|first|note:TEXT (default allow)
   --steer-after MS --steer TEXT   steer once, MS ms after the first prompt
@@ -54,6 +55,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -77,6 +79,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--effort" => opts.effort = val()?,
             "--resume" => opts.resume = val()?,
             "--fork" => opts.fork = true,
+            "--rollback" => opts.rollback = val()?,
             "--seed" => seed.push(val()?),
             "--access" => {
                 opts.access = match val()?.as_str() {

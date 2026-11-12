@@ -74,7 +74,7 @@ impl ClaudeDriver {
                 chosen: opts.model.clone(),
                 ..State::default()
             }));
-            if !opts.fork || !resumed {
+            if !(opts.fork || !opts.rollback.is_empty()) || !resumed {
                 let _ = me.tx.unbounded_send(Update::Session(id.clone()));
             }
             if let Some(n) = note.take() {
@@ -95,7 +95,7 @@ impl ClaudeDriver {
                     let _ = me.tx.unbounded_send(Update::Warning(why.into()));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    let fix = if opts.fork {
+                    let fix = if opts.fork || !opts.rollback.is_empty() {
                         Some(ResumeFix::Fresh(me.state.guard().stderr.fatal("")))
                     } else {
                         resume_fix(&me.state.guard().stderr)
@@ -103,11 +103,25 @@ impl ClaudeDriver {
                     match fix {
                         Some(fix) if attempt == 0 => {
                             me.stop_child();
-                            if opts.fork {
+                            if opts.fork || !opts.rollback.is_empty() {
                                 args.retain(|a| a != "--fork-session");
+                                if let Some(i) =
+                                    args.iter().position(|a| a == "--resume-session-at")
+                                {
+                                    args.drain(i..i + 2);
+                                }
                             }
                             (args, id, resumed, note) = apply_fix(args, fix);
-                            if opts.fork {
+                            if !opts.rollback.is_empty() {
+                                let reason = me.state.guard().stderr.fatal("");
+                                note = Some(Notice::new(
+                                    "info-rollback",
+                                    NoticeKind::Info,
+                                    format!(
+                                        "Could not roll back the conversation natively ({reason}). Started a fresh session with its history."
+                                    ),
+                                ));
+                            } else if opts.fork {
                                 let reason = me.state.guard().stderr.fatal("");
                                 note = Some(Notice::new(
                                     "info-fork",
@@ -378,10 +392,15 @@ pub(crate) fn launch_args(
             Err(e) => eprintln!("aether: lead tools unavailable: {e}"),
         }
     }
-    let resumed = !opts.resume.is_empty() && (opts.fork || session_exists(&opts.resume));
+    let resumed = !opts.resume.is_empty()
+        && (opts.fork || !opts.rollback.is_empty() || session_exists(&opts.resume));
     let note = lost_resume(&opts.resume, resumed);
     let id = if resumed { opts.resume.clone() } else { new_uuid() };
     args.extend([if resumed { "--resume" } else { "--session-id" }.to_string(), id.clone()]);
+    if !opts.rollback.is_empty() && resumed {
+        args.extend(["--resume-session-at".into(), opts.rollback.clone(), "--fork-session".into()]);
+        return (args, id, resumed, note);
+    }
     if opts.fork && resumed {
         let (args, id, resumed, _) = apply_fix(args, ResumeFix::Fork);
         return (args, id, resumed, note);

@@ -987,6 +987,7 @@ impl ChatApp {
             effort: a.effort.clone(),
             cli_session: String::new(),
             fork_from: String::new(),
+            rollback_to: String::new(),
             agent_sessions: vec![],
             handoff_seen: None,
             queue: Vec::new(),

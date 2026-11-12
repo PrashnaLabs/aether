@@ -50,6 +50,7 @@ fn command_strips_lead_env() {
         effort: String::new(),
         access: aether_core::AccessMode::Full,
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,

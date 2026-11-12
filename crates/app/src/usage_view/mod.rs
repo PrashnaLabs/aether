@@ -196,6 +196,7 @@ impl ChatApp {
                 provider_model: c.provider_model.clone(),
                 cli_session: c.cli_session.clone(),
                 fork_from: c.fork_from.clone(),
+                rollback_to: c.rollback_to.clone(),
                 agent_sessions: vec![],
                 handoff_seen: None,
                 access: c.access_mode(),

@@ -764,3 +764,106 @@ fn compact_detail_drops_thinking_rows() {
     let compact = ReplyView { show_thinking: false, ..view(true, false, false, &|_| false) };
     assert_eq!(reply_blocks(&m, &compact), [Block::Notice(2), Block::Live]);
 }
+
+fn sent(model: &str, effort: &str) -> aether_core::SentWith {
+    aether_core::SentWith { model: model.into(), effort: effort.into() }
+}
+
+fn sent_user(model: &str, effort: &str) -> Message {
+    let mut message = Message::user("hello");
+    message.sent_with = Some(sent(model, effort));
+    message
+}
+
+#[test]
+fn model_switch_labels_show_only_changed_values() {
+    let label = |from, to| {
+        model_switch_label(&from, &to, &|m| format!("Model {m}"), &|_| Some("medium".into()))
+    };
+    assert_eq!(label(sent("a", "high"), sent("b", "high")).as_deref(), Some("Model a → Model b"));
+    assert_eq!(
+        label(sent("a", "medium"), sent("a", "xhigh")).as_deref(),
+        Some("Medium → Extra High")
+    );
+    assert_eq!(
+        label(sent("a", "medium"), sent("b", "high")).as_deref(),
+        Some("Model a Medium → Model b High")
+    );
+    assert_eq!(label(sent("a", ""), sent("a", "medium")), None);
+    assert_eq!(label(sent("a", ""), sent("a", "high")).as_deref(), Some("Medium → High"));
+    assert_eq!(
+        model_switch_label(&sent("a", ""), &sent("a", "high"), &str::to_string, &|_| None),
+        None
+    );
+}
+
+#[test]
+fn model_switch_divider_precedes_only_a_changed_user_turn() {
+    let messages = [
+        sent_user("a", "medium"),
+        Message::assistant(),
+        sent_user("b", "high"),
+        sent_user("b", "high"),
+    ];
+    let never = |_: &str| false;
+    let rows = transcript_rows(&messages, &|_| view(false, false, false, &never));
+    let switches: Vec<_> =
+        rows.iter().filter(|r| matches!(r.block, Block::ModelSwitch(_))).collect();
+    assert_eq!(switches.len(), 1);
+    assert_eq!(switches[0].message, 2);
+    let at = rows.iter().position(|r| matches!(r.block, Block::ModelSwitch(_))).unwrap();
+    assert_eq!(rows[at + 1], TranscriptRow { message: 2, block: Block::User });
+    let partial =
+        transcript_rows_with(&messages, 2, &|_| view(false, false, false, &never), &|a, b| {
+            model_switch_label(a, b, &str::to_string, &|_| None)
+        });
+    assert_eq!(partial, rows.into_iter().filter(|r| r.message >= 2).collect::<Vec<_>>());
+}
+
+#[test]
+fn model_switch_divider_does_not_cross_handoffs_or_missing_snapshots() {
+    let mut reply = Message::assistant();
+    reply.handoff = Some(aether_core::Handoff {
+        from: aether_core::Provider::Codex,
+        from_model: "a".into(),
+        to: aether_core::Provider::Claude,
+        to_model: "b".into(),
+    });
+    let messages = [
+        sent_user("a", "medium"),
+        reply,
+        sent_user("b", "high"),
+        Message::user("old"),
+        sent_user("c", "low"),
+    ];
+    let never = |_: &str| false;
+    let rows = transcript_rows(&messages, &|_| view(false, false, false, &never));
+    assert!(!rows.iter().any(|r| matches!(r.block, Block::ModelSwitch(_))));
+    assert!(rows.iter().any(|r| r.block == Block::Handoff));
+}
+
+#[test]
+fn effort_change_alone_places_a_divider() {
+    let messages = [sent_user("a", "medium"), sent_user("a", "high")];
+    let never = |_: &str| false;
+    let rows = transcript_rows(&messages, &|_| view(false, false, false, &never));
+    assert_eq!(
+        rows,
+        vec![
+            TranscriptRow { message: 0, block: Block::User },
+            TranscriptRow { message: 1, block: Block::ModelSwitch("Medium → High".into()) },
+            TranscriptRow { message: 1, block: Block::User },
+        ]
+    );
+}
+
+#[test]
+fn sent_settings_round_trip_and_old_messages_load_without_them() {
+    let message = sent_user("a", "high");
+    let mut value = serde_json::to_value(&message).unwrap();
+    let restored: Message = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(restored.sent_with, message.sent_with);
+    value.as_object_mut().unwrap().remove("sent_with");
+    let restored: Message = serde_json::from_value(value).unwrap();
+    assert_eq!(restored.sent_with, None);
+}

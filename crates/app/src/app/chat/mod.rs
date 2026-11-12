@@ -2,8 +2,7 @@ use crate::agents_view::externally_locked;
 use aether_agent::SavedChat;
 use aether_core::{AccessMode, ChatDetail, Message, Provider, Role, Step, Update};
 use aether_ui::{
-    Block, ChatStatus, Reflow, ReplyView, TranscriptRow, opened_tools, row_splice,
-    set_verbose_rows, transcript_rows,
+    Block, ChatStatus, Reflow, ReplyView, TranscriptRow, opened_tools, row_splice, set_verbose_rows,
 };
 use gpui_kit::{App, Context, SharedString, Window};
 use std::collections::HashSet;
@@ -503,12 +502,28 @@ impl ChatApp {
             show_thinking: detail != ChatDetail::Compact,
             kept: &kept[ix],
         };
-        let mut rows = transcript_rows(chat.messages.get(from..).unwrap_or_default(), &view);
+        let label = |from: &aether_core::SentWith, to: &aether_core::SentWith| {
+            let models = self.probes.get(&chat.provider).map_or(&[][..], |probe| &probe.models);
+            aether_ui::model_switch_label(
+                from,
+                to,
+                &|model| {
+                    if chat.provider == Provider::OpenRouter {
+                        self.models
+                            .iter()
+                            .find(|m| m.id.as_ref() == model)
+                            .map_or_else(|| model.to_string(), |m| m.name.to_string())
+                    } else {
+                        super::sidebar::model_label(models, model)
+                    }
+                },
+                &|_| None,
+            )
+        };
+        let mut rows =
+            aether_ui::transcript_rows_with(&chat.messages, from, &|ix| view(ix - from), &label);
         // Live status is attached to the composer, outside the scrolling transcript.
         rows.retain(|row| row.block != Block::Live);
-        for row in &mut rows {
-            row.message += from;
-        }
         rows
     }
 
@@ -661,6 +676,7 @@ impl ChatApp {
                 provider_model: chat.provider_model.clone(),
                 cli_session: chat.cli_session.clone(),
                 fork_from: chat.fork_from.clone(),
+                rollback_to: chat.rollback_to.clone(),
                 agent_sessions: chat.agent_sessions.clone(),
                 handoff_seen: chat.handoff_seen.clone(),
                 access: chat.access,

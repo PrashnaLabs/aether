@@ -534,6 +534,9 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
             }
             let message = &v["message"];
             if !sub && message["model"] != "<synthetic>" {
+                if let Some(id) = v["uuid"].as_str().filter(|id| !id.is_empty()) {
+                    updates.push(Update::NativeTurn(id.to_string()));
+                }
                 let streamed = message["id"].as_str().is_some_and(|id| s.texted.contains(id));
                 for b in blocks("text") {
                     let text = b["text"].as_str().filter(|t| !t.is_empty());

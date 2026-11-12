@@ -22,6 +22,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         provider_model: "sonnet".into(),
         cli_session: "sid".into(),
         fork_from: "source".into(),
+        rollback_to: "turn-1".into(),
         agent_sessions: vec![AgentSession {
             provider: Provider::Codex,
             session: "saved".into(),
@@ -58,6 +59,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         provider_model: String::new(),
         cli_session: String::new(),
         fork_from: String::new(),
+        rollback_to: String::new(),
         agent_sessions: vec![],
         handoff_seen: None,
         access: AccessMode::Ask,
@@ -90,6 +92,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
     assert_eq!(chats[1].provider_model, "sonnet");
     assert_eq!(chats[1].cli_session, "sid");
     assert_eq!(chats[1].fork_from, "source");
+    assert_eq!(chats[1].rollback_to, "turn-1");
     assert_eq!(chats[1].access, AccessMode::Auto);
     assert_eq!(chats[1].effort, "high");
     assert_eq!(chats[1].cwd, "/tmp/p");
@@ -190,6 +193,7 @@ fn ids_include_every_row() {
             provider_model: String::new(),
             cli_session: String::new(),
             fork_from: String::new(),
+            rollback_to: String::new(),
             agent_sessions: vec![],
             handoff_seen: None,
             access: AccessMode::Ask,
@@ -229,6 +233,7 @@ fn flush_returns_once_queued_saves_are_written() {
             provider_model: String::new(),
             cli_session: String::new(),
             fork_from: String::new(),
+            rollback_to: String::new(),
             agent_sessions: vec![],
             handoff_seen: None,
             access: AccessMode::Ask,
@@ -278,6 +283,7 @@ fn parent_and_lead_round_trip() {
         provider_model: String::new(),
         cli_session: String::new(),
         fork_from: String::new(),
+        rollback_to: String::new(),
         agent_sessions: vec![],
         handoff_seen: None,
         access: AccessMode::Ask,
@@ -345,6 +351,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         provider_model: String::new(),
         cli_session: String::new(),
         fork_from: String::new(),
+        rollback_to: String::new(),
         agent_sessions: vec![],
         handoff_seen: None,
         access: AccessMode::Ask,
@@ -370,6 +377,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         provider_model: String::new(),
         cli_session: String::new(),
         fork_from: String::new(),
+        rollback_to: String::new(),
         agent_sessions: vec![],
         handoff_seen: None,
         access: AccessMode::Ask,

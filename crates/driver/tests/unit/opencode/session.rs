@@ -46,6 +46,7 @@ fn create_body_carries_location_and_model_ref() {
         effort: "high".into(),
         access: AccessMode::Ask,
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -425,4 +426,32 @@ fn a_failed_active_listing_settles_nothing() {
     assert_eq!(relink(&mut s, &messages(), None, |_| Some(ToolStatus::Stopped)), []);
     assert!(s.background.contains_key("call_old"));
     assert_eq!(s.restored, ["call_bg"], "kept for the next relink");
+}
+
+#[test]
+fn rollback_stages_and_commits_or_clears_on_failure() {
+    let mut calls = Vec::new();
+    rollback_session("ses_1", "msg_1", |method, path, body| {
+        calls.push((method, path.to_string(), body));
+        Ok(json!({}))
+    })
+    .unwrap();
+    assert_eq!(
+        calls[0],
+        (
+            Method::POST,
+            "/api/session/ses_1/revert/stage".into(),
+            Some(json!({"messageID":"msg_1", "files":false}))
+        )
+    );
+    assert_eq!(calls[1], (Method::POST, "/api/session/ses_1/revert/commit".into(), None));
+    let mut calls = Vec::new();
+    assert!(
+        rollback_session("ses_1", "msg_1", |method, path, _| {
+            calls.push((method.clone(), path.to_string()));
+            if path.ends_with("commit") { Err("failure".into()) } else { Ok(json!({})) }
+        })
+        .is_err()
+    );
+    assert_eq!(calls.last().unwrap(), &(Method::DELETE, "/api/session/ses_1/revert".into()));
 }

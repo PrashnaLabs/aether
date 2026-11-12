@@ -97,6 +97,7 @@ struct State {
     turn: u64,
     /// Inbox id of the turn's prompt.
     prompt: String,
+    native_turn_recorded: bool,
     /// Unix ms the turn started at.
     started: u64,
     dead: Option<String>,
@@ -162,6 +163,7 @@ impl OpencodeDriver {
 }
 
 fn on_prompt(s: &mut State) {
+    s.native_turn_recorded = false;
     s.active = true;
     s.cancelled = false;
     s.turn += 1;

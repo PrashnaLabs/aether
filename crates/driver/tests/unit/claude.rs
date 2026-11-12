@@ -894,6 +894,7 @@ fn full_access_args_start_fresh_session() {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -922,6 +923,7 @@ fn launch_args_let_claude_read_attachments() {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -961,6 +963,7 @@ fn auto_access_uses_auto_permission_mode_without_bypass() {
         effort: String::new(),
         access: AccessMode::Auto,
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -1032,6 +1035,7 @@ fn live_claude_smoke() {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: resume.into(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -1120,6 +1124,7 @@ fn live_wake_smoke() {
         effort: String::new(),
         access: AccessMode::Full,
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -1199,6 +1204,7 @@ fn ask_opts() -> DriverStartOptions {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: String::new(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -2073,6 +2079,7 @@ fn test_opts() -> DriverStartOptions {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        rollback: String::new(),
         fork: false,
         reattach: false,
         attachments: None,
@@ -2292,4 +2299,15 @@ fn native_fork_launches_with_resume_and_fork_flag() {
     assert!(args.iter().any(|arg| arg == "--fork-session"));
     assert_eq!(id, "source");
     assert!(resumed);
+}
+
+#[test]
+fn rollback_launches_a_resumed_fork_at_the_assistant_uuid() {
+    let opts =
+        DriverStartOptions { resume: "source".into(), rollback: "turn".into(), ..test_opts() };
+    let (args, _, resumed, _) = launch_args(&opts);
+    assert!(resumed);
+    assert!(args.windows(2).any(|a| a == ["--resume", "source"]));
+    assert!(args.windows(2).any(|a| a == ["--resume-session-at", "turn"]));
+    assert!(args.iter().any(|a| a == "--fork-session"));
 }

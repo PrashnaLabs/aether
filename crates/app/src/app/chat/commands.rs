@@ -16,6 +16,7 @@ impl ChatApp {
         chat.epoch += 1;
         chat.cli_session.clear();
         chat.fork_from.clear();
+        chat.rollback_to.clear();
         chat.agent_sessions.clear();
         chat.handoff_seen = None;
         self.agent.close_session(&chat.id.to_string());

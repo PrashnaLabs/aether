@@ -460,6 +460,7 @@ impl ChatApp {
         }
         chat.cli_session.clear();
         chat.fork_from.clear();
+        chat.rollback_to.clear();
         chat.handoff_seen = None;
         if provider != Provider::OpenRouter
             && let Some(pos) = chat
