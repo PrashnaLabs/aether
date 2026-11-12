@@ -419,17 +419,18 @@ fn message_agent_tags_other_chats_and_guards_loops(cx: &mut TestAppContext) {
             assert_eq!(app.chats[2].queue[0].text, "[from lead #10] hi");
             assert_eq!(
                 app.message_agent(1, &json!({"id": 20, "text": "hi"}), window, cx),
-                Err("agent-to-agent loop guard: chat 20 got 6 agent messages in a row with no message from the user; ask the user before sending more".into())
+                Err("agent-to-agent loop guard: you sent chat 20 6 messages in a row with no reply from another sender or the user; ask the user before sending more".into())
             );
         })
         .unwrap();
 }
 
 #[test]
-fn agent_streak_counts_trailing_tagged_user_messages() {
+fn agent_streak_counts_trailing_messages_from_one_sender() {
+    let a = "[from a #1]";
     let tagged = "[from a #1] x";
     let mut chat = chat_with("c", &[tagged, "ok", "human", "ok", tagged, "ok", tagged, "ok"]);
-    assert_eq!(agent_streak(&chat), 2);
+    assert_eq!(agent_streak(&chat, a), 2);
     chat.queue.push(Queued {
         text: tagged.into(),
         attachments: vec![],
@@ -437,9 +438,12 @@ fn agent_streak_counts_trailing_tagged_user_messages() {
         from_children: false,
         deliveries: vec![],
     });
-    assert_eq!(agent_streak(&chat), 3);
+    assert_eq!(agent_streak(&chat, a), 3);
+    chat.queue[0].text = "[from b #2] y".into();
+    assert_eq!(agent_streak(&chat, a), 0);
+    assert_eq!(agent_streak(&chat, "[from b #2]"), 1);
     chat.queue[0].text = "human".into();
-    assert_eq!(agent_streak(&chat), 0);
+    assert_eq!(agent_streak(&chat, a), 0);
 }
 
 #[gpui_kit::test]

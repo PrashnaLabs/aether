@@ -202,12 +202,12 @@ const SEP: &str = "\n\n---\n\n";
 const FROM_TAG: &str = "[from ";
 const MAX_AGENT_STREAK: usize = 6;
 
-pub(super) fn agent_streak(chat: &Chat) -> usize {
+pub(super) fn agent_streak(chat: &Chat, from: &str) -> usize {
     let users = chat.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text.as_str());
     users
         .chain(chat.queue.iter().map(|q| q.text.as_str()))
         .rev()
-        .take_while(|t| t.starts_with(FROM_TAG))
+        .take_while(|t| t.starts_with(from))
         .count()
 }
 
@@ -611,14 +611,15 @@ impl ChatApp {
         let text = if child {
             text
         } else {
-            let n = agent_streak(&self.chats[ix]);
+            let lead = &self.chats[lead_ix];
+            let from = format!("{FROM_TAG}{} #{}]", lead.title, lead.id);
+            let n = agent_streak(&self.chats[ix], &from);
             if n >= MAX_AGENT_STREAK {
                 return Err(format!(
-                    "agent-to-agent loop guard: chat {id} got {n} agent messages in a row with no message from the user; ask the user before sending more"
+                    "agent-to-agent loop guard: you sent chat {id} {n} messages in a row with no reply from another sender or the user; ask the user before sending more"
                 ));
             }
-            let lead = &self.chats[lead_ix];
-            format!("{FROM_TAG}{} #{}] {text}", lead.title, lead.id)
+            format!("{from} {text}")
         };
         if self.chats[ix].messages.is_empty() && self.chats[ix].worktree_error.is_some() {
             return Err(format!("agent {id} has no worktree; spawn a new one"));
