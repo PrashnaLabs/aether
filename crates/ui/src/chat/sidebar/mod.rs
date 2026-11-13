@@ -479,6 +479,8 @@ struct ProjectItem {
     on_page: Option<RowHandler>,
     /// Has an org, and what opens its page.
     org: Option<(bool, RowHandler)>,
+    /// Pinned, and what flips it.
+    pin: Option<(bool, RowHandler)>,
     /// Org sidebar row: a click opens this, the chevron folds.
     on_open: Option<RowHandler>,
     active: bool,
@@ -529,7 +531,6 @@ pub struct ChatSidebar {
     custom_sections: Vec<(SharedString, Vec<ChatItem>)>,
     style: SidebarStyle,
     archived: bool,
-    pins_only: bool,
     top: Vec<SectionButtonItem>,
     search: Option<Entity<InputState>>,
     section_tools: Option<ToolsFactory>,
@@ -577,7 +578,6 @@ impl ChatSidebar {
             custom_sections: Vec::new(),
             style: SidebarStyle::Default,
             archived: false,
-            pins_only: false,
             top: Vec::new(),
             search: None,
             section_tools: None,
@@ -725,6 +725,7 @@ impl ChatSidebar {
             on_hide: Some(Rc::new(on_hide)),
             on_page: Some(Rc::new(on_page)),
             org: None,
+            pin: None,
             on_open: None,
             active: false,
             chats: Vec::new(),
@@ -751,6 +752,7 @@ impl ChatSidebar {
             on_hide: None,
             on_page: None,
             org: None,
+            pin: None,
             on_open: Some(Rc::new(on_open)),
             active,
             chats: Vec::new(),
@@ -780,6 +782,18 @@ impl ChatSidebar {
     ) -> Self {
         if let Some(project) = self.projects.last_mut() {
             project.org = Some((has_org, Rc::new(on_click)));
+        }
+        self
+    }
+
+    /// Pin / Unpin on the last project's menu; a pinned project shows a pin.
+    pub fn project_pin(
+        mut self,
+        pinned: bool,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        if let Some(project) = self.projects.last_mut() {
+            project.pin = Some((pinned, Rc::new(on_click)));
         }
         self
     }
@@ -816,9 +830,9 @@ impl ChatSidebar {
     }
 
     /// Adds a chat row; `id` keeps its scroll anchor and focus across reorders.
-    /// Pinned chats go to Pinned and also stay in their normal place: project
-    /// `project` (an index from [`Self::project`]), its worktree `worktree` (an index from
-    /// [`Self::worktree`]), or the plain Chats list. `line` makes it a
+    /// Goes in project `project` (an index from [`Self::project`]), its worktree
+    /// `worktree` (an index from [`Self::worktree`]), or the plain Chats list;
+    /// pinned chats outside a project also go to Pinned. `line` makes it a
     /// two-line agent row. `on_remove_worktree` adds "Remove worktree…" to
     /// its menu.
     pub fn chat(
@@ -870,11 +884,8 @@ impl ChatSidebar {
             pick: self.pick_for(id),
             now: 0,
         };
-        if pinned {
+        if pinned && project.is_none() {
             self.pinned.push(ChatItem { pin: true, depth: 0, ..item.clone() });
-        }
-        if self.pins_only {
-            return self;
         }
         match (project, worktree) {
             (Some(k), Some(w))
@@ -974,14 +985,6 @@ impl ChatSidebar {
     /// Action whose shortcut the collapse tooltip shows.
     pub fn collapse_action(mut self, action: impl Action) -> Self {
         self.collapse_action = Some(Box::new(action));
-        self
-    }
-
-    /// Drops the Pinned copies added so far; [`Self::chat`] calls after
-    /// this fill Pinned in call order and skip the chat's normal place.
-    pub fn pins_only(mut self) -> Self {
-        self.pinned.clear();
-        self.pins_only = true;
         self
     }
 

@@ -75,6 +75,7 @@ pub(super) struct ProjectRow {
     pub(super) on_hide: Option<RowHandler>,
     pub(super) on_page: Option<RowHandler>,
     pub(super) org: Option<(bool, RowHandler)>,
+    pub(super) pin: Option<(bool, RowHandler)>,
     pub(super) on_open: Option<RowHandler>,
     pub(super) now: i64,
 }
@@ -103,6 +104,7 @@ impl ProjectRow {
             on_hide,
             on_page,
             org,
+            pin,
             on_open,
             now,
         } = self;
@@ -138,9 +140,16 @@ impl ProjectRow {
             Some((false, on_click)) => (None, Some(on_click)),
             None => (None, None),
         };
+        let pinned = pin.as_ref().is_some_and(|(pinned, _)| *pinned);
         let menu = {
-            let (path, on_new, on_files, on_hide, on_page) =
-                (path.clone(), on_new.clone(), on_files.clone(), on_hide.clone(), on_page.clone());
+            let (path, on_new, on_files, on_hide, on_page, pin) = (
+                path.clone(),
+                on_new.clone(),
+                on_files.clone(),
+                on_hide.clone(),
+                on_page.clone(),
+                pin.clone(),
+            );
             move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
                 project_menu(
                     menu,
@@ -151,6 +160,7 @@ impl ProjectRow {
                     on_hide.clone(),
                     on_page.clone(),
                     on_setup.clone(),
+                    pin.clone(),
                 )
             }
         };
@@ -348,17 +358,36 @@ impl ProjectRow {
                 .flex_1()
                 .min_w_0()
                 .child(
-                    h_flex().h(rems(1.25)).gap_2().items_center().child(
-                        div()
-                            .id(("project-name", id))
-                            .text_color(if missing { muted } else { cx.theme().sidebar_foreground })
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .font_semibold()
-                            .tooltip(tooltip(name_tip))
-                            .child(name),
-                    ),
+                    h_flex()
+                        .h(rems(1.25))
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .id(("project-name", id))
+                                .text_color(if missing {
+                                    muted
+                                } else {
+                                    cx.theme().sidebar_foreground
+                                })
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_semibold()
+                                .tooltip(tooltip(name_tip))
+                                .child(name),
+                        )
+                        .when(pinned, |el| {
+                            el.child(
+                                div()
+                                    .id(("project-pinned", id))
+                                    .flex_none()
+                                    .tooltip(tooltip("Pinned".into()))
+                                    .child(
+                                        Icon::new(Lucide::Pin).size(rems(0.75)).text_color(muted),
+                                    ),
+                            )
+                        }),
                 )
                 .children(git)
                 .children(no_git),

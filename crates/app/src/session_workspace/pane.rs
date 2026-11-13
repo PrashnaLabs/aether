@@ -183,8 +183,8 @@ impl ChatApp {
             menu.item(
                 PopupMenuItem::new(if pinned { "Unpin session" } else { "Pin session" })
                     .icon(if pinned { Lucide::PinOff } else { Lucide::Pin })
-                    .on_click(move |_, _, cx| {
-                        pin.update(cx, |app, cx| app.toggle_pin(app.active, cx));
+                    .on_click(move |_, window, cx| {
+                        pin.update(cx, |app, cx| app.toggle_pin(app.active, window, cx));
                     }),
             )
             .when(context_app.read(cx).settings.watch_enabled, |menu| {

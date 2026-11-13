@@ -247,3 +247,18 @@ fn focus_section_count_counts_rows_needing_attention() {
     let attention = rows.iter().filter(|&&ix| chats[ix].1 == ChatStatus::Waiting).count();
     assert_eq!(attention, 1);
 }
+
+#[test]
+fn at_most_four_projects_pin_and_stale_pins_drop() {
+    let shown: Vec<PathBuf> = ["/a", "/b", "/c", "/d", "/e"].map(PathBuf::from).into();
+    let mut pins = vec!["/gone".to_string()];
+    for folder in ["/e", "/c", "/a", "/d"] {
+        assert!(toggle_pin(&mut pins, &shown, Path::new(folder)));
+    }
+    assert_eq!(pins, ["/e", "/c", "/a", "/d"]);
+    assert!(!toggle_pin(&mut pins, &shown, Path::new("/b")));
+    assert_eq!(pins, ["/e", "/c", "/a", "/d"]);
+    assert!(toggle_pin(&mut pins, &shown, Path::new("/c")));
+    assert!(toggle_pin(&mut pins, &shown, Path::new("/b")));
+    assert_eq!(pins, ["/e", "/a", "/d", "/b"]);
+}

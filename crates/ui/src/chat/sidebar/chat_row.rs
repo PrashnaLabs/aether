@@ -599,6 +599,7 @@ pub(super) fn render_chat(
     let line = chat.line.clone();
     let users = chat.lead && crew.is_none() && !child && line.is_none();
     let badge = chat.badge.clone();
+    let pinned = chat.pinned && !chat.pin;
     let tip = match line {
         Some(_) => None,
         None => (title.chars().count() > LONG_TITLE).then(|| title.clone()),
@@ -625,7 +626,7 @@ pub(super) fn render_chat(
                     })
                     .when_some(tip, |el, tip| el.tooltip(tooltip(tip)))
                     .child(title);
-                if !users && badge.is_none() {
+                if !users && badge.is_none() && !pinned {
                     return title.into_any_element();
                 }
                 h_flex()
@@ -655,6 +656,15 @@ pub(super) fn render_chat(
                             .child(text)
                     }))
                     .child(title)
+                    .when(pinned, |el| {
+                        el.child(
+                            div()
+                                .id(("chat-pinned", ix))
+                                .flex_none()
+                                .tooltip(tooltip("Pinned".into()))
+                                .child(Icon::new(Lucide::Pin).size(rems(0.75)).text_color(muted)),
+                        )
+                    })
                     .into_any_element()
             }
         }

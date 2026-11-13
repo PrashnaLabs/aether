@@ -931,6 +931,9 @@ pub struct Settings {
     /// Project folders the user added, listed even without chats.
     #[serde(default)]
     pub projects: Vec<String>,
+    /// Project folders pinned to the top of the sidebar, in pin order.
+    #[serde(default)]
+    pub pinned_projects: Vec<String>,
     #[serde(default)]
     pub project_open_in: BTreeMap<String, String>,
     #[serde(default)]
@@ -1144,6 +1147,7 @@ impl Default for Settings {
             agents_section_collapsed: false,
             hidden_projects: Vec::new(),
             projects: Vec::new(),
+            pinned_projects: Vec::new(),
             project_open_in: BTreeMap::new(),
             project_scripts: BTreeMap::new(),
             terminal_height: 260.,

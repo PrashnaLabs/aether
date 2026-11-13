@@ -75,6 +75,7 @@ pub(super) fn project_menu(
     on_hide: Option<RowHandler>,
     on_page: Option<RowHandler>,
     on_setup_org: Option<RowHandler>,
+    pin: Option<(bool, RowHandler)>,
 ) -> PopupMenu {
     let mut menu = menu;
     if let Some(on_page) = on_page {
@@ -104,6 +105,13 @@ pub(super) fn project_menu(
                 .icon(IconName::Folder)
                 .disabled(missing)
                 .on_click(move |ev, window, cx| on_files(ev, window, cx)),
+        );
+    }
+    if let Some((pinned, on_pin)) = pin {
+        menu = menu.item(
+            PopupMenuItem::new(if pinned { "Unpin project" } else { "Pin project" })
+                .icon(if pinned { Lucide::PinOff } else { Lucide::Pin })
+                .on_click(move |ev, window, cx| on_pin(ev, window, cx)),
         );
     }
     let menu = menu.item(reveal_item(path.clone(), missing)).item(copy_item("Copy path", path));

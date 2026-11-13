@@ -195,7 +195,7 @@ impl ChatApp {
             Some(PaletteCommand::Model(id)) => self.pick_model(id, window, cx),
             Some(PaletteCommand::UseSkill(name)) => self.mention_skill(&name, window, cx),
             Some(PaletteCommand::RenameChat) => self.begin_rename(self.active, window, cx),
-            Some(PaletteCommand::TogglePin) => self.toggle_pin(self.active, cx),
+            Some(PaletteCommand::TogglePin) => self.toggle_pin(self.active, window, cx),
             Some(PaletteCommand::ToggleLead) => self.toggle_lead(self.active, window, cx),
             Some(PaletteCommand::ArchiveChat) => self.confirm_archive_chat(self.active, window, cx),
             Some(PaletteCommand::DeleteChat) => self.confirm_delete_chat(self.active, window, cx),

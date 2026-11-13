@@ -20,6 +20,7 @@ use gpui_kit::{Context, Entity, PathPromptOptions, SharedString, Window, prelude
 
 use super::format::now_ms;
 use super::providers::initial_model;
+use super::worktree::notice;
 use super::{Bulk, CLIS, Chat, ChatApp, Page, SidebarView, chat_cwd, project_dir};
 
 pub(super) fn disambiguated_names(folders: &[PathBuf]) -> HashMap<PathBuf, String> {
@@ -232,8 +233,16 @@ impl ChatApp {
             (name, g.folder.clone())
         });
         for group in &mut groups {
-            group.chats.sort_by_cached_key(|&ix| (self.chats[ix].title.to_lowercase(), ix));
+            group.chats.sort_by_cached_key(|&ix| {
+                let c = &self.chats[ix];
+                let pin = c.pinned.then(|| std::cmp::Reverse(c.activity()));
+                (pin.is_none(), pin, c.title.to_lowercase(), ix)
+            });
         }
+        let pins = &self.settings.pinned_projects;
+        groups.sort_by_key(|g| {
+            pins.iter().position(|p| Path::new(p) == g.folder).unwrap_or(usize::MAX)
+        });
         split_hidden(groups, &self.settings.hidden_projects, self.active)
     }
 
@@ -447,7 +456,8 @@ impl ChatApp {
             let collapsed = projects::listed(&self.settings.collapsed_projects, &group.folder);
             let header =
                 self.sidebar_project_header(&group.folder, name, &group.chats, collapsed, now);
-            let (fold, new, files, hide, page) = (
+            let (fold, new, files, hide, page, pin) = (
+                group.folder.clone(),
                 group.folder.clone(),
                 group.folder.clone(),
                 group.folder.clone(),
@@ -467,10 +477,15 @@ impl ChatApp {
                 }),
                 cx.listener(move |this, _, _, cx| {
                     this.update_settings(cx, |s| {
-                        projects::set_listed(&mut s.hidden_projects, &hide, true)
+                        projects::set_listed(&mut s.hidden_projects, &hide, true);
+                        projects::set_listed(&mut s.pinned_projects, &hide, false);
                     })
                 }),
                 cx.listener(move |this, _, _, cx| this.open_project_page(page.clone(), cx)),
+            );
+            sidebar = sidebar.project_pin(
+                projects::listed(&self.settings.pinned_projects, &group.folder),
+                cx.listener(move |this, _, window, cx| this.toggle_project_pin(&pin, window, cx)),
             );
             if self.settings.org_enabled {
                 let has_org = self.org_for_project(&group.folder.display().to_string()).is_some();
@@ -483,14 +498,6 @@ impl ChatApp {
             for &(ix, _) in &nested[k] {
                 sidebar =
                     self.chat_row(sidebar, ix, Some(k), None, self.chat_line(ix, true, now), cx);
-            }
-        }
-        sidebar = sidebar.pins_only();
-        for ix in (0..self.chats.len()).rev() {
-            let chat = &self.chats[ix];
-            if chat.pinned && !chat.archived && chat.is_agent() && !org.contains(&chat.id) {
-                sidebar =
-                    self.chat_row(sidebar, ix, None, None, self.chat_line(ix, false, now), cx);
             }
         }
         if !hidden.is_empty() {
@@ -651,7 +658,7 @@ impl ChatApp {
                     cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
                     cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
                     cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-                    cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                    cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
                     cx.listener(move |this, _, window, cx| {
                         this.confirm_archive_chat(ix, window, cx)
                     }),
@@ -672,6 +679,42 @@ impl ChatApp {
             k += 1;
         }
         sidebar
+    }
+
+    /// Why chat `ix` can't be pinned: its project already has the most pins.
+    /// Org chats neither count nor are capped.
+    pub(crate) fn chat_pin_refusal(&self, ix: usize) -> Option<&'static str> {
+        let chat = self.chats.get(ix)?;
+        let org = self.org_listed();
+        if chat.pinned || !chat.is_agent() || org.contains(&chat.id) {
+            return None;
+        }
+        let root = &self.settings.workspace_root;
+        let project = project_dir(chat, root);
+        let pinned = self
+            .chats
+            .iter()
+            .filter(|c| c.pinned && !c.archived && c.is_agent() && !org.contains(&c.id))
+            .filter(|c| project_dir(c, root) == project)
+            .count();
+        (pinned >= projects::MAX_PINNED_CHATS)
+            .then_some("Up to 3 pinned chats per project; unpin one first.")
+    }
+
+    /// Pins `folder` to the top of Projects, or unpins it; refuses past the cap.
+    pub(crate) fn toggle_project_pin(
+        &mut self,
+        folder: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let shown: Vec<PathBuf> = self.project_groups().0.into_iter().map(|g| g.folder).collect();
+        let mut pins = self.settings.pinned_projects.clone();
+        if !projects::toggle_pin(&mut pins, &shown, folder) {
+            let text = "Up to 4 pinned projects; unpin one first.";
+            return notice("Can't pin project", text, window, cx);
+        }
+        self.update_settings(cx, |s| s.pinned_projects = pins);
     }
 
     /// Org heads and their workers: listed only in the Organization view.
@@ -746,13 +789,6 @@ impl ChatApp {
             self.section_chat_row(sidebar, section.to_string(), ix, now, cx)
         };
         let org = self.org_listed();
-        let pinned: Vec<usize> = (0..self.chats.len())
-            .rev()
-            .filter(|&ix| {
-                let chat = &self.chats[ix];
-                chat.pinned && !chat.archived && chat.is_agent() && !org.contains(&chat.id)
-            })
-            .collect();
         let (mut groups, _) = self.project_groups();
         for g in &mut groups {
             g.chats.retain(|&ix| !org.contains(&self.chats[ix].id));
@@ -765,7 +801,7 @@ impl ChatApp {
                 g.chats.iter().map(move |&ix| (ix, name.clone()))
             })
             .collect();
-        let sections: Vec<(String, Vec<usize>)> = match style {
+        let mut sections: Vec<(String, Vec<usize>)> = match style {
             SidebarStyle::Focus => {
                 let leads: HashMap<i64, usize> = listed
                     .iter()
@@ -804,8 +840,10 @@ impl ChatApp {
                 )
             }
         };
-        let mut sections = nest_section_children(&self.chats, sections);
-        sections.insert(0, ("Pinned".to_string(), pinned.into_iter().map(|ix| (ix, 0)).collect()));
+        for (_, ixs) in &mut sections {
+            ixs.sort_by_key(|&ix| !self.chats[ix].pinned);
+        }
+        let sections = nest_section_children(&self.chats, sections);
         sidebar = sidebar.child_agents(
             sections
                 .iter()
@@ -875,7 +913,7 @@ impl ChatApp {
                 cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
                 cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
                 cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-                cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
                 cx.listener(move |this, _, _, cx| this.unarchive_chat(ix, cx)),
                 cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
                 None,
@@ -975,7 +1013,7 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-            cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+            cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             None,
@@ -1175,7 +1213,7 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-            cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+            cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             None,
@@ -1212,7 +1250,7 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-            cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+            cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             remove,

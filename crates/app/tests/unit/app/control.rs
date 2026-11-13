@@ -231,6 +231,26 @@ fn update_chat_allows_caller_and_direct_child_but_rejects_unrelated_targets(
 }
 
 #[gpui_kit::test]
+fn update_chat_refuses_a_fourth_pin_in_a_project(cx: &mut TestAppContext) {
+    let window = app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            for ix in [1, 3, 4] {
+                app.chats[ix].parent = Some(10);
+            }
+            app.update_chat(0, &json!({"id": 10, "pinned": true}), cx).unwrap();
+            app.update_chat(0, &json!({"id": 20, "pinned": true}), cx).unwrap();
+            assert_eq!(
+                app.update_chat(0, &json!({"id": 23, "pinned": true}), cx).unwrap_err(),
+                "Up to 3 pinned chats per project; unpin one first."
+            );
+            assert!(!app.chats[4].pinned);
+            app.update_chat(0, &json!({"id": 22, "pinned": true}), cx).unwrap();
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn update_chat_lets_an_org_ceo_manage_its_heads(cx: &mut TestAppContext) {
     use crate::org::model::{Head, Org};
     let window = app(cx);

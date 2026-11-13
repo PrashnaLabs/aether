@@ -689,7 +689,7 @@ fn sub_lead_on_own_branch_shows_git_line() {
     assert!(git_flags(&mut sidebar).contains(&(100, true)));
 }
 
-fn pinned_in_project(chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
+fn pinned_in(project: Option<usize>, chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
     let mut sidebar = ChatSidebar::new("Aether")
         .style(SidebarStyle::Default)
         .lead_agents(vec![10])
@@ -724,7 +724,7 @@ fn pinned_in_project(chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
             active,
             status,
             pinned,
-            Some(0),
+            project,
             None,
             None,
             |_, _, _| {},
@@ -741,21 +741,21 @@ fn pinned_in_project(chats: &[(i64, ChatStatus, bool, bool)]) -> ChatSidebar {
 }
 
 #[test]
-fn pinned_chat_appears_in_pinned_and_project() {
-    let mut sidebar = pinned_in_project(&[(7, ChatStatus::Idle, true, false)]);
-    assert_eq!(
-        keys(&mut sidebar),
-        ["caption:Pinned", "pin:7", "caption:Projects", "project:/w/aether", "chat:7"]
-    );
+fn pinned_project_chat_lists_only_in_its_project() {
+    let mut sidebar = pinned_in(Some(0), &[(7, ChatStatus::Idle, true, false)]);
+    assert_eq!(keys(&mut sidebar), ["caption:Projects", "project:/w/aether", "chat:7"]);
 }
 
 #[test]
 fn pinned_and_project_copies_have_distinct_keys() {
-    let mut sidebar = pinned_in_project(&[
-        (10, ChatStatus::Idle, true, true),
-        (100, ChatStatus::Waiting, true, false),
-        (101, ChatStatus::Idle, false, false),
-    ]);
+    let mut sidebar = pinned_in(
+        None,
+        &[
+            (10, ChatStatus::Idle, true, true),
+            (100, ChatStatus::Waiting, true, false),
+            (101, ChatStatus::Idle, false, false),
+        ],
+    );
     let rows = sidebar.rows();
     let mut keys: Vec<_> = rows.iter().map(|r| r.key()).collect();
     let all = keys.len();
@@ -774,7 +774,7 @@ fn pinned_and_project_copies_have_distinct_keys() {
 
 #[test]
 fn pinned_open_chat_highlights_in_place_when_pinned_is_folded() {
-    let mut sidebar = pinned_in_project(&[(10, ChatStatus::Idle, true, true)]);
+    let mut sidebar = pinned_in(None, &[(10, ChatStatus::Idle, true, true)]);
     sidebar.pinned_collapse = Some((true, std::rc::Rc::new(|_, _, _| {})));
     let rows = sidebar.rows();
     let active: Vec<_> = rows
@@ -789,11 +789,14 @@ fn pinned_open_chat_highlights_in_place_when_pinned_is_folded() {
 
 #[test]
 fn pinned_lead_shows_rollup_without_crew_in_pinned() {
-    let mut sidebar = pinned_in_project(&[
-        (10, ChatStatus::Idle, true, false),
-        (100, ChatStatus::Waiting, false, false),
-        (101, ChatStatus::Working { since_ms: 0 }, false, false),
-    ]);
+    let mut sidebar = pinned_in(
+        None,
+        &[
+            (10, ChatStatus::Idle, true, false),
+            (100, ChatStatus::Waiting, false, false),
+            (101, ChatStatus::Working { since_ms: 0 }, false, false),
+        ],
+    );
     sidebar.crew_open.insert(10, true);
     let rows = sidebar.rows();
     let find = |key: &str| {
@@ -819,11 +822,14 @@ fn pinned_lead_shows_rollup_without_crew_in_pinned() {
 #[test]
 fn pinned_child_copy_is_top_level() {
     use super::super::state::{Tree, parent_rows};
-    let mut sidebar = pinned_in_project(&[
-        (7, ChatStatus::Idle, true, false),
-        (10, ChatStatus::Idle, false, false),
-        (100, ChatStatus::Waiting, true, false),
-    ]);
+    let mut sidebar = pinned_in(
+        None,
+        &[
+            (7, ChatStatus::Idle, true, false),
+            (10, ChatStatus::Idle, false, false),
+            (100, ChatStatus::Waiting, true, false),
+        ],
+    );
     let rows = sidebar.rows();
     let at = keys_of(&rows).iter().position(|k| k == "pin:100").unwrap();
     assert!(matches!(&rows[at], ChatRow::Chat { chat, .. } if chat.depth == 0));

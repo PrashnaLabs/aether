@@ -580,9 +580,9 @@ fn native_lead_chats_get_the_lead_marker(cx: &mut gpui_kit::TestAppContext) {
     assert!(visual.debug_bounds("chat-lead-1").is_none());
 }
 
-fn pinned_sidebar(cx: &mut gpui_kit::TestAppContext) -> gpui_kit::VisualTestContext {
+fn pin_app(cx: &mut gpui_kit::TestAppContext) -> gpui_kit::WindowHandle<ChatApp> {
     cx.update(gpui_kit::init);
-    let window = cx.add_window(|window, cx| {
+    cx.add_window(|window, cx| {
         let mut app = ChatApp::with_state(
             aether_agent::Agent::new().unwrap(),
             aether_core::Settings::default(),
@@ -593,42 +593,103 @@ fn pinned_sidebar(cx: &mut gpui_kit::TestAppContext) -> gpui_kit::VisualTestCont
             cx,
         );
         app.chats.clear();
-        for (id, project, pinned) in
-            [(1, "/w/a", true), (2, "/w/b", true), (3, "/w/h", true), (4, "/w/a", false)]
-        {
-            let mut chat = chat_with("t", &["hi", "hello"]);
+        for (id, title, project, pinned) in [
+            (1, "b", "/w/a", true),
+            (2, "a", "/w/b", true),
+            (3, "a", "/w/a", false),
+            (4, "c", "/w/a", true),
+            (5, "d", "/w/c", false),
+            (6, "e", "/w/d", false),
+            (7, "f", "/w/e", false),
+        ] {
+            let mut chat = chat_with(title, &["hi", "hello"]);
             chat.id = id;
             chat.provider = Provider::Claude;
             chat.project = project.into();
             chat.pinned = pinned;
             app.chats.push(chat);
         }
-        app.active = 3;
         app.sidebar_view = SidebarView::Projects;
-        app.settings.hidden_projects = vec!["/w/h".into()];
         app
-    });
+    })
+}
+
+#[gpui_kit::test]
+fn pinned_chats_lead_their_project_with_no_pinned_section(cx: &mut gpui_kit::TestAppContext) {
+    let window = pin_app(cx);
+    window.update(cx, |app, _, _| app.settings.pinned_projects = vec!["/w/b".into()]).unwrap();
     let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
     visual.update(|window, cx| {
         let _ = window.draw(cx);
     });
-    visual
+    let mut y = |k: &'static str| visual.debug_bounds(k).unwrap_or_else(|| panic!("{k}")).origin.y;
+    let order: Vec<_> = ["project:/w/b", "project:/w/a", "chat:1", "chat:3"].map(&mut y).into();
+    assert!(order.is_sorted(), "{order:?}");
+    assert!(y("chat:4") < y("chat:3"));
+    for k in ["pin:1", "pin:2", "pin:4"] {
+        assert!(visual.debug_bounds(k).is_none());
+    }
+    assert!(visual.debug_bounds("caption:Pinned").is_none());
 }
 
 #[gpui_kit::test]
-fn pinned_chat_in_hidden_project_shows_only_in_pinned(cx: &mut gpui_kit::TestAppContext) {
-    let mut visual = pinned_sidebar(cx);
-    assert!(visual.debug_bounds("pin:3").is_some());
-    assert!(visual.debug_bounds("chat:3").is_none());
-    assert!(visual.debug_bounds("chat:1").is_some());
+fn flat_styles_put_pins_first_without_a_pinned_section(cx: &mut gpui_kit::TestAppContext) {
+    use aether_core::{SidebarGrouping, SidebarStyle};
+    let window = pin_app(cx);
+    window
+        .update(cx, |app, _, _| {
+            app.settings.sidebar_style = SidebarStyle::Minimal;
+            app.settings.sidebar_grouping = SidebarGrouping::Project;
+            app.settings.sidebar_ordering = aether_core::SidebarOrdering::Name;
+        })
+        .unwrap();
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    assert!(visual.debug_bounds("caption:Pinned").is_none());
+    let mut y = |k: &'static str| visual.debug_bounds(k).unwrap_or_else(|| panic!("{k}")).origin.y;
+    assert!(y("chat:1") < y("chat:3") && y("chat:4") < y("chat:3"));
 }
 
 #[gpui_kit::test]
-fn default_pinned_lists_newest_first(cx: &mut gpui_kit::TestAppContext) {
-    let mut visual = pinned_sidebar(cx);
-    let y: Vec<_> =
-        ["pin:3", "pin:2", "pin:1"].map(|k| visual.debug_bounds(k).unwrap().origin.y).into();
-    assert!(y.is_sorted());
+fn a_project_holds_at_most_three_pinned_chats(cx: &mut gpui_kit::TestAppContext) {
+    use crate::org::model::{Head, Org};
+    let window = pin_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let text = "Up to 3 pinned chats per project; unpin one first.";
+            let mut extra = chat_with("g", &["hi"]);
+            (extra.id, extra.provider, extra.project, extra.pinned) =
+                (8, Provider::Claude, "/w/a".into(), true);
+            app.chats.push(extra);
+            assert_eq!(app.chat_pin_refusal(2), Some(text));
+            assert_eq!(app.chat_pin_refusal(4), None, "other projects keep their own three");
+            assert_eq!(app.chat_pin_refusal(0), None, "unpinning is never refused");
+
+            app.toggle_pin(0, window, cx);
+            app.toggle_pin(2, window, cx);
+            assert!(app.chats[2].pinned);
+
+            app.settings.org_enabled = true;
+            let head = Head { chat: Some(8), ..Head::new("CEO", 2) };
+            app.org.orgs.push(Org { project: "/w/a".into(), heads: vec![head], ..Org::default() });
+            app.chats[0].pinned = false;
+            assert_eq!(app.chat_pin_refusal(0), None, "org chats don't count");
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn pinned_projects_list_first_in_pin_order(cx: &mut gpui_kit::TestAppContext) {
+    let window = pin_app(cx);
+    window
+        .update(cx, |app, _, _| {
+            app.settings.pinned_projects = vec!["/w/e".into(), "/w/c".into()];
+            let order: Vec<_> = app.project_groups().0.into_iter().map(|g| g.folder).collect();
+            assert_eq!(order, ["/w/e", "/w/c", "/w/a", "/w/b", "/w/d"].map(PathBuf::from));
+        })
+        .unwrap();
 }
 
 #[gpui_kit::test]

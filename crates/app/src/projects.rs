@@ -104,6 +104,9 @@ pub(crate) fn busy_label(verb: &str, since_ms: i64, now_ms: i64) -> String {
     }
 }
 
+pub(crate) const MAX_PINNED_PROJECTS: usize = 4;
+pub(crate) const MAX_PINNED_CHATS: usize = 3;
+
 pub(crate) fn listed(list: &[String], folder: &Path) -> bool {
     list.iter().any(|key| Path::new(key) == folder)
 }
@@ -114,6 +117,20 @@ pub(crate) fn set_listed(list: &mut Vec<String>, folder: &Path, on: bool) {
     if on {
         list.push(folder.display().to_string());
     }
+}
+
+/// Pins `folder` or unpins it, first dropping pins of folders not in `shown`.
+/// False, changing nothing, when pinning past the cap.
+pub(crate) fn toggle_pin(pins: &mut Vec<String>, shown: &[PathBuf], folder: &Path) -> bool {
+    let mut next = pins.clone();
+    next.retain(|p| shown.iter().any(|f| f == Path::new(p)));
+    let on = !listed(&next, folder);
+    if on && next.len() >= MAX_PINNED_PROJECTS {
+        return false;
+    }
+    set_listed(&mut next, folder, on);
+    *pins = next;
+    true
 }
 
 /// One row of the project switcher.

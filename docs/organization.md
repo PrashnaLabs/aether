@@ -31,7 +31,7 @@ name, branch line). Click a row to open that org's page; its chevron folds it,
 remembered per project and apart from the Projects list; its **+** hires into
 that org. The org on the page is highlighted. Under each row are its heads with
 their role chips, each followed by its workers. Heads and workers are org agents: they
-stay out of Pinned and Projects, and opening one from anywhere (sidebar, page,
+stay out of Projects, and opening one from anywhere (sidebar, page,
 palette, watch list, notifications, tabs) shows its chat with this sidebar for
 its org. Opening any other chat brings back the sidebar view you had before.
 The header's **+** opens the hire dialog for the current org (Add head while only the CEO exists).

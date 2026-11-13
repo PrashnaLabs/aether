@@ -414,6 +414,11 @@ impl ChatApp {
         if title.is_none() && pinned.is_none() {
             return Err(r#"nothing to change; pass "title" or "pinned""#.into());
         }
+        if pinned == Some(true)
+            && let Some(why) = self.chat_pin_refusal(ix)
+        {
+            return Err(why.into());
+        }
         let chat = &mut self.chats[ix];
         if let Some(t) = title {
             chat.title = SharedString::from(t.to_string());

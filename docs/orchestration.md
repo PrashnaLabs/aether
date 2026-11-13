@@ -159,7 +159,8 @@ When messaging a chat that is **not** the caller's direct child:
   A message you type that starts with the exact tag also counts.
 
 `update_chat` (rename, pin) only reaches the lead's own chat and its direct
-children, plus, for an organization's CEO, that organization's heads.
+children, plus, for an organization's CEO, that organization's heads. A project
+holds at most 3 pinned chats (org chats don't count); pinning a 4th is refused.
 
 `read_history` reads earlier messages of this chat (or, for a lead, any chat)
 with full tool calls and output. A negative `offset` counts back from the end,

@@ -435,8 +435,11 @@ impl ChatApp {
         cx.notify();
     }
 
-    /// Flips the pin; pinned chats sort into their own sidebar section.
-    pub(crate) fn toggle_pin(&mut self, ix: usize, cx: &mut Context<Self>) {
+    /// Flips the pin; pinned chats sort to the top of their project.
+    pub(crate) fn toggle_pin(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.chat_pin_refusal(ix) {
+            return notice("Can't pin chat", text, window, cx);
+        }
         if let Some(chat) = self.chats.get_mut(ix) {
             chat.pinned = !chat.pinned;
         }

@@ -316,7 +316,7 @@ pub fn tool_specs() -> Value {
                 "properties": {
                     "id": chat_id(),
                     "title": {"type": "string", "description": "New title"},
-                    "pinned": {"type": "boolean", "description": "Pin (true) or unpin (false)"}
+                    "pinned": {"type": "boolean", "description": "Pin (true) or unpin (false); at most 3 pinned chats per project"}
                 },
                 "required": ["id"]
             }
