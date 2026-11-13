@@ -13,12 +13,17 @@ impl ChatApp {
     ) {
         let Some(host) = self.workspace.model.window_of(pane) else { return };
         let result = match action {
-            PaneAction::SplitRight => {
-                self.split_session(pane, SplitAxis::Horizontal, window, cx);
-                return;
-            }
-            PaneAction::SplitDown => {
-                self.split_session(pane, SplitAxis::Vertical, window, cx);
+            PaneAction::SplitRight
+            | PaneAction::SplitLeft
+            | PaneAction::SplitDown
+            | PaneAction::SplitUp => {
+                let side = match action {
+                    PaneAction::SplitLeft => DockSide::Left,
+                    PaneAction::SplitDown => DockSide::Bottom,
+                    PaneAction::SplitUp => DockSide::Top,
+                    _ => DockSide::Right,
+                };
+                self.split_session(pane, side, window, cx);
                 return;
             }
             PaneAction::Float => self.workspace.model.float(pane, Rect::new(40., 40., 640., 480.)),
@@ -42,8 +47,8 @@ impl ChatApp {
                 Ok(())
             }
             PaneAction::Close => {
-                self.workspace.views.remove(&pane);
-                self.workspace.model.close(pane)
+                self.close_session_pane(pane, cx);
+                return;
             }
         };
         if let Err(e) = result {
@@ -77,15 +82,14 @@ impl ChatApp {
     pub(super) fn split_session(
         &mut self,
         pane: PaneId,
-        axis: SplitAxis,
+        side: DockSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let size = self.workspace.bounds.get(&pane).copied().unwrap_or([
-            f32::from(window.viewport_size().width),
-            f32::from(window.viewport_size().height) - 120.,
-        ]);
-        if let Err(error) = self.workspace.model.can_split(pane, axis, size) {
+        let Some(host) = self.workspace.model.window_of(pane) else { return };
+        let surface = self.workspace.surface_sizes.get(&host).copied();
+        let gap = self.settings.tile_gap.clamp(0., 24.);
+        if let Err(error) = self.workspace.model.can_split_in(pane, side, surface, gap) {
             self.workspace.error = Some(error.into());
             cx.notify();
             return;
@@ -97,13 +101,19 @@ impl ChatApp {
             self.active = ix;
             self.activate_session_ui(id, window, cx);
         }
+        let before = self.chats.len();
         self.workspace.splitting = true;
         self.new_chat_in_current_project(window, cx);
         self.workspace.splitting = false;
         let id = self.chats[self.active].id;
-        match self.workspace.model.split(pane, id, axis, size) {
-            Ok(_) => {}
-            Err(e) => self.workspace.error = Some(e.into()),
+        if let Err(e) = self.workspace.model.split_in(pane, id, side, surface, gap) {
+            self.workspace.error = Some(e.into());
+            if self.chats.len() > before {
+                self.delete_chat(self.active, window, cx);
+                if let Some(ix) = source.and_then(|id| self.chats.iter().position(|c| c.id == id)) {
+                    self.active = ix;
+                }
+            }
         }
         cx.notify();
     }

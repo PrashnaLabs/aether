@@ -1,5 +1,4 @@
 use super::*;
-use aether_core::Role;
 
 #[test]
 fn btw_question_takes_the_text_after_the_command() {
@@ -29,19 +28,15 @@ fn follow_ups_carry_prior_turns() {
         error: None,
         running: false,
     });
-    let prompt = btw_prompt(&thread, "and the other one?");
-    assert!(prompt.contains("Q: which file?"));
-    assert!(prompt.contains("A: a.ts"));
-    assert!(prompt.contains("Follow-up: and the other one?"));
-}
-
-#[test]
-fn side_history_keeps_the_last_forty() {
-    let all: Vec<(Role, String)> = (0..50).map(|i| (Role::User, i.to_string())).collect();
-    let capped = side_history(all);
-    assert_eq!(capped.len(), 40);
-    assert_eq!(capped[0].1, "10");
-    assert_eq!(side_history(vec![(Role::User, "a".into())]).len(), 1);
+    let prompt = btw_prompt(&thread.turns, "and the other one?");
+    assert!(prompt.contains("User: which file?"));
+    assert!(prompt.contains("Assistant: a.ts"));
+    assert!(prompt.contains("Question: and the other one?"));
+    assert!(prompt.starts_with("Earlier in this side chat:\nUser: which file?\nAssistant: a.ts"));
+    thread.turns[0].answer = "  first\n\n".to_owned() + &"界🧪".repeat(300);
+    let prompt = btw_prompt(&thread.turns, "follow up");
+    assert!(prompt.contains(&format!("Assistant: {}", thread.turns[0].answer)));
+    assert_eq!(btw_prompt(&[], "first"), side_prompt("first"));
 }
 
 #[test]

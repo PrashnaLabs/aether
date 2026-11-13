@@ -12,7 +12,8 @@ use aether_ui::{
 };
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{ButtonVariant, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Sizable, h_flex};
+use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::{ActiveTheme, Sizable, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, ClipboardItem, Context, FontWeight, Role, SharedString, Window, div, prelude::*, px,
 };
@@ -90,15 +91,12 @@ impl ChatApp {
         if chat.worktree_job.is_some() {
             return notice("Wait for the worktree", worktree_busy(&chat.title), window, cx);
         }
-        if chat.lead && self.running_children(ix) > 0 {
-            return notice(
-                "Wait for your crew",
-                crew_busy(&chat.title, self.running_children(ix)),
-                window,
-                cx,
-            );
-        }
+        let running = if chat.lead { self.running_children(ix) } else { 0 };
         let (id, title) = (chat.id, chat.title.to_string());
+        let finished = if chat.lead { self.finished_crew(id) } else { Vec::new() };
+        if running > 0 && finished.is_empty() {
+            return notice("Wait for your crew", crew_busy(&chat.title, running), window, cx);
+        }
         let mut text = "This removes the chat and its history. This can't be undone.".to_string();
         if chat.has_worktree(&self.missing_folders, &self.settings.workspace_root) {
             text.push_str(
@@ -108,19 +106,92 @@ impl ChatApp {
         if let Some(job) = self.terminal_job(chat.id, cx) {
             text.push_str(&format!(" Its terminal is running {job}, which will be stopped."));
         }
+        let crew = if chat.lead { self.crew_ids(id) } else { Vec::new() };
+        // a lead can't go while agents run, so then only its finished agents can
+        let options = crew_options(id, (running == 0).then_some(&crew[..]), &finished);
+        let picked = Rc::new(std::cell::Cell::new(0));
         let view = cx.entity();
         aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
-            let view = view.clone();
+            let (view, options, picked) = (view.clone(), options.clone(), picked.clone());
+            let labels = options.iter().map(|(label, _)| label.clone()).collect();
             alert
                 .confirm()
                 .title(SharedString::from(format!("Delete “{title}”?")))
-                .description(SharedString::from(text.clone()))
+                .description(crew_scope(text.clone(), "delete-crew", labels, &picked))
                 .ok_text("Delete")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
+                    let ids = options.get(picked.get()).map(|(_, ids)| ids.clone());
                     view.update(cx, |this, cx| {
-                        if let Some(ix) = this.chat_ix(id) {
-                            this.delete_chat(ix, window, cx);
+                        for id in ids.unwrap_or_default() {
+                            if let Some(ix) = this.chat_ix(id) {
+                                this.delete_chat(ix, window, cx);
+                            }
+                        }
+                    });
+                    true
+                })
+        });
+    }
+
+    /// Every chat a lead spawned, and theirs in turn.
+    pub(crate) fn crew_ids(&self, lead: i64) -> Vec<i64> {
+        let mut out = Vec::new();
+        let mut queue = vec![lead];
+        while let Some(parent) = queue.pop() {
+            for chat in self.chats.iter().filter(|c| c.parent == Some(parent)) {
+                if chat.id != lead && !out.contains(&chat.id) {
+                    out.push(chat.id);
+                    queue.push(chat.id);
+                }
+            }
+        }
+        out
+    }
+
+    /// Archives a plain chat at once; a lead asks first and offers its crew too.
+    pub(crate) fn confirm_archive_chat(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = self.chats.get(ix) else {
+            return;
+        };
+        if !chat.lead {
+            return self.archive_chat(ix, window, cx);
+        }
+        let (id, title) = (chat.id, chat.title.to_string());
+        let crew: Vec<i64> = self
+            .crew_ids(id)
+            .into_iter()
+            .filter(|id| self.chat_ix(*id).is_some_and(|ix| !self.chats[ix].archived))
+            .collect();
+        let finished = self.finished_crew(id);
+        let options = crew_options(id, Some(&crew), &finished);
+        let picked = Rc::new(std::cell::Cell::new(0));
+        let view = cx.entity();
+        aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
+            let (view, options, picked) = (view.clone(), options.clone(), picked.clone());
+            let labels = options.iter().map(|(label, _)| label.clone()).collect();
+            alert
+                .confirm()
+                .title(SharedString::from(format!("Archive “{title}”?")))
+                .description(crew_scope(
+                    "It moves to Archive; open it from there or the palette to restore it.".into(),
+                    "archive-crew",
+                    labels,
+                    &picked,
+                ))
+                .ok_text("Archive")
+                .on_ok(move |_, window, cx| {
+                    let ids = options.get(picked.get()).map(|(_, ids)| ids.clone());
+                    view.update(cx, |this, cx| {
+                        for id in ids.unwrap_or_default() {
+                            if let Some(ix) = this.chat_ix(id) {
+                                this.archive_chat(ix, window, cx);
+                            }
                         }
                     });
                     true
@@ -149,6 +220,7 @@ impl ChatApp {
         self.session_views.remove(&id);
         self.session_subscriptions.remove(&id);
         self.session_windows.remove(&id);
+        self.expire_chat_requests(ix);
         let mut chat = self.chats.remove(ix);
         if let Some(WorktreeJob::Creating(_, cancel)) = &chat.worktree_job {
             cancel.store(true, Ordering::Relaxed);
@@ -363,8 +435,11 @@ impl ChatApp {
         cx.notify();
     }
 
-    /// Flips the pin; pinned chats sort into their own sidebar section.
-    pub(crate) fn toggle_pin(&mut self, ix: usize, cx: &mut Context<Self>) {
+    /// Flips the pin; pinned chats sort to the top of their project.
+    pub(crate) fn toggle_pin(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.chat_pin_refusal(ix) {
+            return notice("Can't pin chat", text, window, cx);
+        }
         if let Some(chat) = self.chats.get_mut(ix) {
             chat.pinned = !chat.pinned;
         }
@@ -564,6 +639,9 @@ impl ChatApp {
         }
         let (settings, session) = self.cli_request(ix);
         self.agent.close_session(&session.key);
+        self.expire_chat_requests(ix);
+        self.sync_chat_rows(ix, None, cx);
+        self.persist(ix);
         self.agent.attach(&settings, &session, restored_background(&self.chats[ix]));
         let now = now_ms();
         self.refresh_health(ix, now);
@@ -712,4 +790,59 @@ impl ChatApp {
             .on_reflow(row_reflow(view, ix))
             .into_any_element()
     }
+}
+
+/// Archive or Delete reaches the lead with its whole crew, or only finished agents.
+/// `crew` is `None` when the lead can't go. An empty crew is a standalone chat.
+pub(crate) fn crew_options(
+    lead: i64,
+    crew: Option<&[i64]>,
+    finished: &[i64],
+) -> Vec<(String, Vec<i64>)> {
+    let agents = |n: usize| if n == 1 { "1 agent".to_string() } else { format!("{n} agents") };
+    let mut options = Vec::new();
+    if let Some(crew) = crew {
+        let all = crew.iter().copied().chain([lead]).collect();
+        let label = if crew.is_empty() {
+            "This chat".to_string()
+        } else {
+            format!("This chat and all its {}", agents(crew.len()))
+        };
+        options.push((label, all));
+    }
+    if !finished.is_empty() {
+        let n = finished.len();
+        let noun = if n == 1 { "agent" } else { "agents" };
+        let label = format!("Only its {n} finished {noun} (done or failed); this chat stays");
+        options.push((label, finished.to_vec()));
+    }
+    options
+}
+
+/// The dialog text, with a choice of scope when there's more than one.
+fn crew_scope(
+    text: String,
+    id: &'static str,
+    labels: Vec<String>,
+    picked: &Rc<std::cell::Cell<usize>>,
+) -> AnyElement {
+    let pick = picked.clone();
+    let only_lead = labels.len() == 1 && labels[0] == "This chat";
+    v_flex()
+        .gap_3()
+        .child(div().child(text))
+        .when(!labels.is_empty() && !only_lead, |column| {
+            column.child(
+                RadioGroup::vertical(id)
+                    .children(
+                        labels.into_iter().enumerate().map(|(i, l)| Radio::new((id, i)).label(l)),
+                    )
+                    .selected_index(Some(picked.get()))
+                    .on_change(move |ix: &usize, window, _| {
+                        pick.set(*ix);
+                        window.refresh();
+                    }),
+            )
+        })
+        .into_any_element()
 }

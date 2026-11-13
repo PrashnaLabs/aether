@@ -178,10 +178,24 @@ impl ChatApp {
         let prev = self.ui_owner;
         let prev_draft_owner = self.draft_owner;
         let prev_active = self.chats.get(self.active).map(|c| c.id);
+        let detached = self
+            .workspace
+            .model
+            .pane_for(id)
+            .and_then(|pane| self.workspace.model.window_of(pane))
+            .is_some_and(|host| host != 0);
+        let page = self.page;
         self.swap_session_ui(id);
         self.active = ix;
         self.draft_owner = Some(id);
+        // detached windows have no page; main's Project/Settings page mustn't strip their tabs
+        if detached {
+            self.page = Page::Chat;
+        }
         let result = f(self, cx);
+        if detached && self.page == Page::Chat {
+            self.page = page;
+        }
         if let Some(prev) = prev {
             self.swap_session_ui(prev);
         }
@@ -227,6 +241,7 @@ impl ChatApp {
             let draft = self.chats[ix].draft.clone();
             self.composer.update(cx, |s, cx| s.set_value(draft, window, cx));
             self.bind_session_widgets(id, window, cx);
+            self.rebind_session_requests(id, window, cx);
             self.reset_rows(cx);
             self.apply_restored_session(id, window, cx);
             self.sync_selector(cx);
@@ -245,6 +260,7 @@ impl ChatApp {
         if self.ui_owner.is_none() {
             self.ui_owner = Some(id);
             self.bind_session_widgets(id, window, cx);
+            self.rebind_session_requests(id, window, cx);
             self.apply_restored_session(id, window, cx);
         } else {
             self.ensure_session_ui(id, window, cx);

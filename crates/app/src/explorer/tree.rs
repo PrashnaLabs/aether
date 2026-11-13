@@ -514,6 +514,9 @@ impl ChatApp {
 
     /// Asks for a file name, then makes it in `dir` and opens it.
     fn ask_new_file(&mut self, dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.notes_tree_path_allowed(&dir, cx) {
+            return;
+        }
         let op: NameOp = |this, dir, name, window, cx| {
             let made = aether_explorer::create_file(dir, name);
             let Some(path) = this.tree_op_done(made, &format!("create {name}"), window, cx) else {
@@ -618,8 +621,8 @@ impl ChatApp {
             })
             .ok()?;
         let explorer = self.active_project_explorer(cx);
-        self.refresh_explorer(&explorer, cx);
-        explorer.update(cx, |exp, _| exp.reveal(&path));
+        self.refresh_explorer_tree(&explorer, Some(path.clone()), cx);
+        self.load_explorer_index(&explorer, cx);
         cx.notify();
         Some(path)
     }

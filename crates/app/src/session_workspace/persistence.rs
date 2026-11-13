@@ -10,7 +10,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub(crate) struct SessionSnapshot {
     pub text: String,
@@ -66,9 +66,25 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
 }
 #[derive(Default)]
 pub(crate) struct SaveState {
-    pub last: String,
+    inputs: Option<(WorkspaceModel, BTreeMap<i64, SessionSnapshot>)>,
     pub generation: Arc<AtomicU64>,
     pub lock: Arc<Mutex<()>>,
+}
+impl SaveState {
+    fn payload(
+        inputs: &mut Option<(WorkspaceModel, BTreeMap<i64, SessionSnapshot>)>,
+        model: &WorkspaceModel,
+        snapshots: BTreeMap<i64, SessionSnapshot>,
+    ) -> Option<(String, String)> {
+        if inputs.as_ref().is_some_and(|(saved, drafts)| saved == model && *drafts == snapshots) {
+            return None;
+        }
+        let saved = SavedWorkspace { version: 1, model: model.clone() };
+        let drafts = SavedDrafts { version: 1, drafts: snapshots };
+        let payload = (serde_json::to_string(&saved).ok()?, serde_json::to_string(&drafts).ok()?);
+        *inputs = Some((saved.model, drafts.drafts));
+        Some(payload)
+    }
 }
 impl ChatApp {
     pub(crate) fn load_session_workspace(
@@ -83,9 +99,23 @@ impl ChatApp {
         {
             for (id, snapshot) in saved.drafts {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == id) {
+                    // drafts file can predate last send; reusing those paths shares/deletes sent files
+                    let sent: std::collections::HashSet<_> = chat
+                        .messages
+                        .iter()
+                        .flat_map(|m| &m.attachments)
+                        .chain(chat.queue.iter().flat_map(|q| &q.attachments))
+                        .map(|a| a.path.clone())
+                        .collect();
+                    let fresh = |files: &[aether_core::Attachment]| {
+                        files.iter().filter(|a| !sent.contains(&a.path)).cloned().collect()
+                    };
                     chat.draft = snapshot.text.clone();
-                    chat.pending = snapshot.pending.clone();
-                    chat.edit_stash = snapshot.edit_stash.clone();
+                    chat.pending = fresh(&snapshot.pending);
+                    chat.edit_stash = snapshot
+                        .edit_stash
+                        .as_ref()
+                        .map(|(text, files)| (text.clone(), fresh(files)));
                     self.workspace.restored_drafts.insert(id, snapshot);
                 }
             }
@@ -133,12 +163,11 @@ impl ChatApp {
         if !self.workspace.persistence_enabled {
             return;
         }
-        let Some((layout, drafts)) = self.workspace_payload(cx) else { return };
-        let signature = format!("{layout}\n{drafts}");
-        if self.workspace.save.last == signature {
-            return;
-        }
-        self.workspace.save.last = signature;
+        let mut inputs = self.workspace.save.inputs.take();
+        let payload =
+            SaveState::payload(&mut inputs, &self.workspace.model, self.session_snapshots(cx));
+        self.workspace.save.inputs = inputs;
+        let Some((layout, drafts)) = payload else { return };
         let Some(dir) = aether_core::config_dir() else { return };
         let generation = self.workspace.save.generation.clone();
         let n = generation.fetch_add(1, Ordering::SeqCst) + 1;

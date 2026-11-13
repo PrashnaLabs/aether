@@ -220,7 +220,10 @@ fn sidebar_status_precedence() {
     );
     assert_eq!(chat_status(&StatusFacts { started: false, ..facts }, now), ChatStatus::Starting);
     assert_eq!(chat_status(&StatusFacts { retrying: true, ..facts }, now), ChatStatus::Retrying);
-    assert_eq!(chat_status(&facts, 130_000), ChatStatus::Quiet { since_ms: 100_000 });
+    assert_eq!(
+        chat_status(&facts, 130_000),
+        ChatStatus::Quiet { since_ms: 100_000, turn_ms: 40_000 }
+    );
     assert_eq!(chat_status(&facts, now), ChatStatus::Working { since_ms: 40_000 });
     let idle = StatusFacts { busy: false, ..facts };
     assert_eq!(chat_status(&StatusFacts { background: 2, ..idle }, now), ChatStatus::Background(2));
@@ -252,7 +255,7 @@ fn sidebar_quiet_flips_with_the_status_line_no_output() {
     assert_eq!(heartbeat(SILENT_MS - 1), Heartbeat::Quiet(SILENT_MS - 1));
     assert_eq!(chat_status(&facts, at - 1), ChatStatus::Working { since_ms: 40_000 });
     assert_eq!(heartbeat(SILENT_MS), Heartbeat::Silent(SILENT_MS));
-    assert_eq!(chat_status(&facts, at), ChatStatus::Quiet { since_ms: 100_000 });
+    assert_eq!(chat_status(&facts, at), ChatStatus::Quiet { since_ms: 100_000, turn_ms: 40_000 });
 }
 
 #[test]
@@ -278,7 +281,10 @@ fn silent_turns_go_quiet_from_the_later_of_last_event_and_send() {
         unseen: ChatStatus::Idle,
     };
     assert_eq!(chat_status(&facts, 60_000), ChatStatus::Starting);
-    assert_eq!(chat_status(&facts, 70_000), ChatStatus::Quiet { since_ms: 40_000 });
+    assert_eq!(
+        chat_status(&facts, 70_000),
+        ChatStatus::Quiet { since_ms: 40_000, turn_ms: 40_000 }
+    );
     let ask = StatusFacts { ask: true, ..facts };
     assert_eq!(chat_status(&ask, 900_000), ChatStatus::Waiting);
 }

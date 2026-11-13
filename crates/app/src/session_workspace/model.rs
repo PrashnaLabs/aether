@@ -77,6 +77,26 @@ pub(crate) fn restore_window_rect(saved: Rect, displays: &[Rect]) -> Rect {
     )
 }
 
+fn side_axis(side: DockSide) -> SplitAxis {
+    if matches!(side, DockSide::Left | DockSide::Right) {
+        SplitAxis::Horizontal
+    } else {
+        SplitAxis::Vertical
+    }
+}
+
+fn fits(needed: [f32; 2], available: Option<[f32; 2]>) -> Result<(), &'static str> {
+    match available {
+        Some([w, h]) if w.is_finite() && h.is_finite() && w > 0. && h > 0. => {
+            if w < needed[0] || h < needed[1] {
+                return Err("Not enough room for another session");
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 pub(crate) fn split_sizes(total: f32, a: f32, b: f32, ratio: f32) -> Option<(f32, f32)> {
     let usable = total - DIVIDER;
     if !usable.is_finite() || usable < a + b {
@@ -87,7 +107,7 @@ pub(crate) fn split_sizes(total: f32, a: f32, b: f32, ratio: f32) -> Option<(f32
     Some((first, usable - first))
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) enum DockNode {
     Leaf(PaneId),
     Split { id: u64, axis: SplitAxis, ratio: f32, first: Box<Self>, second: Box<Self> },
@@ -104,13 +124,17 @@ impl DockNode {
         }
     }
     pub(crate) fn minimum(&self) -> [f32; 2] {
+        self.minimum_with_gap(0.)
+    }
+    pub(crate) fn minimum_with_gap(&self, gap: f32) -> [f32; 2] {
         match self {
             Self::Leaf(_) => [320., 240.],
             Self::Split { axis, first, second, .. } => {
-                let (a, b) = (first.minimum(), second.minimum());
+                let (a, b) = (first.minimum_with_gap(gap), second.minimum_with_gap(gap));
+                let divider = DIVIDER + gap;
                 match axis {
-                    SplitAxis::Horizontal => [a[0] + DIVIDER + b[0], a[1].max(b[1])],
-                    SplitAxis::Vertical => [a[0].max(b[0]), a[1] + DIVIDER + b[1]],
+                    SplitAxis::Horizontal => [a[0] + divider + b[0], a[1].max(b[1])],
+                    SplitAxis::Vertical => [a[0].max(b[0]), a[1] + divider + b[1]],
                 }
             }
         }
@@ -182,7 +206,7 @@ impl DockNode {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct FloatingPane {
     pub pane: PaneId,
     pub bounds: Rect,
@@ -201,6 +225,17 @@ pub(crate) struct WindowLayout {
     // monocle tab; outlives focus moving to a float
     #[serde(skip)]
     pub shown: Option<PaneId>,
+}
+impl PartialEq for WindowLayout {
+    fn eq(&self, other: &Self) -> bool {
+        // Persistence compares only fields written to the layout file.
+        self.bounds == other.bounds
+            && self.stack == other.stack
+            && self.root == other.root
+            && self.floats == other.floats
+            && self.focused == other.focused
+            && self.maximized == other.maximized
+    }
 }
 impl WindowLayout {
     pub(crate) fn panes(&self) -> Vec<PaneId> {
@@ -221,7 +256,7 @@ impl WindowLayout {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct WorkspaceModel {
     pub windows: BTreeMap<WindowId, WindowLayout>,
     pub panes: BTreeMap<PaneId, i64>,
@@ -371,24 +406,42 @@ impl WorkspaceModel {
         w.focused = Some(p);
         p
     }
+    fn docked_root(&self, target: PaneId) -> Result<&DockNode, &'static str> {
+        let w = self.window_of(target).ok_or("Pane no longer exists")?;
+        self.windows[&w]
+            .root
+            .as_ref()
+            .filter(|r| r.leaves().contains(&target))
+            .ok_or("Dock this pane before splitting")
+    }
+    /// `size` is the target pane's own size; unmeasured ([0,0]) is allowed.
     pub(crate) fn can_split(
         &self,
         target: PaneId,
         axis: SplitAxis,
         size: [f32; 2],
     ) -> Result<(), &'static str> {
-        let needed = match axis {
-            SplitAxis::Horizontal => [644., 240.],
-            SplitAxis::Vertical => [320., 484.],
+        self.docked_root(target)?;
+        let pair = DockNode::Split {
+            id: 0,
+            axis,
+            ratio: 0.5,
+            first: Box::new(DockNode::Leaf(target)),
+            second: Box::new(DockNode::Leaf(target)),
         };
-        if size[0] < needed[0] || size[1] < needed[1] {
-            return Err("Not enough room for another session");
-        }
-        let w = self.window_of(target).ok_or("Pane no longer exists")?;
-        if !self.windows[&w].root.as_ref().is_some_and(|r| r.leaves().contains(&target)) {
-            return Err("Dock this pane before splitting");
-        }
-        Ok(())
+        fits(pair.minimum(), Some(size))
+    }
+    /// `surface` is the window's measured tiling area; `None` or unmeasured is allowed.
+    pub(crate) fn can_split_in(
+        &self,
+        target: PaneId,
+        side: DockSide,
+        surface: Option<[f32; 2]>,
+        gap: f32,
+    ) -> Result<(), &'static str> {
+        let mut root = self.docked_root(target)?.clone();
+        root.insert(target, PaneId::MAX, 0, side_axis(side), false);
+        fits(root.minimum_with_gap(gap), surface)
     }
     pub(crate) fn split(
         &mut self,
@@ -398,14 +451,36 @@ impl WorkspaceModel {
         size: [f32; 2],
     ) -> Result<PaneId, &'static str> {
         self.can_split(target, axis, size)?;
+        let side = if axis == SplitAxis::Horizontal { DockSide::Right } else { DockSide::Bottom };
+        self.place(target, chat, side)
+    }
+    pub(crate) fn split_in(
+        &mut self,
+        target: PaneId,
+        chat: i64,
+        side: DockSide,
+        surface: Option<[f32; 2]>,
+        gap: f32,
+    ) -> Result<PaneId, &'static str> {
+        self.can_split_in(target, side, surface, gap)?;
+        self.place(target, chat, side)
+    }
+    fn place(&mut self, target: PaneId, chat: i64, side: DockSide) -> Result<PaneId, &'static str> {
         let w = self.window_of(target).ok_or("Pane no longer exists")?;
         if self.pane_for(chat).is_some() {
             return Err("Session is already open");
         }
         let p = self.alloc();
         let s = self.alloc();
+        let before = matches!(side, DockSide::Left | DockSide::Top);
         let layout = self.windows.get_mut(&w).ok_or("Pane no longer exists")?;
-        layout.root.as_mut().ok_or("Pane no longer exists")?.insert(target, p, s, axis, false);
+        layout.root.as_mut().ok_or("Pane no longer exists")?.insert(
+            target,
+            p,
+            s,
+            side_axis(side),
+            before,
+        );
         self.panes.insert(p, chat);
         self.focus(p);
         Ok(p)
@@ -442,11 +517,7 @@ impl WorkspaceModel {
         let layout = self.windows.get_mut(&w).ok_or("Pane no longer exists")?;
         layout.remove(pane);
         let before = matches!(side, DockSide::Left | DockSide::Top);
-        let axis = if matches!(side, DockSide::Left | DockSide::Right) {
-            SplitAxis::Horizontal
-        } else {
-            SplitAxis::Vertical
-        };
+        let axis = side_axis(side);
         if let Some(root) = layout.root.as_mut() {
             let t = target.unwrap_or_else(|| root.leaves()[0]);
             root.insert(t, pane, s, axis, before);

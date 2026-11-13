@@ -88,6 +88,8 @@ impl RenderOnce for Markdown {
 struct MarkdownEntry {
     raw: String,
     linked: Option<SharedString>,
+    /// Last source pushed into the view: re-setting the view re-parses it.
+    shown: String,
     linking: bool,
     state: Entity<TextViewState>,
     reflow: Option<Reflow>,
@@ -107,9 +109,26 @@ fn wants_link(live: bool, unlinked: bool, linking: bool, text: &str, has_cwd: bo
     !live && unlinked && !linking && has_cwd && text.contains('`')
 }
 
+const VIEW_CAP: usize = 256 * 1024;
+
+// text view layout grows ~quadratically: a 1 MB message would stall the UI ~13 s
+pub(crate) fn clip_for_view(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.len() <= VIEW_CAP {
+        return text.into();
+    }
+    let mut cut = VIEW_CAP;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let cut = text[..cut].rfind('\n').filter(|&i| i > VIEW_CAP / 2).unwrap_or(cut);
+    let more = (text.len() - cut).div_ceil(1024);
+    format!("{}\n\n*… message truncated in view ({more} KB more)*", &text[..cut]).into()
+}
+
 fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
     register_aliases();
-    let text = md.text.trim();
+    let clipped = clip_for_view(md.text.trim());
+    let text: &str = &clipped;
     if text.is_empty() {
         return None;
     }
@@ -138,6 +157,7 @@ fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
             let entry = MarkdownEntry {
                 raw: text.to_string(),
                 linked: None,
+                shown: text.to_string(),
                 linking: false,
                 state: state.clone(),
                 reflow: md.on_reflow.clone(),
@@ -167,6 +187,7 @@ fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
                 if entry.raw == raw {
                     let linked = SharedString::from(linked);
                     entry.linked = Some(linked.clone());
+                    entry.shown = linked.to_string();
                     state.update(cx, |state, cx| state.set_text(&linked, cx));
                 }
                 if let Some(reflow) = reflow {
@@ -177,7 +198,20 @@ fn markdown(md: &Markdown, cx: &mut App) -> Option<TextView> {
         .detach();
     }
     let source = shown.unwrap_or_else(|| text.to_string().into());
-    state.update(cx, |state, cx| state.set_text(&source, cx));
+    let changed = match cx.default_global::<MarkdownStates>().0.get(key) {
+        Some(entry) => {
+            if entry.shown == source {
+                false
+            } else {
+                entry.shown = source.to_string();
+                true
+            }
+        }
+        None => false,
+    };
+    if changed {
+        state.update(cx, |state, cx| state.set_text(&source, cx));
+    }
 
     let theme = cx.theme();
     let (muted, mono) = (theme.muted_foreground, theme.mono_font_family.clone());

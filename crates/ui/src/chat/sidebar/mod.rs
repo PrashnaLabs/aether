@@ -18,6 +18,7 @@ use aether_core::{Provider, SidebarStyle};
 
 mod chat_row;
 mod chrome;
+mod crew;
 mod menu;
 mod project_row;
 mod render;
@@ -28,6 +29,7 @@ use chrome::tabular;
 
 pub use chat_row::{middle_truncate, project_color, project_mark, project_mark_sized};
 pub use chrome::{count_badge, row_hover, row_style};
+pub use crew::{Bucket, CrewSummary, Tier};
 pub use render::traffic_lights_gap;
 pub use rows::outside_aria;
 pub use state::splice_range;
@@ -46,9 +48,10 @@ pub enum ChatStatus {
     Waiting,
     /// The provider is retrying or rate limited.
     Retrying,
-    /// Running but silent since `since_ms`.
+    /// Running since `turn_ms` but silent since `since_ms`.
     Quiet {
         since_ms: i64,
+        turn_ms: i64,
     },
     /// Turn over; this many background tasks still run.
     Background(usize),
@@ -79,7 +82,7 @@ impl ChatStatus {
             Self::Working { since_ms } => format!("Working · {}", clock(since_ms)),
             Self::Waiting => "Needs you".into(),
             Self::Retrying => "Retrying".into(),
-            Self::Quiet { since_ms } => format!("No output {}", clock(since_ms)),
+            Self::Quiet { since_ms, .. } => format!("No output {}", clock(since_ms)),
             Self::Background(n) => format!("{n} in background"),
             Self::Done => "Done".into(),
             Self::Failed => "Failed".into(),
@@ -139,6 +142,20 @@ impl ChatStatus {
                     .text_color(mango)
                     .font_features(tabular())
                     .child(Spinner::new().xsmall().color(mango))
+                    .when_some(timer, |el, t| el.child(div().text_xs().child(t)))
+                    .into_any_element()
+            }
+            Self::Quiet { turn_ms, .. } => {
+                let muted = cx.theme().muted_foreground;
+                let timer = now_ms.and_then(|now| live::since(Some(turn_ms), now));
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .px_1p5()
+                    .py_0p5()
+                    .text_color(muted)
+                    .font_features(tabular())
+                    .child(Spinner::new().xsmall().color(muted))
                     .when_some(timer, |el, t| el.child(div().text_xs().child(t)))
                     .into_any_element()
             }
@@ -282,7 +299,8 @@ impl RowPlace {
             Self::Branch { worktree: true, .. } => Lucide::GitFork,
             Self::Branch { detached: true, .. } => Lucide::GitCommitHorizontal,
             Self::Branch { .. } => Lucide::GitBranch,
-            Self::Folder(_) | Self::NoGit => Lucide::Folder,
+            Self::Folder(_) => Lucide::Folder,
+            Self::NoGit => Lucide::CircleSlash,
         }
     }
 
@@ -308,6 +326,8 @@ pub struct ChatLine {
     pub project: Option<SharedString>,
     /// Model display name, for the hover card.
     pub model: SharedString,
+    /// Thinking level the chat sends with; empty means the CLI default.
+    pub effort: SharedString,
     pub place: Option<RowPlace>,
     /// Relative time, or elapsed time while a turn runs; empty for a draft.
     pub time: SharedString,
@@ -349,6 +369,16 @@ pub struct ProjectHeader {
     pub status: ChatStatus,
     /// The folder no longer exists.
     pub missing: bool,
+    /// Checked-out branch of the folder, if it is a git repository.
+    pub branch: Option<SharedString>,
+    /// Checked and found no git repository.
+    pub no_git: bool,
+    pub added: u32,
+    pub deleted: u32,
+    pub ahead: u32,
+    /// Chats waiting on the user and failed chats, for the header chips.
+    pub needs_you: usize,
+    pub failed: usize,
 }
 
 type RowHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -369,6 +399,7 @@ pub const SIDEBAR_MAX_WIDTH: f32 = 480.;
 
 type WatchHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 type HandoffHandler = Rc<dyn Fn(i64, Provider, &mut Window, &mut App)>;
+
 type PickHandler = Rc<dyn Fn(i64, &mut Window, &mut App)>;
 
 /// A row's bulk-select state: picked, any row picked, toggle.
@@ -389,8 +420,15 @@ struct ChatItem {
     active: bool,
     status: ChatStatus,
     pinned: bool,
+    /// The Pinned section's copy; the in-place copy keeps the crew.
+    pin: bool,
+    /// Coloured chip before the title, e.g. an org head's role.
+    badge: Option<(SharedString, Hsla)>,
+    tally: Option<CrewSummary>,
+    /// Providers across its crew, for the Minimal lead's avatar stack.
+    providers: Vec<Provider>,
     watched: bool,
-    child: bool,
+    depth: u8,
     lead: bool,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, HandoffHandler)>,
@@ -407,6 +445,12 @@ struct ChatItem {
     archived: bool,
     pick: Option<Pick>,
     now: i64,
+}
+
+impl ChatItem {
+    fn child(&self) -> bool {
+        self.depth > 0
+    }
 }
 
 struct AgentItem {
@@ -430,9 +474,16 @@ struct ProjectItem {
     header: ProjectHeader,
     on_collapse: CollapseHandler,
     on_new: RowHandler,
-    on_files: RowHandler,
-    on_hide: RowHandler,
-    on_page: RowHandler,
+    on_files: Option<RowHandler>,
+    on_hide: Option<RowHandler>,
+    on_page: Option<RowHandler>,
+    /// Has an org, and what opens its page.
+    org: Option<(bool, RowHandler)>,
+    /// Pinned, and what flips it.
+    pin: Option<(bool, RowHandler)>,
+    /// Org sidebar row: a click opens this, the chevron folds.
+    on_open: Option<RowHandler>,
+    active: bool,
     chats: Vec<ChatItem>,
     worktrees: Vec<WorktreeItem>,
 }
@@ -461,6 +512,7 @@ pub struct ChatSidebar {
     mark: Option<SharedString>,
     pinned: Vec<ChatItem>,
     pinned_collapse: Option<(bool, CollapseHandler)>,
+    keep_pins: bool,
     projects: Vec<ProjectItem>,
     projects_collapse: Option<(bool, CollapseHandler)>,
     chats: Vec<ChatItem>,
@@ -471,6 +523,7 @@ pub struct ChatSidebar {
     count: Option<usize>,
     empty: Option<SharedString>,
     on_new_chat: Option<ClickHandler>,
+    new_chat_label: SharedString,
     on_back: Option<ClickHandler>,
     on_add_project: Option<RowHandler>,
     new_chat_action: Option<Box<dyn Action>>,
@@ -480,16 +533,19 @@ pub struct ChatSidebar {
     style: SidebarStyle,
     archived: bool,
     top: Vec<SectionButtonItem>,
+    search: Option<Entity<InputState>>,
     section_tools: Option<ToolsFactory>,
     rename_ix: Option<usize>,
     rename_input: Option<Entity<InputState>>,
     width: f32,
+    tier: crew::Tier,
     on_resize: Option<ResizeHandler>,
     on_resize_end: Option<ResizeEndHandler>,
     now: i64,
     watched: Vec<i64>,
-    children: Vec<i64>,
-    collapsed_crews: std::collections::HashSet<i64>,
+    children: std::collections::HashMap<i64, u8>,
+    crew_open: std::collections::HashMap<i64, bool>,
+    crew_all: std::collections::HashSet<i64>,
     leads: Vec<i64>,
     on_watch: Option<WatchHandler>,
     handoff: Option<(Vec<Provider>, Vec<(i64, Provider)>, HandoffHandler)>,
@@ -504,6 +560,7 @@ impl ChatSidebar {
             mark: None,
             pinned: Vec::new(),
             pinned_collapse: None,
+            keep_pins: false,
             projects: Vec::new(),
             projects_collapse: None,
             chats: Vec::new(),
@@ -514,6 +571,7 @@ impl ChatSidebar {
             count: None,
             empty: None,
             on_new_chat: None,
+            new_chat_label: "New chat".into(),
             on_back: None,
             on_add_project: None,
             new_chat_action: None,
@@ -523,16 +581,19 @@ impl ChatSidebar {
             style: SidebarStyle::Default,
             archived: false,
             top: Vec::new(),
+            search: None,
             section_tools: None,
             rename_ix: None,
             rename_input: None,
             width: SIDEBAR_WIDTH,
+            tier: crew::Tier::of(SIDEBAR_WIDTH),
             on_resize: None,
             on_resize_end: None,
             now: 0,
             watched: Vec::new(),
-            children: Vec::new(),
-            collapsed_crews: std::collections::HashSet::new(),
+            children: std::collections::HashMap::new(),
+            crew_open: std::collections::HashMap::new(),
+            crew_all: std::collections::HashSet::new(),
             leads: Vec::new(),
             on_watch: None,
             handoff: None,
@@ -564,8 +625,8 @@ impl ChatSidebar {
     }
 
     /// Chat ids drawn one level deeper, under their lead.
-    pub fn child_agents(mut self, ids: Vec<i64>) -> Self {
-        self.children = ids;
+    pub fn child_agents(mut self, depths: Vec<(i64, u8)>) -> Self {
+        self.children = depths.into_iter().collect();
         self
     }
 
@@ -662,12 +723,80 @@ impl ChatSidebar {
             header,
             on_collapse: Rc::new(on_collapse),
             on_new: Rc::new(on_new),
-            on_files: Rc::new(on_files),
-            on_hide: Rc::new(on_hide),
-            on_page: Rc::new(on_page),
+            on_files: Some(Rc::new(on_files)),
+            on_hide: Some(Rc::new(on_hide)),
+            on_page: Some(Rc::new(on_page)),
+            org: None,
+            pin: None,
+            on_open: None,
+            active: false,
             chats: Vec::new(),
             worktrees: Vec::new(),
         });
+        self
+    }
+
+    /// Adds an organization as a project group: a click runs `on_open`, the
+    /// chevron folds, + runs `on_hire`. `active` highlights it.
+    pub fn org_project(
+        mut self,
+        header: ProjectHeader,
+        active: bool,
+        on_collapse: impl Fn(&bool, &mut Window, &mut App) + 'static,
+        on_open: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_hire: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.projects.push(ProjectItem {
+            header,
+            on_collapse: Rc::new(on_collapse),
+            on_new: Rc::new(on_hire),
+            on_files: None,
+            on_hide: None,
+            on_page: None,
+            org: None,
+            pin: None,
+            on_open: Some(Rc::new(on_open)),
+            active,
+            chats: Vec::new(),
+            worktrees: Vec::new(),
+        });
+        self
+    }
+
+    /// Puts a coloured chip before the title of the last chat added to project `project`.
+    pub fn chat_badge(
+        mut self,
+        project: usize,
+        text: impl Into<SharedString>,
+        color: Hsla,
+    ) -> Self {
+        if let Some(chat) = self.projects.get_mut(project).and_then(|p| p.chats.last_mut()) {
+            chat.badge = Some((text.into(), color));
+        }
+        self
+    }
+
+    /// Organization entry on the last project: an icon when `has_org`, else "Set up organization" in its menu.
+    pub fn project_org(
+        mut self,
+        has_org: bool,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        if let Some(project) = self.projects.last_mut() {
+            project.org = Some((has_org, Rc::new(on_click)));
+        }
+        self
+    }
+
+    /// Pin / Unpin on the last project's menu; a pinned project shows a pin.
+    pub fn project_pin(
+        mut self,
+        pinned: bool,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        if let Some(project) = self.projects.last_mut() {
+            project.pin = Some((pinned, Rc::new(on_click)));
+        }
         self
     }
 
@@ -703,9 +832,9 @@ impl ChatSidebar {
     }
 
     /// Adds a chat row; `id` keeps its scroll anchor and focus across reorders.
-    /// Pinned chats go to Pinned; others to project `project` (an index from
-    /// [`Self::project`]), its worktree `worktree` (an index from
-    /// [`Self::worktree`]), or the plain Chats list. `line` makes it a
+    /// Goes in project `project` (an index from [`Self::project`]), its worktree
+    /// `worktree` (an index from [`Self::worktree`]), or the plain Chats list;
+    /// pinned chats outside a project also go to Pinned. `line` makes it a
     /// two-line agent row. `on_remove_worktree` adds "Remove worktree…" to
     /// its menu.
     pub fn chat(
@@ -735,8 +864,12 @@ impl ChatSidebar {
             active,
             status,
             pinned,
+            pin: false,
+            badge: None,
+            tally: None,
+            providers: Vec::new(),
             watched: self.watched.contains(&id),
-            child: self.children.contains(&id),
+            depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
@@ -753,8 +886,10 @@ impl ChatSidebar {
             pick: self.pick_for(id),
             now: 0,
         };
+        if pinned && project.is_none() {
+            self.pinned.push(ChatItem { pin: true, depth: 0, ..item.clone() });
+        }
         match (project, worktree) {
-            _ if pinned => self.pinned.push(item),
             (Some(k), Some(w))
                 if k < self.projects.len() && w < self.projects[k].worktrees.len() =>
             {
@@ -781,6 +916,12 @@ impl ChatSidebar {
         self
     }
 
+    /// Tooltip of the header's + button.
+    pub fn new_chat_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.new_chat_label = label.into();
+        self
+    }
+
     /// Footer button that leaves a sub view back to the project list.
     pub fn on_back(
         mut self,
@@ -797,6 +938,12 @@ impl ChatSidebar {
         handler: impl Fn(&bool, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.projects_collapse = Some((collapsed, Rc::new(handler)));
+        self
+    }
+
+    /// Keeps pinned chats listed under collapsed projects.
+    pub fn keep_pinned_when_collapsed(mut self, keep: bool) -> Self {
+        self.keep_pins = keep;
         self
     }
 
@@ -888,8 +1035,20 @@ impl ChatSidebar {
         })
     }
 
+    pub fn width(mut self, px: f32) -> Self {
+        self.width = px;
+        self.tier = crew::Tier::of(px);
+        self
+    }
+
     pub fn style(mut self, style: SidebarStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    /// A chat search field pinned above the list.
+    pub fn search(mut self, input: &Entity<InputState>) -> Self {
+        self.search = Some(input.clone());
         self
     }
 
@@ -945,8 +1104,12 @@ impl ChatSidebar {
             active,
             status,
             pinned,
+            pin: false,
+            badge: None,
+            tally: None,
+            providers: Vec::new(),
             watched: self.watched.contains(&id),
-            child: self.children.contains(&id),
+            depth: self.children.get(&id).copied().unwrap_or(0),
             lead: self.leads.contains(&id),
             on_watch: self.on_watch.clone(),
             handoff: self.handoff_for(id),
@@ -964,6 +1127,8 @@ impl ChatSidebar {
             now: 0,
         };
         let section = section.into();
+        let pin = pinned && section == "Pinned";
+        let item = ChatItem { pin, depth: if pin { 0 } else { item.depth }, ..item };
         if let Some((_, list)) = self.custom_sections.iter_mut().find(|(s, _)| s == &section) {
             list.push(item);
         } else {

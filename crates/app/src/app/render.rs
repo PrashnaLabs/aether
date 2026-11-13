@@ -13,6 +13,7 @@ use super::{ChatApp, Page, apply_font_size};
 impl Render for ChatApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         apply_font_size(self.settings.font_size, window);
+        self.sync_org_view(false);
         let news_shown = self.page == Page::HackerNews;
         let reader_shown =
             news_shown && self.hn_reader_open && !self.palette_open && !self.notes.search_ui.open;
@@ -47,6 +48,7 @@ impl Render for ChatApp {
                 self.refresh_git(false, cx);
                 self.refresh_missing_attachments(false, cx);
                 self.load_bases(cx);
+                self.sync_org_view(true);
             }
         }
         let native_bounds = window.window_bounds().get_bounds();
@@ -74,8 +76,7 @@ impl Render for ChatApp {
         let pane_header = self.page == Page::Chat
             && self.workspace.model.windows.get(&0).is_some_and(|w| !w.panes().is_empty());
         let header = if show_header && !pane_header {
-            let pop = self.render_workspace_pop(window, cx);
-            Some(self.render_header(pop, cx).into_any_element())
+            Some(self.render_header(cx).into_any_element())
         } else if self.page == Page::Project {
             Some(self.render_project_top_bar(cx).into_any_element())
         } else {
@@ -97,6 +98,8 @@ impl Render for ChatApp {
             self.render_terminal_page(window, cx)
         } else if self.page == Page::Board {
             self.render_board(window, cx)
+        } else if self.page == Page::Org {
+            self.render_org(window, cx)
         } else if self.page == Page::HackerNews {
             self.render_hackernews_page(window, cx).into_any_element()
         } else if self.page == Page::Chat || self.page == Page::Explorer {
@@ -198,6 +201,7 @@ impl Render for ChatApp {
             .relative()
             .size_full()
             .track_focus(&self.focus)
+            .on_mouse_down(gpui_kit::MouseButton::Left, crate::app::claim_title_bar_press)
             .key_context(if self.page == Page::Chat { "Aether Chat" } else { "Aether" })
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 if this.page == Page::Chat {
@@ -232,11 +236,28 @@ impl Render for ChatApp {
             .on_action(cx.listener(|this, _: &crate::actions::OpenBoard, window, cx| {
                 this.open_board(window, cx)
             }))
+            .on_action(cx.listener(|this, _: &crate::actions::OpenOrg, window, cx| {
+                this.open_org(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::actions::CycleOrgLayout, _, cx| {
+                if this.settings.org_enabled {
+                    this.update_settings(cx, |s| {
+                        s.org_layout = crate::org::next_layout(s.org_layout)
+                    })
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleHackerNews, window, cx| {
                 this.toggle_hackernews_page(window, cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleWatchList, _, cx| this.toggle_watch_list(cx)))
             .on_action(cx.listener(|this, _: &BackToChat, window, cx| {
+                if this.page == Page::Org && this.org.overlay != crate::org::OrgOverlay::None {
+                    this.org.overlay = crate::org::OrgOverlay::None;
+                    return cx.notify();
+                }
+                if this.page == Page::Org {
+                    return this.org_back(window, cx);
+                }
                 let editing_skill = this.page == Page::Skills && this.skill_editor.is_some();
                 if matches!(
                     this.page,

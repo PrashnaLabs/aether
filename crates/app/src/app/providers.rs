@@ -5,8 +5,8 @@ use crate::settings::{self, KeySource};
 use aether_agent::ModelInfo;
 use aether_agent::usage::{
     PlanUsage, fetch_antigravity_plan_usage, fetch_claude_plan_usage, fetch_codex_plan_usage,
-    fetch_opencode_plan_usage, fetch_openrouter_plan_usage, read_claude_credentials,
-    read_codex_token, read_openrouter_key,
+    fetch_opencode_plan_usage, fetch_openrouter_plan_usage, forget_claude_credentials,
+    read_claude_credentials, read_codex_token, read_openrouter_key,
 };
 use aether_core::{Appearance, CornerStyle, Provider, Role, Settings, Skill, effort_levels};
 use aether_driver::{CliModel, catalog::provider_label};
@@ -59,35 +59,42 @@ impl ChatApp {
         let dir = self.settings.account_dir(provider);
         match provider {
             Provider::Claude => {
-                if let Some((tok, sub)) = read_claude_credentials(dir.as_deref()) {
-                    cx.spawn(async move |this, cx| {
-                        let usage = bg
-                            .spawn(async move { fetch_claude_plan_usage(&tok, sub.as_deref()) })
-                            .await;
-                        if let Some(usage) = usage {
-                            let _ = this.update(cx, |this, cx| {
-                                this.claude_plan_usage = Some(usage.clone());
-                                this.store_plan_usage(Provider::Claude, usage);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .detach();
-                }
+                cx.spawn(async move |this, cx| {
+                    let usage = bg
+                        .spawn(async move {
+                            let (tok, sub) = read_claude_credentials(dir.as_deref())?;
+                            let usage = fetch_claude_plan_usage(&tok, sub.as_deref());
+                            if usage.is_none() && dir.is_none() {
+                                forget_claude_credentials();
+                            }
+                            usage
+                        })
+                        .await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.claude_plan_usage = Some(usage.clone());
+                            this.store_plan_usage(Provider::Claude, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
             }
             Provider::Codex => {
-                if let Some(tok) = read_codex_token(dir.as_deref()) {
-                    cx.spawn(async move |this, cx| {
-                        let usage = bg.spawn(async move { fetch_codex_plan_usage(&tok) }).await;
-                        if let Some(usage) = usage {
-                            let _ = this.update(cx, |this, cx| {
-                                this.store_plan_usage(Provider::Codex, usage);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .detach();
-                }
+                cx.spawn(async move |this, cx| {
+                    let usage =
+                        bg.spawn(async move {
+                            fetch_codex_plan_usage(&read_codex_token(dir.as_deref())?)
+                        })
+                        .await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.store_plan_usage(Provider::Codex, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
             }
             Provider::Antigravity => {
                 cx.spawn(async move |this, cx| {
@@ -102,19 +109,18 @@ impl ChatApp {
                 .detach();
             }
             Provider::OpenRouter => {
-                if let Some(key) = read_openrouter_key() {
-                    cx.spawn(async move |this, cx| {
-                        let usage =
-                            bg.spawn(async move { fetch_openrouter_plan_usage(&key) }).await;
-                        if let Some(usage) = usage {
-                            let _ = this.update(cx, |this, cx| {
-                                this.store_plan_usage(Provider::OpenRouter, usage);
-                                cx.notify();
-                            });
-                        }
-                    })
-                    .detach();
-                }
+                cx.spawn(async move |this, cx| {
+                    let usage = bg
+                        .spawn(async move { fetch_openrouter_plan_usage(&read_openrouter_key()?) })
+                        .await;
+                    if let Some(usage) = usage {
+                        let _ = this.update(cx, |this, cx| {
+                            this.store_plan_usage(Provider::OpenRouter, usage);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
             }
             Provider::OpenCode => {
                 cx.spawn(async move |this, cx| {
@@ -323,20 +329,24 @@ impl ChatApp {
         }
     }
 
-    /// Pushes every provider's rows, favorites and the active chat's choice to the selector.
-    pub(crate) fn sync_selector(&self, cx: &mut Context<Self>) {
-        let chat = &self.chats[self.active];
-        let current = chat.provider;
-        let mut model = SharedString::default();
-        let providers = Provider::ALL
-            .map(|provider| {
+    /// Selector tabs for `providers`, `model` kept selectable under `current`; plus its row id.
+    pub(crate) fn selector_rows(
+        &self,
+        providers: &[Provider],
+        current: Provider,
+        model: &str,
+    ) -> (Vec<ProviderModels>, SharedString) {
+        let mut picked = SharedString::default();
+        let rows = providers
+            .iter()
+            .map(|&provider| {
                 let mut items = self.model_items(provider);
                 if provider == current {
-                    let value = picker_value(provider, &chat.model(&self.settings), &items);
+                    let value = picker_value(provider, model, &items);
                     if !value.is_empty() && !items.iter().any(|item| item.id == value) {
                         items.insert(0, ModelItem::custom(value.clone()));
                     }
-                    model = value.into();
+                    picked = value.into();
                 }
                 let installed = self.probes.get(&provider).map(|probe| probe.installed);
                 ProviderModels {
@@ -345,7 +355,16 @@ impl ChatApp {
                     hidden: rail_hidden(provider, current, installed),
                 }
             })
-            .to_vec();
+            .collect();
+        (rows, picked)
+    }
+
+    /// Pushes every provider's rows, favorites and the active chat's choice to the selector.
+    pub(crate) fn sync_selector(&self, cx: &mut Context<Self>) {
+        let chat = &self.chats[self.active];
+        let current = chat.provider;
+        let (providers, model) =
+            self.selector_rows(&Provider::ALL, current, &chat.model(&self.settings));
         let favorites = self.settings.favorite_models.clone();
         let efforts = self.effort_options(chat);
         let effort = chat.effort.clone();
@@ -372,7 +391,7 @@ impl ChatApp {
         });
     }
 
-    pub(super) fn toggle_favorite(
+    pub(crate) fn toggle_favorite(
         &mut self,
         provider: Provider,
         model: &str,
@@ -464,16 +483,57 @@ impl ChatApp {
         if let Some(last) = chat.messages.last_mut() {
             last.handoff = Some(handoff);
         }
+        if chat.provider != Provider::OpenRouter && !chat.cli_session.is_empty() {
+            let usage = chat.messages.iter().rev().find(|m| {
+                m.role == aether_core::Role::Assistant
+                    && (m.context_tokens.is_some() || m.context_window.is_some())
+            });
+            let seen = chat.handoff_seen.as_ref().map_or(chat.messages.len(), |h| h.seen);
+            let estimate = super::chat::native_context_estimate(&chat.messages, chat.id, seen);
+            chat.agent_sessions.retain(|s| s.provider != chat.provider);
+            chat.agent_sessions.push(aether_agent::AgentSession {
+                provider: chat.provider,
+                session: chat.cli_session.clone(),
+                seen,
+                context_tokens: chat
+                    .handoff_seen
+                    .as_ref()
+                    .map_or_else(|| usage.and_then(|m| m.context_tokens), |h| h.context_tokens)
+                    .or(Some(estimate)),
+                context_window: chat
+                    .handoff_seen
+                    .as_ref()
+                    .map_or_else(|| usage.and_then(|m| m.context_window), |h| h.context_window),
+            });
+        }
+        chat.cli_session.clear();
+        chat.fork_from.clear();
+        chat.rollback_to.clear();
+        chat.handoff_seen = None;
+        if provider != Provider::OpenRouter
+            && let Some(pos) = chat
+                .agent_sessions
+                .iter()
+                .position(|s| s.provider == provider && !s.session.is_empty())
+        {
+            let saved = chat.agent_sessions.remove(pos);
+            chat.cli_session = saved.session;
+            chat.handoff_seen = Some(aether_agent::HandoffSeen {
+                pending: false,
+                seen: saved.seen,
+                context_tokens: saved.context_tokens,
+                context_window: saved.context_window,
+            });
+        }
         chat.provider = provider;
         chat.provider_model = model;
         chat.access = super::chat::fit_access(provider, chat.access);
         chat.effort.clear();
-        chat.cli_session.clear();
         chat.external_pid = None;
         if let Some(session) = session {
             chat.session = session.clone();
-            let hist = super::chat::history(&chat.messages);
-            let seed = aether_agent::budget_history(&hist, aether_agent::HISTORY_BUDGET).0;
+            let selection = super::chat::handoff_selection(&chat.messages, chat.id, false);
+            let seed = aether_agent::handoff::seed_pairs(&selection);
             if let Err(e) = self.agent.fork_session(&session, &seed) {
                 eprintln!("aether: couldn't seed the OpenRouter session: {e}");
             }
@@ -545,11 +605,13 @@ impl ChatApp {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut Settings),
     ) {
-        let detail = self.settings.chat_detail;
+        let (detail, hooks) = (self.settings.chat_detail, self.settings.show_hooks);
         f(&mut self.settings);
         settings::save(&self.settings);
         if self.settings.chat_detail != detail {
             self.reset_rows(cx);
+        } else if self.settings.show_hooks != hooks {
+            self.sync_rows(None, cx);
         }
         cx.notify();
     }
@@ -628,7 +690,7 @@ impl ChatApp {
     }
 
     /// Window the latest reply's provider reported for this model, else the catalog's, else a guess.
-    pub(in crate::app) fn context_limit(&self, chat: &Chat) -> u64 {
+    pub(crate) fn context_limit(&self, chat: &Chat) -> u64 {
         let model = chat.model(&self.settings);
         let sent_with = (!model.is_empty()).then(|| model.clone());
         chat.messages
@@ -648,14 +710,18 @@ impl ChatApp {
 
     /// Effort levels the chat's model takes: the catalog's per-model list, else the CLI's.
     pub(in crate::app) fn effort_options(&self, chat: &Chat) -> Vec<String> {
-        let model = chat.model(&self.settings);
+        self.model_efforts(chat.provider, &chat.model(&self.settings))
+    }
+
+    /// Reasoning levels `model` takes, from its probe, else the provider's list.
+    pub(crate) fn model_efforts(&self, provider: Provider, model: &str) -> Vec<String> {
         self.probes
-            .get(&chat.provider)
+            .get(&provider)
             .and_then(|p| {
                 p.models.iter().find(|m| if model.is_empty() { m.default } else { m.id == model })
             })
             .and_then(|m| m.efforts.clone())
-            .unwrap_or_else(|| effort_levels(chat.provider).iter().map(|e| e.to_string()).collect())
+            .unwrap_or_else(|| effort_levels(provider).iter().map(|e| e.to_string()).collect())
     }
 
     pub(crate) fn enabled_skills(&self) -> Vec<Skill> {
@@ -780,7 +846,7 @@ fn openrouter_item(m: &ModelInfo) -> ModelItem {
     }
 }
 
-fn stored_model(provider: Provider, value: &str) -> String {
+pub(crate) fn stored_model(provider: Provider, value: &str) -> String {
     if provider != Provider::OpenRouter && value == CLI_DEFAULT {
         String::new()
     } else {

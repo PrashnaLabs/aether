@@ -49,6 +49,7 @@ fn aria_carries_hover_card_lines() {
         provider: Provider::OpenCode,
         project: Some("auto-clicker".into()),
         model: "DeepSeek V4.1 Flash Free".into(),
+        effort: SharedString::default(),
         place: Some(RowPlace::Branch {
             name: "feat/autoclicker".into(),
             worktree: false,
@@ -64,19 +65,56 @@ fn aria_carries_hover_card_lines() {
         background: 0,
     };
     assert_eq!(
-        aria("Project Purpose", ChatStatus::Done, false, Some(&line)),
+        aria("Project Purpose", ChatStatus::Done, false, Some(&line), None),
         "Project Purpose, new reply, auto-clicker, Branch feat/autoclicker, \
          OpenCode DeepSeek V4.1 Flash Free, 15h"
     );
     let bare = ChatLine { project: None, place: None, ..line };
     assert_eq!(
-        aria("Greeting", ChatStatus::Idle, false, Some(&bare)),
+        aria("Greeting", ChatStatus::Idle, false, Some(&bare), None),
         "Greeting, No project, OpenCode DeepSeek V4.1 Flash Free, 15h"
     );
-    assert_eq!(aria("Plain", ChatStatus::Idle, false, None), "Plain");
+    assert_eq!(aria("Plain", ChatStatus::Idle, false, None, None), "Plain");
     assert_eq!(
-        aria("Greeting", ChatStatus::Idle, true, Some(&bare)),
+        aria("Greeting", ChatStatus::Idle, true, Some(&bare), None),
         "Greeting, Lead, No project, OpenCode DeepSeek V4.1 Flash Free, 15h"
+    );
+}
+
+#[test]
+fn lead_aria_reads_spawned_count_and_rollup() {
+    use super::super::crew::CrewSummary;
+    let line = ChatLine {
+        provider: aether_core::Provider::Claude,
+        project: Some("aether".into()),
+        model: "Opus".into(),
+        effort: SharedString::default(),
+        place: None,
+        time: "2m".into(),
+        path: "/repo".into(),
+        removed: false,
+        changed: 0,
+        added: 0,
+        deleted: 0,
+        ahead_behind: None,
+        background: 0,
+    };
+    let summary = CrewSummary { needs_you: 1, failed: 0, working: 2, done: 12 };
+    assert_eq!(
+        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, false, 4))),
+        "Lead, Title, 4 spawned agents, 1 needs you, 2 working, 12 done, collapsed"
+    );
+    assert!(
+        aria("Title", ChatStatus::Idle, true, Some(&line), Some((summary, true, 4)))
+            .ends_with(", expanded")
+    );
+}
+
+#[test]
+fn child_aria_is_short() {
+    assert_eq!(
+        aria("Title", ChatStatus::Working { since_ms: 0 }, false, None, None),
+        "Title, working"
     );
 }
 
@@ -101,4 +139,21 @@ fn status_state_predicates_and_waiting_action() {
     assert!(ChatStatus::Working { since_ms: 100 }.is_busy());
     assert!(!ChatStatus::Done.is_busy());
     assert!(!ChatStatus::Idle.is_busy());
+}
+
+#[test]
+fn run_clock_only_for_working_chats() {
+    let now = 169_000;
+    assert_eq!(run_clock(ChatStatus::Working { since_ms: 0 }, now), Some("2m 49s".into()));
+    assert_eq!(run_clock(ChatStatus::Idle, now), None);
+    assert_eq!(run_clock(ChatStatus::Waiting, now), None);
+}
+
+#[test]
+fn worktree_rows_show_only_the_icon() {
+    let branch =
+        |worktree| RowPlace::Branch { name: "aether/backlog-81".into(), worktree, detached: false };
+    assert_eq!(place_label(&branch(true)), None);
+    assert_eq!(place_label(&branch(false)).as_deref(), Some("aether/backlog-81"));
+    assert_eq!(place_label(&RowPlace::NoGit).as_deref(), Some("No git"));
 }

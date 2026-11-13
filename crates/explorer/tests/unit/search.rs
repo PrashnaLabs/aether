@@ -73,3 +73,20 @@ fn grep_files_reads_the_index_and_stops_at_the_limit() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn grep_files_skips_symlinks_and_non_regular_files() {
+    let dir = std::env::temp_dir().join(format!(
+        "aether_test_grep_symlink_{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("real.rs"), "fn target() {}\n").unwrap();
+    std::os::unix::fs::symlink(dir.join("real.rs"), dir.join("link.rs")).unwrap();
+    let files = ["real.rs".to_string(), "link.rs".to_string()];
+    let matches = grep_files(&dir, &files, &opts("target", true, false, false), 500);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].path, dir.join("real.rs"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

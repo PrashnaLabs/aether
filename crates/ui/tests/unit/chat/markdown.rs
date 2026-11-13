@@ -21,3 +21,16 @@ fn code_blocks_are_uncapped_unless_the_container_requests_a_limit() {
     assert_eq!(style.max_size.height, Some(px(340.).into()));
     assert_eq!(style.overflow.y, Some(Overflow::Scroll));
 }
+
+#[test]
+fn oversized_messages_are_clipped_for_view() {
+    let short = "hello\nworld";
+    assert_eq!(clip_for_view(short), short);
+    let big = "line of text\n".repeat(30_000);
+    let clipped = clip_for_view(&big);
+    assert!(clipped.len() < 256 * 1024 + 100);
+    assert!(clipped.ends_with("KB more)*"));
+    assert!(clipped.contains("line of text\n\n*… message truncated in view"));
+    let wide = "é".repeat(200_000);
+    assert!(clip_for_view(&wide).starts_with('é'));
+}

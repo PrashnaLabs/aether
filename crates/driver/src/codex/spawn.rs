@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::process::{ChildStdin, Stdio};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -13,6 +13,7 @@ use aether_core::{
 };
 
 use crate::DriverStartOptions;
+use crate::lines::{MAX_LINE, capped_lines, oversized};
 use crate::record::{self};
 use crate::spawn::{command, spawn_logged};
 use crate::tool::{Throttle, start};
@@ -89,7 +90,7 @@ impl CodexDriver {
         if let Some(stderr) = child.stderr.take() {
             let state = me.state.clone();
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     state.guard().stderr.push(&line);
                 }
                 drop(stderr_done);
@@ -99,7 +100,11 @@ impl CodexDriver {
             let (throttle, state, stdin, rec) =
                 (me.throttle.clone(), me.state.clone(), me.stdin.clone(), me.rec.clone());
             std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+                    let Some(line) = line else {
+                        throttle.send(oversized("codex"));
+                        continue;
+                    };
                     if let Some(rec) = &rec {
                         rec.line(&line);
                     }
@@ -164,10 +169,52 @@ impl CodexDriver {
         self.note("startup-session", stage, NoticeState::Running);
         let mut resumed = None;
         if !opts.resume.is_empty() {
-            match self.request("thread/resume", resume_params(opts), deadline) {
-                Ok(thread) => resumed = Some(thread),
+            let (method, params) = session_request(opts);
+            match self.request(method, params, deadline).and_then(|thread| {
+                if opts.fork && thread["thread"]["id"].as_str().is_none_or(str::is_empty) {
+                    Err("thread/fork returned no thread id".into())
+                } else {
+                    Ok(thread)
+                }
+            }) {
+                Ok(thread) => {
+                    let reverted = if opts.rollback.is_empty() {
+                        Ok(json!({}))
+                    } else {
+                        self.request(
+                            "thread/revert",
+                            json!({"threadId": opts.resume, "beforeTurnId": opts.rollback}),
+                            deadline,
+                        )
+                    };
+                    match reverted {
+                        Ok(_) => resumed = Some(thread),
+                        Err(e) => {
+                            let _ = self.tx.unbounded_send(Update::Notice(Notice::new("info-rollback", NoticeKind::Info, format!("Could not roll back the conversation natively ({e}). Started a fresh session with its history."))));
+                        }
+                    }
+                }
                 Err(e) => {
-                    let _ = self.tx.unbounded_send(Update::Notice(resume_notice(&e)));
+                    let notice = if !opts.rollback.is_empty() {
+                        Notice::new(
+                            "info-rollback",
+                            NoticeKind::Info,
+                            format!(
+                                "Could not roll back the conversation natively ({e}). Started a fresh session with its history."
+                            ),
+                        )
+                    } else if opts.fork {
+                        Notice::new(
+                            "info-fork",
+                            NoticeKind::Info,
+                            format!(
+                                "Could not fork the source conversation natively ({e}). Started a fresh session with its history."
+                            ),
+                        )
+                    } else {
+                        resume_notice(&e)
+                    };
+                    let _ = self.tx.unbounded_send(Update::Notice(notice));
                 }
             }
         }
@@ -346,6 +393,17 @@ pub(crate) fn thread_params(opts: &DriverStartOptions) -> Value {
     p
 }
 
+pub(crate) fn session_request(opts: &DriverStartOptions) -> (&'static str, Value) {
+    if opts.fork {
+        let mut params = thread_params(opts);
+        params["threadId"] = opts.resume.clone().into();
+        params["excludeTurns"] = true.into();
+        ("thread/fork", params)
+    } else {
+        ("thread/resume", resume_params(opts))
+    }
+}
+
 pub(crate) fn resume_params(opts: &DriverStartOptions) -> Value {
     let mut p = thread_params(opts);
     p["threadId"] = opts.resume.clone().into();
@@ -422,6 +480,9 @@ pub(crate) fn start_turn(s: &mut State, text: &str, images: &[Attachment]) -> Va
 }
 
 pub(crate) fn turn_started(s: &mut State, id: &str) -> Vec<Update> {
+    if s.turn_id.is_some() {
+        return vec![];
+    }
     s.turn_id = Some(id.to_string());
     if let Naming::Prompt(prompt) = &mut s.naming {
         let prompt = std::mem::take(prompt);
@@ -429,7 +490,7 @@ pub(crate) fn turn_started(s: &mut State, id: &str) -> Vec<Update> {
         let line = s.rpc("model/list", json!({}), Some(Call::Models(prompt)));
         s.outbox.push(line);
     }
-    let mut out = vec![];
+    let mut out = vec![Update::Accepted, Update::NativeTurn(id.to_string())];
     if s.cancelled {
         s.stale.insert(id.to_string());
         let line = interrupt(s);

@@ -146,6 +146,7 @@ impl ChatApp {
                         provider_icon(card.provider),
                         card.title,
                         card.place,
+                        card.gone,
                         relative_time(card.activity_ms, now, &chrono::Local),
                         move |window, cx| {
                             view.update(cx, |this, cx| this.select(card.ix, window, cx))

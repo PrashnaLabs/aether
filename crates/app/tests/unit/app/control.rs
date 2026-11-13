@@ -114,6 +114,7 @@ fn list_defaults_to_the_leads_project(cx: &mut TestAppContext) {
                 (row["project"].as_str(), row["state"].as_str()),
                 (Some("proj"), Some("running"))
             );
+            assert_eq!((&row["queued"], &row["cost"]), (&json!(0), &json!(0.0)));
         })
         .unwrap();
 }
@@ -166,18 +167,21 @@ fn unarchive_update_and_stop(cx: &mut TestAppContext) {
     window
         .update(cx, |app, window, cx| {
             app.chats[1].archived = true;
+            app.chats[1].parent = Some(10);
             let back = app.unarchive_chats(0, &json!({"filter": {}}), window, cx).unwrap();
             assert_eq!(back["unarchived"], 1);
             assert!(!app.chats[1].archived);
             let done = app
-                .update_chat(&json!({"id": 20, "title": " Renamed ", "pinned": true}), cx)
+                .update_chat(0, &json!({"id": 20, "title": " Renamed ", "pinned": true}), cx)
                 .unwrap();
             assert_eq!(done, json!({"id": 20, "title": "Renamed", "pinned": true}));
             assert!(
-                app.update_chat(&json!({"id": 20}), cx).unwrap_err().contains("nothing to change")
+                app.update_chat(0, &json!({"id": 20}), cx)
+                    .unwrap_err()
+                    .contains("nothing to change")
             );
             assert_eq!(
-                app.update_chat(&json!({"id": 99, "title": "x"}), cx).unwrap_err(),
+                app.update_chat(0, &json!({"id": 99, "title": "x"}), cx).unwrap_err(),
                 "chat 99 not found"
             );
             assert_eq!(
@@ -188,6 +192,77 @@ fn unarchive_update_and_stop(cx: &mut TestAppContext) {
                 app.stop_any_chat(0, &json!({"id": 20}), cx).unwrap(),
                 json!({"stopped": false})
             );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn update_chat_allows_caller_and_direct_child_but_rejects_unrelated_targets(
+    cx: &mut TestAppContext,
+) {
+    let window = app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            // The caller index is explicit: chat 10 is the lead; chat 20 is its direct child.
+            app.chats[1].parent = Some(10);
+            app.update_chat(0, &json!({"id": 10, "title": "Lead renamed"}), cx).unwrap();
+            app.update_chat(0, &json!({"id": 20, "title": "Child renamed", "pinned": true}), cx)
+                .unwrap();
+            assert_eq!(app.chats[0].title.as_ref(), "Lead renamed");
+            assert_eq!(app.chats[1].title.as_ref(), "Child renamed");
+            assert!(app.chats[1].pinned);
+
+            let before_title = app.chats[2].title.clone();
+            let before_pinned = app.chats[2].pinned;
+            assert!(app.update_chat(0, &json!({"id": 21, "title": "Intrusion"}), cx).is_err());
+            assert!(app.update_chat(0, &json!({"id": 21, "pinned": false}), cx).is_err());
+            assert_eq!(app.chats[2].title, before_title);
+            assert_eq!(app.chats[2].pinned, before_pinned);
+
+            // Authorization must precede all mutation, including when a request mixes fields.
+            assert!(
+                app.update_chat(0, &json!({"id": 21, "title": "Partial", "pinned": false}), cx)
+                    .is_err()
+            );
+            assert_eq!(app.chats[2].title, before_title);
+            assert_eq!(app.chats[2].pinned, before_pinned);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn update_chat_refuses_a_fourth_pin_in_a_project(cx: &mut TestAppContext) {
+    let window = app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            for ix in [1, 3, 4] {
+                app.chats[ix].parent = Some(10);
+            }
+            app.update_chat(0, &json!({"id": 10, "pinned": true}), cx).unwrap();
+            app.update_chat(0, &json!({"id": 20, "pinned": true}), cx).unwrap();
+            assert_eq!(
+                app.update_chat(0, &json!({"id": 23, "pinned": true}), cx).unwrap_err(),
+                "Up to 3 pinned chats per project; unpin one first."
+            );
+            assert!(!app.chats[4].pinned);
+            app.update_chat(0, &json!({"id": 22, "pinned": true}), cx).unwrap();
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn update_chat_lets_an_org_ceo_manage_its_heads(cx: &mut TestAppContext) {
+    use crate::org::model::{Head, Org};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            let head = |role: &str, chat: i64| Head { chat: Some(chat), ..Head::new(role, 2) };
+            app.org
+                .orgs
+                .push(Org { heads: vec![head("CEO", 10), head("ENG", 21)], ..Org::default() });
+            app.update_chat(0, &json!({"id": 21, "pinned": false}), cx).unwrap();
+            assert!(!app.chats[2].pinned);
+            assert!(app.update_chat(2, &json!({"id": 10, "title": "x"}), cx).is_err());
         })
         .unwrap();
 }
@@ -294,6 +369,123 @@ fn read_history_pages_this_chats_messages_with_tools(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn read_history_pages_and_reads_items(cx: &mut TestAppContext) {
+    use aether_core::{ToolCall, ToolDetail, Update};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            app.chats[1].messages[1].apply(Update::Tool(ToolCall::new(
+                "1",
+                "T",
+                ToolDetail::Command {
+                    command: "echo test".into(),
+                    cwd: None,
+                    output: "界".repeat(600),
+                    exit_code: Some(0),
+                },
+            )));
+            let first = app.read_history(1, &json!({"view": "items", "limit": 1})).unwrap();
+            assert_eq!(first["items"][0]["item"], "0");
+            assert_eq!(first["next_position"], 0);
+            let next = app
+                .read_history(
+                    1,
+                    &json!({"view": "items", "after_position": first["next_position"], "limit": 1}),
+                )
+                .unwrap();
+            assert_eq!(next["items"][0]["position"], 1);
+            assert_eq!(next["items"][0]["item"], "1.0");
+            assert_eq!(next["items"][0]["kind"], "command_execution");
+            assert_eq!(next["next_position"], 1);
+            let last = app.read_history(1, &json!({"view": "items", "after_position": 1})).unwrap();
+            assert_eq!(last["items"][0]["item"], "1");
+            assert!(last.get("next_position").is_none());
+            let one = app.read_history(1, &json!({"item": "1.0", "max_chars": 500})).unwrap();
+            assert_eq!(one["item"], "1.0");
+            assert_eq!(one["next_text_offset"], 500);
+            let rest = app
+                .read_history(1, &json!({"view": "items", "item": "1.0", "text_offset": 500}))
+                .unwrap();
+            assert_eq!(
+                format!("{}{}", one["text"].as_str().unwrap(), rest["text"].as_str().unwrap()),
+                format!("Command: echo test\nExit code: 0\n{}", "界".repeat(600))
+            );
+            assert_eq!(
+                app.read_history(1, &json!({"item": "missing"})),
+                Err("no item missing".into())
+            );
+            assert_eq!(
+                app.read_history(0, &json!({"id": 20, "item": "1.0"})).unwrap()["item"],
+                "1.0"
+            );
+            assert!(app.read_history(1, &json!({"id": 22, "view": "items"})).is_err());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn read_history_pages_long_message_text(cx: &mut TestAppContext) {
+    use aether_core::{ToolCall, ToolDetail, Update};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            let text = "abcdefghij".repeat(75);
+            let reply = &mut app.chats[1].messages[1];
+            reply.text = text.clone();
+            reply.error = Some("failed\nmore detail".into());
+            reply.apply(Update::Tool(ToolCall::new(
+                "1",
+                "T",
+                ToolDetail::Read { path: "README.md".into(), range: None },
+            )));
+            let first =
+                app.read_history(1, &json!({"offset": 1, "limit": 1, "max_chars": 500})).unwrap();
+            let first = &first["messages"][0];
+            assert_eq!(first["next_text_offset"], 500);
+            assert_eq!(first["tools"], json!(["- Read README.md"]));
+            assert_eq!(first["error"], "failed");
+            let last = app
+                .read_history(
+                    1,
+                    &json!({"offset": 1, "limit": 1, "max_chars": 500,
+                    "text_offset": first["next_text_offset"]}),
+                )
+                .unwrap();
+            let last = &last["messages"][0];
+            assert!(last.get("next_text_offset").is_none());
+            assert!(last.get("tools").is_none());
+            assert!(last.get("error").is_none());
+            assert_eq!(
+                format!("{}{}", first["text"].as_str().unwrap(), last["text"].as_str().unwrap()),
+                text
+            );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn read_history_slices_multibyte_text_by_character(cx: &mut TestAppContext) {
+    let window = app(cx);
+    window
+        .update(cx, |app, _, _| {
+            app.chats[1].messages[1].text = format!("é{}終", "🦀".repeat(500));
+            let first = app
+                .read_history(
+                    1,
+                    &json!({"offset": 1, "limit": 1, "max_chars": 500, "text_offset": 1}),
+                )
+                .unwrap();
+            assert_eq!(first["messages"][0]["text"], "🦀".repeat(500));
+            assert_eq!(first["messages"][0]["next_text_offset"], 501);
+            let last =
+                app.read_history(1, &json!({"offset": 1, "limit": 1, "text_offset": 501})).unwrap();
+            assert_eq!(last["messages"][0]["text"], "終");
+            assert!(last["messages"][0].get("next_text_offset").is_none());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
     let window = app(cx);
     window
@@ -301,6 +493,7 @@ fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
             let mut call = |lead: &str, tool: &str| {
                 let (reply, answer) = std::sync::mpsc::channel();
                 let call = aether_agent::orchestrator::OrchCall {
+                    deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
                     lead: lead.into(),
                     tool: tool.into(),
                     args: json!({}),
@@ -318,7 +511,7 @@ fn non_leads_get_read_history_only(cx: &mut TestAppContext) {
             };
             assert_eq!(
                 names(call("20", "list_tools").unwrap()),
-                ["list_cards", "add_card", "move_card", "update_card", "read_history"]
+                ["list_cards", "add_card", "read_card", "move_card", "update_card", "read_history"]
             );
             assert!(names(call("10", "list_tools").unwrap()).len() > 1);
             assert!(call("20", "read_history").is_ok());

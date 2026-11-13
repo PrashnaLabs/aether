@@ -53,4 +53,15 @@ for tag, size in [(b'icp4', 16), (b'icp5', 32), (b'icp6', 64), (b'ic07', 128),
     data = (icons / f'{size}.png').read_bytes()
     chunks += tag + struct.pack('>I', len(data) + 8) + data
 (icons / 'Aether.icns').write_bytes(b'icns' + struct.pack('>I', len(chunks) + 8) + chunks)
+
+# Windows uses PNG-backed ICO entries up to 256px, encoded as 0 in the directory.
+sizes = (16, 32, 48, 64, 128, 256)
+entries, images = b'', b''
+offset = 6 + 16 * len(sizes)
+for size in sizes:
+    data = (icons / f'{size}.png').read_bytes()
+    entries += struct.pack('<BBBBHHII', size % 256, size % 256, 0, 0, 1, 32, len(data), offset)
+    images += data
+    offset += len(data)
+(icons / 'Aether.ico').write_bytes(struct.pack('<HHH', 0, 1, len(sizes)) + entries + images)
 PY

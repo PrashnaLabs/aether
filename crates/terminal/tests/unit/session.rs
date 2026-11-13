@@ -79,6 +79,29 @@ fn other_terminals_variables_are_dropped() {
 }
 
 #[test]
+fn orchestration_secrets_are_dropped_from_pty_env() {
+    let names = [
+        "AETHER_ORCH_SOCK",
+        "AETHER_ORCH_TOKEN",
+        "AETHER_ORCH_SPECS",
+        "AETHER_ORCH_CUSTOM",
+        "OPENCODE_CONFIG_CONTENT",
+        "SAFE_VAR",
+    ];
+    let found = foreign_terminal_vars(names.iter().map(|s| s.to_string()));
+    assert_eq!(
+        found,
+        [
+            "AETHER_ORCH_CUSTOM",
+            "AETHER_ORCH_SOCK",
+            "AETHER_ORCH_SPECS",
+            "AETHER_ORCH_TOKEN",
+            "OPENCODE_CONFIG_CONTENT"
+        ]
+    );
+}
+
+#[test]
 #[ignore = "spawns a real shell"]
 fn smoke_shell_output_reaches_the_grid() {
     let size = WindowSize { num_lines: 8, num_cols: 40, cell_width: 8, cell_height: 18 };

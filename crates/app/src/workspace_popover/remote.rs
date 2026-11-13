@@ -149,7 +149,7 @@ impl ChatApp {
                     Err(e) => this.pop_error(e, cx),
                     Ok(()) => {
                         let pop = &this.workspace_pop;
-                        if pop.open && pop.view == PopView::Publish {
+                        if pop.view == PopView::Publish {
                             this.pop_view(PopView::Main, window, cx);
                         }
                     }

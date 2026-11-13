@@ -22,10 +22,10 @@ pub use request::{
 };
 pub use settings::{
     AccessMode, Appearance, ChatDetail, ChatLayout, CornerStyle, DateFormat, FooterChips, IconPack,
-    NotesEditor, NotesSettings, NotifyDelivery, NotifySound, ProjectScript, Provider, Reasoning,
-    Settings, SidebarGrouping, SidebarOrdering, SidebarStyle, THEME_FAMILIES, TerminalCursor,
-    TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, Watch, WatchCorner,
-    effort_label, effort_levels, family_index, toggle_watch,
+    NotesEditor, NotesSettings, NotifyDelivery, NotifySound, OrgHire, OrgLayout, ProjectScript,
+    Provider, Reasoning, Settings, SidebarGrouping, SidebarOrdering, SidebarStyle, THEME_FAMILIES,
+    TerminalCursor, TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, Watch,
+    WatchCorner, effort_label, effort_levels, family_index, toggle_watch,
 };
 pub use skill::{
     Skill, SkillSource, complete_skill, mention_at, mentioned_skills, valid_skill_name,
@@ -305,6 +305,8 @@ fn lenient_steps<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Step>, D:
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
+    /// The CLI took the prompt into its native session.
+    Accepted,
     Delta(String),
     /// Full text of the current model turn; replaces that turn's deltas.
     Final(String),
@@ -340,6 +342,8 @@ pub enum Update {
     Title(String),
     /// The CLI session's resume id; UI-only.
     Session(String),
+    /// Native id of the current turn, used to roll back.
+    NativeTurn(String),
     /// The CLI started a turn on its own, e.g. woken by finished background work.
     Wake,
     /// Upserts one tool step by `id`.
@@ -481,11 +485,21 @@ pub struct Handoff {
     pub to_model: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SentWith {
+    pub model: String,
+    pub effort: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(default)]
+    pub native_turn: Option<String>,
     pub role: Role,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff: Option<Handoff>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_with: Option<SentWith>,
     pub text: String,
     #[serde(deserialize_with = "lenient_steps")]
     pub steps: Vec<Step>,
@@ -542,8 +556,10 @@ impl Message {
     pub fn user(text: impl Into<String>) -> Self {
         let text = text.into();
         Self {
+            native_turn: None,
             role: Role::User,
             handoff: None,
+            sent_with: None,
             turn_start: text.len(),
             text,
             steps: Vec::new(),
@@ -572,8 +588,10 @@ impl Message {
 
     pub fn assistant() -> Self {
         Self {
+            native_turn: None,
             role: Role::Assistant,
             handoff: None,
+            sent_with: None,
             text: String::new(),
             steps: Vec::new(),
             step_positions: Vec::new(),
@@ -625,6 +643,7 @@ impl Message {
             self.close_thinking();
         }
         match update {
+            Update::NativeTurn(id) => self.native_turn = Some(id),
             Update::Delta(text) if !text.is_empty() => {
                 self.begin_turn();
                 self.text.push_str(&text);
@@ -698,7 +717,11 @@ impl Message {
                 status: RequestStatus::Pending,
                 asked_ms: now_ms(),
             }),
-            Update::Title(_) | Update::Session(_) | Update::Wake | Update::SteerRefused(_) => {}
+            Update::Title(_)
+            | Update::Session(_)
+            | Update::Wake
+            | Update::SteerRefused(_)
+            | Update::Accepted => {}
             Update::Tool(call) => {
                 let id = call.id.clone();
                 let ends = matches!(

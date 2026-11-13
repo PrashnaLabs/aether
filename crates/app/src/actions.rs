@@ -28,6 +28,7 @@ actions!(
         PreviousSessionPane,
         CycleTileLayout,
         CycleChatLayout,
+        CycleOrgLayout,
         SwapSessionLeft,
         SwapSessionRight,
         SwapSessionUp,
@@ -57,6 +58,7 @@ actions!(
         SaveSelectionToNote,
         OpenUsage,
         OpenBoard,
+        OpenOrg,
         ToggleHackerNews,
         BackToChat,
         SearchWorkspace,
@@ -116,6 +118,7 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("alt-n", OpenNotes, None),
         KeyBinding::new("alt-b", OpenBoard, None),
+        KeyBinding::new("alt-o", OpenOrg, None),
         KeyBinding::new("secondary-shift-n", SearchNotes, None),
         KeyBinding::new(
             "/",

@@ -9,12 +9,13 @@ use aether_ui::{
 };
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Sizable, StyledExt,
+    ActiveTheme, Icon, IconName, Sizable, StyledExt, WindowExt,
     button::ButtonVariants,
     h_flex,
     input::{Editor, RopeExt},
     kbd::Kbd,
     menu::PopupMenuItem,
+    notification::Notification,
     v_flex,
 };
 use gpui_kit::{
@@ -336,7 +337,19 @@ impl ChatApp {
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if let Some(id) = buffer_id {
-                            if this.explorer_markdown_source.remove(&id) {
+                            if this.explorer_markdown_source.contains(&id) {
+                                let heavy =
+                                    this.active_explorer_editor(window, cx).is_some_and(|e| {
+                                        too_big_to_preview(&e.read(cx).text().to_string())
+                                    });
+                                if heavy {
+                                    window.push_notification(
+                                        Notification::warning("This file is too large to preview"),
+                                        cx,
+                                    );
+                                    return;
+                                }
+                                this.explorer_markdown_source.remove(&id);
                                 window.blur(cx);
                             } else {
                                 this.explorer_markdown_source.insert(id);
@@ -607,6 +620,11 @@ impl ChatApp {
             })
             .into_any_element()
     }
+}
+
+// preview layout grows ~quadratically: 256 KB ≈ 0.6 s, 1 MB ≈ 13 s, 2.8 MB froze
+pub(super) fn too_big_to_preview(text: &str) -> bool {
+    text.len() > 256 * 1024 || text.lines().any(|line| line.len() > 10_000)
 }
 
 pub(super) fn is_markdown_file(path: &Path) -> bool {

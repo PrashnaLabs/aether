@@ -2,6 +2,30 @@ use super::*;
 use aether_core::AccessMode;
 
 #[test]
+fn fork_request_returns_child_and_rejects_failures() {
+    let child = fork_session("ses_source", |path, body| {
+        assert_eq!(path, "/api/session/ses_source/fork");
+        assert_eq!(body, json!({"before": null}));
+        Ok(json!({"data": {"id": "ses_child"}}))
+    })
+    .unwrap();
+    assert_eq!(child["data"]["id"], "ses_child");
+    assert!(fork_session("ses_source", |_, _| Err("failed".into())).is_err());
+    assert!(fork_session("ses_source", |_, _| Ok(json!({"data": {}}))).is_err());
+}
+
+#[test]
+fn failed_fork_selects_fresh_session_and_notifies() {
+    use futures::StreamExt;
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    assert!(fork_or_fresh("ses_source", &tx, |_, _| Err("failed".into())).is_none());
+    let update = futures::executor::block_on(rx.next()).unwrap();
+    assert!(
+        matches!(update, Update::Notice(n) if n.id == "info-fork" && n.text == "Could not fork the source conversation natively (failed). Started a fresh session with its history.")
+    );
+}
+
+#[test]
 fn lost_resume_notice_only_when_a_resume_was_requested_but_not_possible() {
     let notice = lost_resume(true, false).unwrap();
     assert_eq!(notice.id, "info-resume");
@@ -23,6 +47,8 @@ fn create_body_carries_location_and_model_ref() {
         effort: "high".into(),
         access: AccessMode::Ask,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -77,9 +103,37 @@ fn minted_ids_match_opencode_format() {
 fn sse_frames_split_on_blank_lines() {
     let mut buf =
         b"data: {\"type\":\"a\"}\n\n: heartbeat\n\ndata: {\"type\":\"b\"}\n\ndata: {\"ty".to_vec();
-    let types: Vec<Value> = frames(&mut buf).into_iter().map(|v| v["type"].clone()).collect();
+    let (events, dropped) = frames(&mut buf, &mut false, 1000);
+    let types: Vec<Value> = events.into_iter().map(|v| v["type"].clone()).collect();
     assert_eq!(types, ["a", "b"]);
+    assert!(!dropped);
     assert_eq!(buf, b"data: {\"ty");
+}
+
+#[test]
+fn an_oversized_sse_frame_is_dropped_and_the_next_one_still_parses() {
+    let mut skipping = false;
+    let mut buf = b"data: {\"type\":\"a\"}\n\ndata: ".to_vec();
+    buf.extend(vec![b'x'; 100]);
+    let (events, dropped) = frames(&mut buf, &mut skipping, 50);
+    assert_eq!((events.len(), dropped, skipping), (1, true, true));
+    assert!(buf.len() <= 1);
+
+    buf.extend(vec![b'y'; 100]);
+    assert_eq!(frames(&mut buf, &mut skipping, 50), (vec![], false));
+    assert!(skipping && buf.len() <= 1);
+
+    buf.extend(b"\n\ndata: {\"type\":\"b\"}\n\n");
+    let (events, dropped) = frames(&mut buf, &mut skipping, 50);
+    assert_eq!((events[0]["type"].clone(), dropped, skipping), ("b".into(), false, false));
+    assert!(buf.is_empty());
+}
+
+#[test]
+fn an_oversized_sse_frame_that_arrives_whole_is_dropped() {
+    let mut buf = format!("data: {}\n\ndata: {{\"type\":\"b\"}}\n\n", "x".repeat(100)).into_bytes();
+    let (events, dropped) = frames(&mut buf, &mut false, 50);
+    assert_eq!((events.len(), dropped), (1, true));
 }
 
 #[test]
@@ -373,4 +427,32 @@ fn a_failed_active_listing_settles_nothing() {
     assert_eq!(relink(&mut s, &messages(), None, |_| Some(ToolStatus::Stopped)), []);
     assert!(s.background.contains_key("call_old"));
     assert_eq!(s.restored, ["call_bg"], "kept for the next relink");
+}
+
+#[test]
+fn rollback_stages_and_commits_or_clears_on_failure() {
+    let mut calls = Vec::new();
+    rollback_session("ses_1", "msg_1", |method, path, body| {
+        calls.push((method, path.to_string(), body));
+        Ok(json!({}))
+    })
+    .unwrap();
+    assert_eq!(
+        calls[0],
+        (
+            Method::POST,
+            "/api/session/ses_1/revert/stage".into(),
+            Some(json!({"messageID":"msg_1", "files":false}))
+        )
+    );
+    assert_eq!(calls[1], (Method::POST, "/api/session/ses_1/revert/commit".into(), None));
+    let mut calls = Vec::new();
+    assert!(
+        rollback_session("ses_1", "msg_1", |method, path, _| {
+            calls.push((method.clone(), path.to_string()));
+            if path.ends_with("commit") { Err("failure".into()) } else { Ok(json!({})) }
+        })
+        .is_err()
+    );
+    assert_eq!(calls.last().unwrap(), &(Method::DELETE, "/api/session/ses_1/revert".into()));
 }

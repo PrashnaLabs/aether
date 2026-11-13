@@ -22,6 +22,7 @@ pub(crate) enum PaletteCommand {
     SessionLayout(crate::session_workspace::PaneAction),
     TileLayout(aether_core::TileLayout),
     ChatLayout(aether_core::ChatLayout),
+    OrgLayout(aether_core::OrgLayout),
     OpenChat(usize),
     SearchMatch {
         chat: usize,
@@ -98,6 +99,29 @@ fn matches(query: &str, terms: &[SharedString]) -> bool {
 
 type Row = (Item, Option<PaletteCommand>);
 
+fn session_pane_actions(
+    host: WindowId,
+) -> Vec<(&'static str, crate::session_workspace::PaneAction)> {
+    use crate::session_workspace::PaneAction as A;
+    let window_move = if host == 0 {
+        ("Open in new window", A::Detach)
+    } else {
+        ("Move back to main window", A::Return)
+    };
+    vec![
+        ("Split session right", A::SplitRight),
+        ("Split session left", A::SplitLeft),
+        ("Split session down", A::SplitDown),
+        ("Split session up", A::SplitUp),
+        ("Float session pane", A::Float),
+        ("Dock session pane", A::Dock),
+        window_move,
+        ("Maximize / restore session pane", A::Maximize),
+        ("Make session the main pane", A::Promote),
+        ("Hide session pane", A::Close),
+    ]
+}
+
 impl ChatApp {
     pub(crate) fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette_open {
@@ -154,6 +178,9 @@ impl ChatApp {
             Some(PaletteCommand::ChatLayout(layout)) => {
                 self.update_settings(cx, |s| s.chat_layout = layout)
             }
+            Some(PaletteCommand::OrgLayout(layout)) => {
+                self.update_settings(cx, |s| s.org_layout = layout)
+            }
             Some(PaletteCommand::OpenChat(chat)) => self.select(chat, window, cx),
             Some(PaletteCommand::SearchMatch { chat, message }) => {
                 self.jump_to_message(chat, message, window, cx)
@@ -171,9 +198,9 @@ impl ChatApp {
             Some(PaletteCommand::Model(id)) => self.pick_model(id, window, cx),
             Some(PaletteCommand::UseSkill(name)) => self.mention_skill(&name, window, cx),
             Some(PaletteCommand::RenameChat) => self.begin_rename(self.active, window, cx),
-            Some(PaletteCommand::TogglePin) => self.toggle_pin(self.active, cx),
+            Some(PaletteCommand::TogglePin) => self.toggle_pin(self.active, window, cx),
             Some(PaletteCommand::ToggleLead) => self.toggle_lead(self.active, window, cx),
-            Some(PaletteCommand::ArchiveChat) => self.archive_chat(self.active, window, cx),
+            Some(PaletteCommand::ArchiveChat) => self.confirm_archive_chat(self.active, window, cx),
             Some(PaletteCommand::DeleteChat) => self.confirm_delete_chat(self.active, window, cx),
             Some(PaletteCommand::RemoveWorktree) => self.remove_worktree(self.active, window, cx),
             Some(PaletteCommand::CleanUpWorktrees) => self.open_worktrees(cx),
@@ -198,6 +225,7 @@ impl ChatApp {
                 }
                 crate::app::SidebarView::Outside => self.switch_sidebar_to_outside(cx),
                 crate::app::SidebarView::Archived => self.switch_sidebar_to_archive(cx),
+                crate::app::SidebarView::Org => self.open_org_page(None, cx),
             },
             Some(PaletteCommand::FilterChats(state)) => {
                 self.toggle_palette(window, cx);
@@ -214,25 +242,15 @@ impl ChatApp {
 
         groups.push((
             "Session panes",
-            [
-                ("Split session right", crate::session_workspace::PaneAction::SplitRight),
-                ("Split session down", crate::session_workspace::PaneAction::SplitDown),
-                ("Float session pane", crate::session_workspace::PaneAction::Float),
-                ("Dock session pane", crate::session_workspace::PaneAction::Dock),
-                ("Move session to desktop window", crate::session_workspace::PaneAction::Detach),
-                ("Return session to main window", crate::session_workspace::PaneAction::Return),
-                ("Maximize / restore session pane", crate::session_workspace::PaneAction::Maximize),
-                ("Make session the main pane", crate::session_workspace::PaneAction::Promote),
-                ("Hide session pane", crate::session_workspace::PaneAction::Close),
-            ]
-            .into_iter()
-            .map(|(label, action)| {
-                (
-                    item(label).icon(IconName::PanelRight),
-                    Some(PaletteCommand::SessionLayout(action)),
-                )
-            })
-            .collect(),
+            session_pane_actions(host)
+                .into_iter()
+                .map(|(label, action)| {
+                    (
+                        item(label).icon(IconName::PanelRight),
+                        Some(PaletteCommand::SessionLayout(action)),
+                    )
+                })
+                .collect(),
         ));
         groups.push((
             "Layout",
@@ -266,6 +284,27 @@ impl ChatApp {
             })
             .collect(),
         ));
+        if self.settings.org_enabled {
+            groups.push((
+                "Organization",
+                std::iter::once((
+                    item("Organization")
+                        .icon(gpui_kit::assets::IconName::Users)
+                        .keywords(["org", "company", "heads", "ceo", "team"])
+                        .action(Box::new(crate::actions::OpenOrg)),
+                    None,
+                ))
+                .chain(aether_core::OrgLayout::ALL.into_iter().map(|layout| {
+                    (
+                        item(format!("Organization layout: {}", layout.label()))
+                            .keywords(["org layout", "roster", "chart", "round table"])
+                            .checked(self.settings.org_layout == layout),
+                        Some(PaletteCommand::OrgLayout(layout)),
+                    )
+                }))
+                .collect(),
+            ));
+        }
         let mut chat = vec![
             action_row("New chat", IconName::Plus, Box::new(NewChat)),
             (

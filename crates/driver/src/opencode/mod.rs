@@ -17,6 +17,7 @@ use super::{Driver, DriverStartOptions};
 mod events;
 mod service;
 mod session;
+pub use session::located;
 
 pub use events::is_placeholder_title;
 pub use service::{Api, kill_lead_servers, service_api, service_reachable};
@@ -96,6 +97,7 @@ struct State {
     turn: u64,
     /// Inbox id of the turn's prompt.
     prompt: String,
+    native_turn_recorded: bool,
     /// Unix ms the turn started at.
     started: u64,
     dead: Option<String>,
@@ -161,6 +163,7 @@ impl OpencodeDriver {
 }
 
 fn on_prompt(s: &mut State) {
+    s.native_turn_recorded = false;
     s.active = true;
     s.cancelled = false;
     s.turn += 1;
@@ -202,6 +205,11 @@ fn on_cancel(s: &mut State) -> bool {
     true
 }
 
+fn prompt_submitted(s: &mut State, id: String, tx: &UnboundedSender<Update>) {
+    s.prompt = id;
+    let _ = tx.unbounded_send(Update::Accepted);
+}
+
 impl Driver for OpencodeDriver {
     fn prompt(&mut self, text: String, images: Vec<Attachment>) {
         let Some(c) = &self.conn else {
@@ -218,7 +226,7 @@ impl Driver for OpencodeDriver {
         let sent = submit(c, &text, &images);
         let mut s = self.state.guard();
         match sent {
-            Ok(id) => s.prompt = id,
+            Ok(id) => prompt_submitted(&mut s, id, &self.tx),
             Err(e) if s.active && s.turn == turn => {
                 let _ = self.tx.unbounded_send(Update::Error(e));
                 for u in settle(&mut s) {

@@ -7,6 +7,7 @@ pub mod antigravity;
 pub mod catalog;
 pub mod claude;
 pub mod codex;
+mod lines;
 pub mod opencode;
 pub mod pi;
 pub mod record;
@@ -30,6 +31,8 @@ pub struct DriverStartOptions {
     pub effort: String,
     pub access: AccessMode,
     pub resume: String,
+    pub rollback: String,
+    pub fork: bool,
     /// Opened for a reply left unfinished at quit; one that ended meanwhile is closed out.
     pub reattach: bool,
     /// This chat's attachment folder, where tool result images are saved.
@@ -77,6 +80,8 @@ impl DriverStartOptions {
                     effort: String::new(),
                     access: AccessMode::default(),
                     resume: String::new(),
+                    rollback: String::new(),
+                    fork: false,
                     reattach: false,
                     attachments: None,
                     background: Vec::new(),
@@ -93,6 +98,8 @@ impl DriverStartOptions {
             effort: String::new(),
             access: AccessMode::default(),
             resume: String::new(),
+            rollback: String::new(),
+            fork: false,
             reattach: false,
             attachments: None,
             background: Vec::new(),

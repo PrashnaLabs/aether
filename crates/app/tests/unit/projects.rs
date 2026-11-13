@@ -44,7 +44,7 @@ fn rollup_prefers_needs_you_then_working_failed_done() {
     assert_eq!(rollup([Idle, Done, working]), working);
     assert_eq!(rollup([Done, Failed, Idle]), Failed);
     assert_eq!(rollup([working, Waiting, Failed]), Waiting);
-    assert_eq!(rollup([Quiet { since_ms: 0 }, Waiting]), Waiting);
+    assert_eq!(rollup([Quiet { since_ms: 0, turn_ms: 0 }, Waiting]), Waiting);
     assert_eq!(rollup([Done, Background(1)]), Background(1));
     assert_eq!(rollup([Idle, Done]), Done);
     assert_eq!(rollup([]), Idle);
@@ -56,7 +56,7 @@ fn agent_state_buckets_statuses() {
     let of = AgentState::of;
     assert_eq!(of(Waiting), AgentState::Blocked);
     assert_eq!(of(Working { since_ms: 0 }), AgentState::Working);
-    assert_eq!(of(Quiet { since_ms: 0 }), AgentState::Working);
+    assert_eq!(of(Quiet { since_ms: 0, turn_ms: 0 }), AgentState::Working);
     assert_eq!(of(Background(2)), AgentState::Working);
     assert_eq!(of(Done), AgentState::Done);
     assert_eq!(of(Idle), AgentState::Idle);
@@ -204,15 +204,75 @@ fn minimal_sections_group_by_time_or_project_and_order_rows() {
 fn focus_sections_put_what_needs_you_first() {
     use aether_ui::ChatStatus;
     let chats = [
-        (0, ChatStatus::Idle, 5),
-        (1, ChatStatus::Working { since_ms: 0 }, 4),
-        (2, ChatStatus::Waiting, 3),
-        (3, ChatStatus::Done, 9),
-        (4, ChatStatus::Idle, 7),
-        (5, ChatStatus::Quiet { since_ms: 0 }, 2),
+        (0, ChatStatus::Idle, 5, None),
+        (1, ChatStatus::Working { since_ms: 0 }, 4, None),
+        (2, ChatStatus::Waiting, 3, None),
+        (3, ChatStatus::Done, 9, None),
+        (4, ChatStatus::Idle, 7, None),
+        (5, ChatStatus::Quiet { since_ms: 0, turn_ms: 0 }, 2, None),
     ];
     assert_eq!(
         focus_sections(&chats),
         [("Needs you", vec![3, 2]), ("Working", vec![1, 5]), ("Recent", vec![4, 0])]
     );
+}
+
+#[test]
+fn lead_with_waiting_child_sits_in_needs_you() {
+    use aether_ui::ChatStatus;
+    let chats = [
+        (0, ChatStatus::Idle, 9, None),
+        (1, ChatStatus::Working { since_ms: 0 }, 8, Some(0)),
+        (2, ChatStatus::Waiting, 1, Some(1)),
+        (3, ChatStatus::Idle, 7, Some(0)),
+        (4, ChatStatus::Idle, 5, None),
+        (5, ChatStatus::Working { since_ms: 0 }, 4, None),
+    ];
+    assert_eq!(
+        focus_sections(&chats),
+        [("Needs you", vec![0, 1, 3, 2]), ("Working", vec![5]), ("Recent", vec![4])]
+    );
+}
+
+#[test]
+fn done_member_is_recent_but_done_lead_needs_you() {
+    use aether_ui::ChatStatus;
+    let mut chats = vec![
+        (0, ChatStatus::Idle, 9, None),
+        (1, ChatStatus::Done, 8, Some(0)),
+        (2, ChatStatus::Idle, 7, Some(0)),
+        (3, ChatStatus::Idle, 6, Some(0)),
+    ];
+    assert_eq!(focus_sections(&chats), [("Recent", vec![0, 1, 2, 3])]);
+    chats[0].1 = ChatStatus::Done;
+    assert_eq!(focus_sections(&chats), [("Needs you", vec![0, 1, 2, 3])]);
+}
+
+#[test]
+fn focus_section_count_counts_rows_needing_attention() {
+    use aether_ui::ChatStatus;
+    let mut chats = vec![(0, ChatStatus::Idle, 99, None)];
+    chats.push((1, ChatStatus::Waiting, 1, Some(0)));
+    chats.extend((2..16).map(|ix| (ix, ChatStatus::Idle, ix as i64 + 1, Some(0))));
+    let sections = focus_sections(&chats);
+    assert_eq!(sections.len(), 1);
+    let (label, rows) = &sections[0];
+    assert_eq!((*label, rows.len()), ("Needs you", 16));
+    let attention = rows.iter().filter(|&&ix| chats[ix].1 == ChatStatus::Waiting).count();
+    assert_eq!(attention, 1);
+}
+
+#[test]
+fn at_most_four_projects_pin_and_stale_pins_drop() {
+    let shown: Vec<PathBuf> = ["/a", "/b", "/c", "/d", "/e"].map(PathBuf::from).into();
+    let mut pins = vec!["/gone".to_string()];
+    for folder in ["/e", "/c", "/a", "/d"] {
+        assert!(toggle_pin(&mut pins, &shown, Path::new(folder)));
+    }
+    assert_eq!(pins, ["/e", "/c", "/a", "/d"]);
+    assert!(!toggle_pin(&mut pins, &shown, Path::new("/b")));
+    assert_eq!(pins, ["/e", "/c", "/a", "/d"]);
+    assert!(toggle_pin(&mut pins, &shown, Path::new("/c")));
+    assert!(toggle_pin(&mut pins, &shown, Path::new("/b")));
+    assert_eq!(pins, ["/e", "/a", "/d", "/b"]);
 }

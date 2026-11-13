@@ -481,6 +481,27 @@ fn extract_claude_token_and_sub(secret: &str) -> (Option<String>, Option<String>
     (None, None)
 }
 
+static CLAUDE_KEYCHAIN: std::sync::Mutex<Option<Option<(String, Option<String>)>>> =
+    std::sync::Mutex::new(None);
+
+fn read_claude_keychain() -> Option<(String, Option<String>)> {
+    let user = std::env::var("USER").unwrap_or_default();
+    for acct in [user.as_str(), "claude", ""] {
+        if let Ok(entry) = keyring::Entry::new("Claude Code-credentials", acct)
+            && let Ok(pwd) = entry.get_password()
+            && let (Some(tok), sub) = extract_claude_token_and_sub(&pwd)
+        {
+            return Some((tok, sub));
+        }
+    }
+    None
+}
+
+/// Drops the cached keychain credentials, e.g. after the token stopped working.
+pub fn forget_claude_credentials() {
+    *CLAUDE_KEYCHAIN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// Reads Claude credentials and optional subscription type from environment, system keychain, or local credentials files.
 pub fn read_claude_credentials(dir: Option<&Path>) -> Option<(String, Option<String>)> {
     // An account's dir holds its own file; env and the shared keychain entry are the default login's.
@@ -500,17 +521,12 @@ pub fn read_claude_credentials(dir: Option<&Path>) -> Option<(String, Option<Str
         return Some((tok.trim().to_string(), None));
     }
 
-    let user = std::env::var("USER").unwrap_or_default();
-    let candidates = [user.as_str(), "claude", ""];
-    for acct in candidates {
-        if let Ok(entry) = keyring::Entry::new("Claude Code-credentials", acct)
-            && let Ok(pwd) = entry.get_password()
-        {
-            let (token, sub) = extract_claude_token_and_sub(&pwd);
-            if let Some(tok) = token {
-                return Some((tok, sub));
-            }
-        }
+    // keychain read can raise a blocking macOS password prompt: ask once, reuse until forgotten
+    let mut cached = CLAUDE_KEYCHAIN.lock().unwrap_or_else(|e| e.into_inner());
+    let found = cached.get_or_insert_with(read_claude_keychain).clone();
+    drop(cached);
+    if found.is_some() {
+        return found;
     }
 
     let home = home_dir();

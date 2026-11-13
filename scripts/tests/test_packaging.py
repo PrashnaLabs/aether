@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -43,6 +44,23 @@ class PackagingTests(unittest.TestCase):
         if shutil.which("desktop-file-validate"):
             subprocess.run(["desktop-file-validate", desktop], check=True)
 
+    def test_tar_filter_normalizes_ownership_and_permissions(self):
+        import tarfile
+        ti_file = tarfile.TarInfo("test_file")
+        ti_file.type = tarfile.REGTYPE
+        ti_file.mode = 0o600
+        ti_file.uid = 1000
+        ti_file.gid = 1000
+        filtered = build.tar_filter(ti_file)
+        self.assertEqual((filtered.uid, filtered.gid, filtered.uname, filtered.gname), (0, 0, "root", "root"))
+        self.assertEqual(filtered.mode, 0o644)
+
+        ti_dir = tarfile.TarInfo("test_dir")
+        ti_dir.type = tarfile.DIRTYPE
+        ti_dir.mode = 0o700
+        filtered_dir = build.tar_filter(ti_dir)
+        self.assertEqual(filtered_dir.mode, 0o755)
+
     def test_icon_dimensions_and_icns_chunks(self):
         for size in (16, 32, 48, 64, 128, 256, 512, 1024):
             data = (build.ICONS / f"{size}.png").read_bytes()
@@ -60,6 +78,21 @@ class PackagingTests(unittest.TestCase):
             chunks += 1
         self.assertEqual(offset, len(data))
         self.assertEqual(chunks, 7)
+
+    def test_windows_icon_contains_existing_artwork_at_each_size(self):
+        data = (build.ICONS / "Aether.ico").read_bytes()
+        sizes = (16, 32, 48, 64, 128, 256)
+        self.assertEqual(struct.unpack_from("<HHH", data), (0, 1, len(sizes)))
+        expected_offset = 6 + 16 * len(sizes)
+        for index, size in enumerate(sizes):
+            width, height, colors, reserved, planes, depth, length, offset = struct.unpack_from(
+                "<BBBBHHII", data, 6 + 16 * index)
+            self.assertEqual((width or 256, height or 256), (size, size))
+            self.assertEqual((colors, reserved, planes, depth), (0, 0, 1, 32))
+            self.assertEqual(offset, expected_offset)
+            self.assertEqual(data[offset:offset + length], (build.ICONS / f"{size}.png").read_bytes())
+            expected_offset += length
+        self.assertEqual(len(data), expected_offset)
 
     def test_env_value_reads_dotenv_when_environment_lacks_key(self):
         env = self.root / ".env"
@@ -99,7 +132,7 @@ class PackagingTests(unittest.TestCase):
 
     def test_invalid_format_fails_before_build(self):
         fmt = "deb" if platform.system() == "Darwin" else "dmg"
-        result = subprocess.run(["python3", SCRIPT, "--format", fmt], capture_output=True)
+        result = subprocess.run([sys.executable, SCRIPT, "--format", fmt], capture_output=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn(b"unsupported", result.stderr)
 

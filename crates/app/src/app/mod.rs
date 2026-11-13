@@ -60,7 +60,7 @@ mod worktree;
 
 pub(crate) use chat::Bulk;
 pub(crate) use format::{chat_markdown, display_path, format_full, format_time, now_ms};
-pub(crate) use providers::picker_value;
+pub(crate) use providers::{picker_value, stored_model};
 use sidebar::folder_label;
 use worktree::SetupJob;
 
@@ -77,6 +77,7 @@ pub(crate) enum Page {
     HackerNews,
     Notes,
     Board,
+    Org,
 }
 
 pub(crate) const CLIS: [Provider; 5] =
@@ -96,9 +97,15 @@ pub(crate) enum SidebarView {
     DirectChats,
     Outside,
     Archived,
+    Org,
 }
 
 impl SidebarView {
+    /// Org lasts only while the Org page shows; off it the view goes `back`.
+    pub(crate) fn off_org(self, page: Page, back: Self) -> Self {
+        if self == Self::Org && page != Page::Org { back } else { self }
+    }
+
     /// View listing a just-selected chat; Outside keeps chats an outside agent holds.
     fn after_select(self, agent: bool, locked: bool) -> Self {
         match self {
@@ -134,6 +141,10 @@ pub(crate) struct Chat {
     pub(crate) effort: String,
     /// Provider's own resume id for this chat's CLI session.
     pub(crate) cli_session: String,
+    pub(crate) fork_from: String,
+    pub(crate) rollback_to: String,
+    pub(crate) agent_sessions: Vec<aether_agent::AgentSession>,
+    pub(crate) handoff_seen: Option<aether_agent::HandoffSeen>,
     pub queue: Vec<Queued>,
     pub stopped: bool,
     /// Outside agent this chat was opened from; read-only while it runs.
@@ -209,7 +220,7 @@ pub(crate) fn chat_status(f: &StatusFacts, now_ms: i64) -> ChatStatus {
         } else if f.retrying {
             ChatStatus::Retrying
         } else if quiet {
-            ChatStatus::Quiet { since_ms: anchor }
+            ChatStatus::Quiet { since_ms: anchor, turn_ms: f.turn_at }
         } else {
             ChatStatus::Working { since_ms: f.turn_at }
         };
@@ -254,7 +265,7 @@ enum WorktreeJob {
 }
 
 /// Sidebar group of a CLI chat: the folder it started in, even once it runs in a worktree.
-fn project_dir(chat: &Chat, workspace_root: &str) -> PathBuf {
+pub(crate) fn project_dir(chat: &Chat, workspace_root: &str) -> PathBuf {
     if chat.project.is_empty() {
         chat_cwd(chat, workspace_root)
     } else {
@@ -292,7 +303,7 @@ impl Chat {
         }
     }
 
-    fn context_used(&self) -> u64 {
+    pub(crate) fn context_used(&self) -> u64 {
         self.messages
             .iter()
             .rev()
@@ -481,6 +492,11 @@ pub(crate) struct ChatApp {
     chat_id_highwater: i64,
     stopped_by_lead: HashSet<i64>,
     spawn_nonces: HashMap<(i64, String), serde_json::Value>,
+    /// (lead id, spawn_agent args) waiting for a free agent slot, oldest first.
+    // ponytail: in memory only; a restart drops queued spawns
+    pub(crate) spawn_queue: Vec<(i64, serde_json::Value)>,
+    /// Highest card id ever handed out; new cards count up from it.
+    pub(crate) card_seq: i64,
     pub(crate) session_views: HashMap<i64, SessionState>,
     pub(crate) session_subscriptions: HashMap<i64, Vec<Subscription>>,
     pub(crate) session_windows: HashMap<i64, gpui_kit::WindowId>,
@@ -523,11 +539,12 @@ pub(crate) struct ChatApp {
     detected_provider: Option<Provider>,
     pub(crate) sys_sample: Option<crate::sysinfo::Sample>,
     pub(crate) usage_pop: status_bar::UsagePop,
+    pub(crate) org_pop: status_bar::OrgPop,
     pub(crate) crew_pop: bool,
     pub(crate) crew_pop_trigger: TriggerBounds,
     pub(crate) show_usage_limits: bool,
     /// Dollars per token per model, from OpenRouter's model list.
-    model_prices: HashMap<String, (f64, f64)>,
+    pub(crate) model_prices: HashMap<String, (f64, f64)>,
     pub(crate) settings: Settings,
     api_key: Option<String>,
     pub(crate) key_status: SharedString,
@@ -539,6 +556,9 @@ pub(crate) struct ChatApp {
     /// The rename field sits in the chat's tab instead of its sidebar row.
     pub(crate) rename_in_tab: bool,
     pub(crate) rename_input: Entity<InputState>,
+    pub(crate) sidebar_search: Entity<InputState>,
+    /// The search field shows instead of its Search row; closes on blur when empty.
+    pub(crate) sidebar_search_open: bool,
     pub(crate) worktree_name_input: Entity<InputState>,
     pub(crate) worktree_base_select: Option<Entity<BranchSelectState>>,
     pub(crate) pending_worktree_dialog: bool,
@@ -550,7 +570,7 @@ pub(crate) struct ChatApp {
     pub(crate) branches: HashMap<PathBuf, Option<BranchInfo>>,
     pub(crate) missing_folders: HashSet<PathBuf>,
     pub(crate) missing_attachments: HashSet<PathBuf>,
-    refreshing_branches: bool,
+    pub(crate) refreshing_branches: bool,
     /// A refresh was asked for while one ran; run a full pass after it.
     branches_stale: bool,
     /// Base branches per draft folder; `None` outside a git repo.
@@ -619,6 +639,14 @@ pub(crate) struct ChatApp {
     pub(crate) btw: HashMap<i64, chat::BtwThread>,
     /// Whether the BTW panel shows (right sidebar in Tabbed, a tab otherwise).
     pub(crate) btw_open: bool,
+    /// Whether the Workspace sidebar shows in the Tabbed layout.
+    pub(crate) workspace_open: bool,
+    pub(crate) inventory: crate::context_panel::InventoryCache,
+    pub(crate) context_expanded: HashSet<&'static str>,
+    pub(crate) connectors_all: bool,
+    pub(crate) subagents_all: bool,
+    /// Provider and folder whose CLI is being asked for its context report.
+    pub(crate) probing: Option<(aether_core::Provider, Option<PathBuf>)>,
     /// Window controls ride the main window's top-right tab bar instead of a title bar row.
     pub(crate) tab_bar_controls: bool,
     pub(crate) btw_input: Entity<TextareaState>,
@@ -656,6 +684,10 @@ pub(crate) struct ChatApp {
     pub(crate) board_picks: HashSet<i64>,
     pub(crate) archive_picks: HashSet<i64>,
     pub(crate) project_picks: HashSet<i64>,
+    pub(crate) stored_files: Vec<crate::attachments_view::StoredFile>,
+    pub(crate) stored_file_picks: HashSet<PathBuf>,
+    pub(crate) stored_files_error: Option<SharedString>,
+    pub(crate) stored_files_project_filter: crate::attachments_view::ProjectFilter,
     pub(crate) right_panel_resizing: bool,
     /// Detached session windows' tabs; main keeps `side_tab`.
     pub(crate) side_tabs: HashMap<crate::session_workspace::WindowId, crate::side_panel::SideTab>,
@@ -710,6 +742,7 @@ pub(crate) struct ChatApp {
     pub(crate) hn_browser: Entity<crate::browser::Browser>,
     pub(crate) hn_reader_open: bool,
     pub(crate) hn_search_input: Entity<InputState>,
+    pub(crate) org: crate::org::OrgState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -717,6 +750,7 @@ impl ChatApp {
     pub(crate) fn open_project_page(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
         self.project_page = Some(folder.clone());
         self.project_picks.clear();
+        self.project_view.attachments = false;
         self.open_page(Page::Project, cx);
         self.load_project_data(folder, cx);
     }
@@ -736,6 +770,12 @@ impl ChatApp {
         if page == Page::Usage {
             self.ensure_usage_history(false, cx);
         }
+        if page == Page::Org {
+            if self.sidebar_view != SidebarView::Org {
+                self.org.back = (self.page, self.sidebar_view);
+            }
+            self.sidebar_view = SidebarView::Org;
+        }
         if page != Page::Chat
             && let Some(window) =
                 cx.active_window().or_else(|| self.workspace.windows.get(&0).copied())
@@ -751,6 +791,7 @@ impl ChatApp {
             });
         }
         self.page = page;
+        self.sync_org_view(true);
         if page == Page::Settings {
             let focus = self.settings_sidebar_focus.clone();
             let search = self.settings_search_input.clone();
@@ -824,6 +865,18 @@ pub(crate) fn apply_font_size(size: f32, window: &mut Window) {
     window.set_rem_size(px(size.clamp(12.0, 24.0)));
 }
 
+// windows: drag area = HTCAPTION, unclaimed press lets DefWindowProc start move loop, eats click.
+// buttons prevent_default on press; stop propagation marks it handled.
+pub(crate) fn claim_title_bar_press(
+    _: &gpui_kit::MouseDownEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if cfg!(target_os = "windows") && window.default_prevented() {
+        cx.stop_propagation();
+    }
+}
+
 #[cfg(test)]
 use aether_core::Update;
 
@@ -856,6 +909,10 @@ pub(super) fn chat_with(title: &str, texts: &[&str]) -> Chat {
         access: AccessMode::Ask,
         effort: String::new(),
         cli_session: String::new(),
+        fork_from: String::new(),
+        rollback_to: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         queue: Vec::new(),
         stopped: false,
         external_pid: None,

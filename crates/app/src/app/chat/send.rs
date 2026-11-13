@@ -11,7 +11,7 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::{App, Context, SharedString, Window};
 
-use super::{Changed, btw_question, btw_rest, seed_history};
+use super::{Changed, btw_question, btw_rest, handoff_history};
 use crate::app::composer::attach::{delete_later, first_refusal, is_cli_command, shell_command};
 use crate::app::composer::quote::quoted;
 use crate::app::format::now_ms;
@@ -21,6 +21,42 @@ use crate::app::worktree::{WorktreeTarget, worktree_name_hint, worktree_target};
 use crate::app::{Chat, ChatApp, Queued, chat_cwd};
 use crate::board::model::Turn;
 use crate::suggest::prompt_commands;
+
+fn handoff_window(chat: &Chat, settings: &Settings, model: &str) -> Option<u64> {
+    chat.handoff_seen
+        .as_ref()
+        .and_then(|h| h.context_window)
+        .or_else(|| {
+            chat.messages.iter().rev().find_map(|m| {
+                (m.role == Role::Assistant && m.model.as_deref() == Some(model))
+                    .then_some(m.context_window)
+                    .flatten()
+            })
+        })
+        .or_else(|| settings.model_windows.get(model).copied())
+        .or_else(|| {
+            (chat.provider == Provider::Claude).then_some(if model.contains("[1m]") {
+                1_000_000
+            } else {
+                200_000
+            })
+        })
+}
+
+/// Native turn ids from different agents share one transcript; the prefix keeps them apart.
+pub(in crate::app) fn native_turn_key(provider: Provider, id: &str) -> String {
+    format!("{provider:?}:{id}")
+}
+
+fn learn_window(settings: &mut Settings, message: &Message, update: &Update) {
+    if let Update::Window(window) = update
+        && let Some(model) = message.model.as_ref()
+        && settings.model_windows.get(model) != Some(window)
+    {
+        settings.model_windows.insert(model.clone(), *window);
+        crate::settings::save(settings);
+    }
+}
 
 /// Title a chat takes from its first message until renamed or titled by its CLI.
 fn auto_title(text: &str) -> String {
@@ -32,6 +68,28 @@ fn title_text(m: &Message) -> &str {
     match m.attachments.first() {
         Some(file) if m.text.is_empty() => &file.name,
         _ => &m.text,
+    }
+}
+
+fn record_missed_turn(chat: &mut Chat, reply_ix: usize, accepted: bool) {
+    if accepted {
+        return;
+    }
+    if chat.provider == Provider::OpenRouter || chat.cli_session.is_empty() {
+        if let Some(handoff) = &mut chat.handoff_seen {
+            handoff.pending = false;
+        }
+        return;
+    }
+    if let Some(user_ix) = chat.messages[..reply_ix].iter().rposition(|m| m.role == Role::User) {
+        let handoff = chat.handoff_seen.get_or_insert(aether_agent::HandoffSeen {
+            seen: user_ix,
+            context_tokens: None,
+            context_window: None,
+            pending: false,
+        });
+        handoff.seen = handoff.seen.min(user_ix);
+        handoff.pending = false;
     }
 }
 
@@ -192,6 +250,7 @@ impl ChatApp {
                 from_children: false,
                 deliveries: vec![],
             });
+            self.persist(self.active);
             return cx.notify();
         }
         self.begin_setup_or_submit(self.active, text, attachments, window, cx);
@@ -235,7 +294,7 @@ impl ChatApp {
         let queued = &mut chat.queue[i];
         queued.delivering = true;
         let (text, attachments) = (queued.text.clone(), queued.attachments.clone());
-        let (id, epoch, hist) = (chat.id, chat.epoch, seed_history(&chat.messages));
+        let (id, epoch, hist) = (chat.id, chat.epoch, handoff_history(&chat.messages, chat.id));
         let (settings, session) = self.cli_request(ix);
         let reply = self.agent.steer(text.clone(), attachments.clone(), &settings, &hist, &session);
         cx.spawn_in(window, async move |this, cx| {
@@ -310,13 +369,17 @@ impl ChatApp {
             if self.chats[ix].is_agent() { self.agent_skills(provider) } else { Vec::new() };
         // Transcript before this turn; live CLI sessions keep their own
         // memory, so it only seeds a fresh one.
-        let hist = seed_history(&self.chats[ix].messages);
+        let hist = handoff_history(&self.chats[ix].messages, self.chats[ix].id);
+        if let Some(at) = left_unfinished(&self.chats[ix]) {
+            self.chats[ix].messages[at].finish();
+            let ids: Vec<u64> = self.chats[ix].messages[at].requests.iter().map(|r| r.id).collect();
+            for id in ids {
+                self.drop_request(id, window, cx);
+            }
+        }
         let chat = &mut self.chats[ix];
         let model = chat.model(&self.settings);
         let prev = chat.messages.len().checked_sub(1);
-        if let Some(at) = left_unfinished(chat) {
-            chat.messages[at].finish();
-        }
         chat.stopped = false;
         if let Some(cancel) = chat.cancel.take() {
             cancel.cancel();
@@ -328,6 +391,8 @@ impl ChatApp {
         let mut sent = Message::user(text.clone());
         sent.attachments = attachments.clone();
         sent.sent_at_ms = Some(chat.turn_at);
+        sent.sent_with =
+            Some(aether_core::SentWith { model: model.clone(), effort: chat.effort.clone() });
         if chat.messages.is_empty() && chat.title == "New chat" {
             chat.title = auto_title(title_text(&sent)).into();
         }
@@ -350,7 +415,18 @@ impl ChatApp {
             self.list_turn(ix, prev, follow, cx);
             return cx.notify();
         }
+        if self.chats[ix].handoff_seen.as_ref().is_some_and(|h| h.pending) {
+            self.agent.close_session(&self.chats[ix].id.to_string());
+            self.chats[ix].cli_session.clear();
+            self.chats[ix].rollback_to.clear();
+            self.chats[ix].handoff_seen = None;
+        } else if let Some(handoff) = &mut self.chats[ix].handoff_seen {
+            handoff.pending = true;
+        }
         let (effective, session) = self.cli_request(ix);
+        self.chats[ix].fork_from.clear();
+        self.chats[ix].rollback_to.clear();
+        self.persist(ix);
         let key = self.api_key.clone().unwrap_or_default();
         let chat = &mut self.chats[ix];
         let Reply { updates, cancel } = self.agent.send(
@@ -378,8 +454,7 @@ impl ChatApp {
     fn list_turn(&mut self, ix: usize, prev: Option<usize>, follow: bool, cx: &mut Context<Self>) {
         match follow {
             true => self.append_rows(ix, prev, cx),
-            false if ix == self.active => self.sync_rows(prev, cx),
-            false => {}
+            false => self.sync_chat_rows(ix, prev, cx),
         }
     }
 
@@ -390,13 +465,23 @@ impl ChatApp {
         let mut effective = self.settings.clone();
         effective.provider = Some(chat.provider);
         set_default_model(&mut effective, chat.provider, chat.model(&self.settings));
+        let model = chat.model(&self.settings);
         let session = ChatSession {
             ephemeral: false,
+            delta_from: chat.handoff_seen.as_ref().map(|h| h.seen),
+            window: handoff_window(chat, &self.settings, &model),
+            used: chat.handoff_seen.as_ref().and_then(|h| h.context_tokens),
             key: chat.id.to_string(),
             cwd: chat_cwd(chat, &self.settings.workspace_root),
             access: chat.access,
             effort: chat.effort.clone(),
-            resume: chat.cli_session.clone(),
+            resume: if chat.fork_from.is_empty() {
+                chat.cli_session.clone()
+            } else {
+                chat.fork_from.clone()
+            },
+            fork: !chat.fork_from.is_empty(),
+            rollback: chat.rollback_to.clone(),
             lead: chat.lead,
         };
         (effective, session)
@@ -442,6 +527,15 @@ impl ChatApp {
             if follow {
                 self.scroller.update(cx, |s, cx| s.scroll_to_end(cx));
             }
+        } else if self.session_views.contains_key(&chat_id) {
+            self.in_session(chat_id, cx, |this, cx| {
+                let follow = !this.scroller.read(cx).is_scrolled_up();
+                let prev = this.rows.last().map_or(reply_ix, |r| r.message);
+                this.sync_rows(Some(prev), cx);
+                if follow {
+                    this.scroller.update(cx, |s, cx| s.scroll_to_end(cx));
+                }
+            });
         }
         self.stream(ix, reply_ix, run, epoch, reply.updates, window, cx);
         cx.notify();
@@ -545,7 +639,9 @@ impl ChatApp {
             epoch,
         };
         cx.spawn_in(window, async move |this, cx| {
+            let mut accepted = false;
             while let Some(update) = updates.next().await {
+                accepted |= matches!(update, Update::Accepted);
                 let applied = this.update_in(cx, |this, window, cx| {
                     if let Some(ix) = target.resolve(&this.chats) {
                         this.apply(ix, reply_ix, run, update, window, cx);
@@ -557,7 +653,7 @@ impl ChatApp {
             }
             this.update_in(cx, |this, window, cx| {
                 if let Some(ix) = target.resolve(&this.chats) {
-                    this.finish_run(ix, reply_ix, run, epoch, window, cx);
+                    this.finish_run(ix, reply_ix, run, epoch, accepted, window, cx);
                 }
             })
             .ok();
@@ -565,12 +661,14 @@ impl ChatApp {
         .detach();
     }
 
-    fn finish_run(
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::app) fn finish_run(
         &mut self,
         ix: usize,
         reply_ix: usize,
         run: u64,
         epoch: u64,
+        accepted: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -589,6 +687,16 @@ impl ChatApp {
             reply.finish();
             failed = reply.failed;
             let expired: Vec<u64> = reply.requests.iter().map(|r| r.id).collect();
+            let injected_delta = chat.provider == Provider::Codex
+                && chat.handoff_seen.as_ref().is_some_and(|h| h.pending);
+            if failed && !accepted && chat.run == run && injected_delta {
+                // codex took the delta into its thread natively; resending would duplicate it
+                self.agent.close_session(&chat.id.to_string());
+                chat.cli_session.clear();
+                chat.handoff_seen = None;
+            } else if failed && chat.run == run {
+                record_missed_turn(chat, reply_ix, accepted);
+            }
             if !watched {
                 chat.unseen = if failed { ChatStatus::Failed } else { ChatStatus::Done };
             }
@@ -604,9 +712,7 @@ impl ChatApp {
                 self.refresh_health(ix, now_ms());
             }
             self.persist(ix);
-            if ix == self.active {
-                self.sync_rows(Some(reply_ix), cx);
-            }
+            self.sync_chat_rows(ix, Some(reply_ix), cx);
             let chat = &self.chats[ix];
             if chat.run == run && !chat.stopped {
                 self.notify_chat(
@@ -620,6 +726,10 @@ impl ChatApp {
             if self.chats[ix].run == run {
                 self.deliver_to_lead(ix, reply_ix, failed, window, cx);
             }
+            if !self.spawn_queue.is_empty() {
+                self.drain_spawn_queue(window, cx);
+            }
+            self.org_flush_wake(window, cx);
         }
         let blocked = self.worktree_blocks_send(ix).is_some();
         let follow = ix != self.active || !self.scroller.read(cx).is_scrolled_up();
@@ -753,11 +863,10 @@ impl ChatApp {
                     return;
                 };
                 let target = route(&chat.messages, last, &update);
-                let changed = Changed::of(&update);
+                let changed = Changed::of(&update, &chat.messages[target]);
+                learn_window(&mut self.settings, &chat.messages[target], &update);
                 chat.messages[target].apply(update);
-                if ix == self.active {
-                    self.sync(Some((target, changed)), cx);
-                }
+                self.sync_chat(ix, Some((target, changed)), cx);
                 cx.notify();
             }
             _ => return,
@@ -765,7 +874,7 @@ impl ChatApp {
         self.persist(ix);
     }
 
-    fn apply(
+    pub(in crate::app) fn apply(
         &mut self,
         ix: usize,
         reply_ix: usize,
@@ -774,7 +883,9 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.chats[ix].run != run {
+        // a request outlives its run: dropping it would leave the agent waiting forever
+        let request = matches!(update, Update::Ask { .. } | Update::AskResolved(_));
+        if (self.chats[ix].run != run && !request) || reply_ix >= self.chats[ix].messages.len() {
             return;
         }
         if let Update::Ask { id, ask } = &update {
@@ -797,8 +908,11 @@ impl ChatApp {
         if matches!(update, Update::Session(_) | Update::Title(_)) {
             return self.apply_cli_meta(ix, update, window, cx);
         }
+        let delivered = matches!(update, Update::Accepted | Update::Tool(_))
+            || matches!(&update, Update::Delta(t) | Update::Replace(t) | Update::Thinking(t) | Update::Final(t) if !t.is_empty());
         let now = now_ms();
         let chat = &mut self.chats[ix];
+        let cleared = delivered && chat.handoff_seen.take().is_some();
         chat.last_event_ms = now;
         match &update {
             Update::Mode(mode) => {
@@ -812,20 +926,23 @@ impl ChatApp {
             _ => {}
         }
         let step_done = matches!(&update, Update::Tool(call) if call.status != ToolStatus::Running);
+        let update = match update {
+            Update::NativeTurn(id) => Update::NativeTurn(native_turn_key(chat.provider, &id)),
+            update => update,
+        };
         let target = route(&chat.messages, reply_ix, &update);
-        let changed = Changed::of(&update);
+        let changed = Changed::of(&update, &chat.messages[target]);
+        learn_window(&mut self.settings, &chat.messages[target], &update);
         chat.messages[target].apply(update);
-        if save_due(now, chat.saved_ms) {
+        if cleared || save_due(now, chat.saved_ms) {
             chat.saved_ms = now;
             self.persist(ix);
         }
-        if ix == self.active {
-            self.sync(Some((target, changed)), cx);
-        }
+        self.sync_chat(ix, Some((target, changed)), cx);
         if step_done {
             let folder = chat_cwd(&self.chats[ix], &self.settings.workspace_root);
-            if let Some(explorer) = self.project_explorers.get(&folder) {
-                explorer.update(cx, |exp, _| exp.refresh_tree());
+            if let Some(explorer) = self.project_explorers.get(&folder).cloned() {
+                self.refresh_explorer_tree(&explorer, None, cx);
             }
             self.check_explorer_disk(&folder, window, cx);
             if ix == self.active {

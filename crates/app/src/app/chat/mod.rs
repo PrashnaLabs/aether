@@ -2,8 +2,7 @@ use crate::agents_view::externally_locked;
 use aether_agent::SavedChat;
 use aether_core::{AccessMode, ChatDetail, Message, Provider, Role, Step, Update};
 use aether_ui::{
-    Block, ChatStatus, Reflow, ReplyView, TranscriptRow, opened_tools, row_splice,
-    set_verbose_rows, transcript_rows,
+    Block, ChatStatus, Reflow, ReplyView, TranscriptRow, opened_tools, row_splice, set_verbose_rows,
 };
 use gpui_kit::{App, Context, SharedString, Window};
 use std::collections::HashSet;
@@ -54,23 +53,127 @@ fn plain_text(m: &Message) -> String {
     text
 }
 
-/// Transcript that seeds a fresh CLI session: one entry per message so the numbers match
-/// read_history; a reply with only tool calls says so.
-fn seed_history(messages: &[Message]) -> Vec<(Role, String)> {
+pub(super) fn native_context_estimate(messages: &[Message], chat: i64, seen: usize) -> u64 {
+    let messages = &messages[..seen.min(messages.len())];
+    let text =
+        handoff_history(messages, chat).iter().map(|item| item.text.len() as u64).sum::<u64>();
     messages
         .iter()
-        .map(|m| {
-            let text = plain_text(m);
-            let text = if !text.trim().is_empty() {
-                text
-            } else if m.steps.iter().any(|s| matches!(s, Step::Tool(_))) {
-                "(tool calls only)".into()
+        .filter(|message| message.role == Role::User)
+        .flat_map(|message| &message.attachments)
+        .fold(text, |total, attachment| {
+            total.saturating_add(if aether_core::is_image(&attachment.mime) {
+                8_192
             } else {
-                "(no text)".into()
-            };
-            (m.role, text)
+                4_096
+            })
         })
-        .collect()
+}
+
+pub(super) fn handoff_history(
+    messages: &[Message],
+    chat: i64,
+) -> Vec<aether_agent::handoff::HistoricalMessage> {
+    use aether_agent::handoff::HistoricalMessage;
+    use aether_core::{PlanStatus, ToolDetail, ToolStatus};
+    let mut out = Vec::new();
+    for (i, m) in messages.iter().enumerate() {
+        let status = if m.role == Role::User {
+            "completed"
+        } else if m.failed {
+            "failed"
+        } else if m.ended_at_ms.is_none() {
+            "running"
+        } else if m
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::Tool(t) if t.status == ToolStatus::Stopped))
+        {
+            "interrupted"
+        } else {
+            "completed"
+        };
+        let mut push = |role, kind, text: String, item: String| {
+            out.push(HistoricalMessage {
+                role,
+                kind,
+                text,
+                chat,
+                message: i,
+                item,
+                model: m.model.clone(),
+                status: status.into(),
+            })
+        };
+        if m.role == Role::User {
+            push(Role::User, "user_message", plain_text(m), i.to_string());
+            continue;
+        }
+        for (k, step) in m.steps.iter().enumerate() {
+            if let Step::Tool(t) = step {
+                let value = match &t.detail {
+                    ToolDetail::Command { command, exit_code, output, .. } => Some((
+                        "command_execution",
+                        format!(
+                            "Command: {command}\nExit code: {}\n{output}",
+                            exit_code.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
+                        ),
+                    )),
+                    ToolDetail::Edit { path, .. } => {
+                        Some(("file_change", format!("File change: {path}")))
+                    }
+                    ToolDetail::Plan { items } => Some((
+                        "proposed_plan",
+                        items
+                            .iter()
+                            .map(|item| {
+                                let status = match item.status {
+                                    PlanStatus::Pending => "pending",
+                                    PlanStatus::Active => "active",
+                                    PlanStatus::Done => "done",
+                                    PlanStatus::Cancelled => "cancelled",
+                                    PlanStatus::Unknown => "unknown",
+                                };
+                                format!("- [{status}] {}", item.text)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )),
+                    _ => None,
+                };
+                if let Some((kind, text)) = value {
+                    push(Role::Assistant, kind, text, format!("{i}.{k}"));
+                }
+            }
+        }
+        if !m.text.is_empty() {
+            push(Role::Assistant, "assistant_message", m.text.clone(), i.to_string());
+        }
+        if let Some(error) = &m.error {
+            push(Role::Assistant, "error", error.clone(), format!("{i}.error"));
+        }
+    }
+    out
+}
+
+pub(super) fn handoff_selection(
+    messages: &[Message],
+    chat: i64,
+    tool: bool,
+) -> aether_agent::handoff::Selection {
+    use aether_agent::handoff::{coverage, select_history, token_cap};
+    let items = handoff_history(messages, chat);
+    let first = items.first();
+    let last = items.last();
+    let note = coverage(
+        chat,
+        first.map_or(0, |m| m.message),
+        last.map_or(0, |m| m.message),
+        first.map(|m| m.item.as_str()),
+        last.map(|m| m.item.as_str()),
+        tool,
+    );
+    select_history(&items, &note, 0, token_cap())
 }
 
 fn one_line(s: &str, max: usize) -> String {
@@ -143,21 +246,24 @@ pub(in crate::app) fn tool_record(c: &aether_core::ToolCall, max: usize) -> Opti
 /// block changed are remeasured regardless.
 pub(in crate::app) enum Changed {
     Blocks,
-    Thought,
+    /// Text was appended; holds the reply's text length before.
+    Text(usize),
+    /// Thinking was appended; holds the reply's step count before.
+    Thought(usize),
     Tool(String),
     All,
 }
 
 impl Changed {
-    pub(in crate::app) fn of(update: &Update) -> Self {
+    pub(in crate::app) fn of(update: &Update, reply: &Message) -> Self {
         match update {
-            Update::Delta(_)
-            | Update::Usage(_)
+            Update::Delta(_) => Self::Text(reply.text.len()),
+            Update::Usage(_)
             | Update::Window(_)
             | Update::Count { .. }
             | Update::Cost(_)
             | Update::Model(_) => Self::Blocks,
-            Update::Thinking(_) => Self::Thought,
+            Update::Thinking(_) => Self::Thought(reply.steps.len()),
             Update::Tool(call) => Self::Tool(call.id.clone()),
             _ => Self::All,
         }
@@ -287,8 +393,12 @@ impl ChatApp {
         self.active = ix;
         self.activate_session_ui(id, window, cx);
         self.draft_owner = Some(id);
-        self.sidebar_view =
-            self.sidebar_view.after_select(self.chats[ix].is_agent(), self.locked(ix));
+        if self.chat_org(ix).is_none() {
+            self.sidebar_view = self
+                .sidebar_view
+                .off_org(Page::Chat, self.org.back.1)
+                .after_select(self.chats[ix].is_agent(), self.locked(ix));
+        }
 
         self.copied = None;
         self.selection_bar = None;
@@ -310,7 +420,7 @@ impl ChatApp {
         if std::mem::replace(&mut self.chats[ix].archived, false) {
             self.persist(ix);
         }
-        self.page = Page::Chat;
+        self.open_page(Page::Chat, cx);
         let host = self.host_of(window);
         self.set_side_tab(host, crate::side_panel::SideTab::Agent);
         self.chats[ix].view = ChatViewMode::Chat;
@@ -319,7 +429,11 @@ impl ChatApp {
         } else if matches!(self.active_terminal_tab, aether_terminal::TerminalTab::Project(_)) {
             self.active_terminal_tab = aether_terminal::TerminalTab::Project(self.chats[ix].id);
         }
-        self.workspace_pop.dismiss();
+        if self.workspace_shown() {
+            self.open_workspace_panel(cx);
+        } else {
+            self.workspace_pop.dismiss();
+        }
         for selector in [&self.selector, &self.default_model] {
             selector.update(cx, |s, cx| s.dismiss(cx));
         }
@@ -392,12 +506,28 @@ impl ChatApp {
             show_thinking: detail != ChatDetail::Compact,
             kept: &kept[ix],
         };
-        let mut rows = transcript_rows(chat.messages.get(from..).unwrap_or_default(), &view);
+        let label = |from: &aether_core::SentWith, to: &aether_core::SentWith| {
+            let models = self.probes.get(&chat.provider).map_or(&[][..], |probe| &probe.models);
+            aether_ui::model_switch_label(
+                from,
+                to,
+                &|model| {
+                    if chat.provider == Provider::OpenRouter {
+                        self.models
+                            .iter()
+                            .find(|m| m.id.as_ref() == model)
+                            .map_or_else(|| model.to_string(), |m| m.name.to_string())
+                    } else {
+                        super::sidebar::model_label(models, model)
+                    }
+                },
+                &|_| None,
+            )
+        };
+        let mut rows =
+            aether_ui::transcript_rows_with(&chat.messages, from, &|ix| view(ix - from), &label);
         // Live status is attached to the composer, outside the scrolling transcript.
         rows.retain(|row| row.block != Block::Live);
-        for row in &mut rows {
-            row.message += from;
-        }
         rows
     }
 
@@ -405,6 +535,41 @@ impl ChatApp {
     /// `None`), splices the list to match, and remeasures every row of `touched`.
     pub(crate) fn sync_rows(&mut self, touched: Option<usize>, cx: &mut Context<Self>) {
         self.sync(touched.map(|m| (m, Changed::All)), cx);
+    }
+
+    /// Brings the rows up to date in place when the live reply only grew its last text
+    /// run or an open thought, returning the rows to remeasure. `None` when the update
+    /// may change the row structure, so the caller rebuilds.
+    fn extend_tail(&mut self, m: usize, changed: &Changed) -> Option<Vec<Range<usize>>> {
+        let chat = &self.chats[self.active];
+        let reply = chat.messages.get(m)?;
+        match *changed {
+            Changed::Thought(steps) => (reply.steps.len() == steps).then(Vec::new),
+            Changed::Text(old) => {
+                let partial = reply.text.get(..old)?.rsplit('\n').next()?;
+                let line = partial.trim_start_matches(' ');
+                // a fence could open on the unfinished line, moving earlier splits
+                let fence =
+                    line.starts_with(['`', '~']) || (line.is_empty() && !partial.is_empty());
+                let last = self.rows.len().checked_sub(1)?;
+                let row = &mut self.rows[last];
+                let Block::Text(range) = &mut row.block else { return None };
+                if fence
+                    || chat.cancel.is_none()
+                    || m + 1 != chat.messages.len()
+                    || row.message != m
+                    || range.end != old
+                    || range.start >= old
+                    || reply.step_positions.iter().any(|&p| p > old)
+                    || reply.requests.iter().any(|r| r.at > old)
+                {
+                    return None;
+                }
+                range.end = reply.text.len();
+                Some((range.end > old).then_some(last..last + 1).into_iter().collect())
+            }
+            _ => None,
+        }
     }
 
     /// `sync_rows`, remeasuring only the rows of `touched` that `changed` may resize.
@@ -418,20 +583,25 @@ impl ChatApp {
         let last = self.rows.last().map_or(0, |r| r.message);
         let from = touched.as_ref().map_or(0, |(m, _)| (*m).min(last));
         let at = self.rows.partition_point(|r| r.message < from);
-        let rows = self.build_rows(from, cx);
-        let (splices, changed) = row_splice(&self.rows[at..], &rows);
-        self.rows.truncate(at);
-        self.rows.extend(rows);
-        let mut resized: Vec<Range<usize>> =
-            changed.into_iter().map(|r| at + r..at + r + 1).collect();
+        let (splices, mut resized) =
+            match touched.as_ref().and_then(|(m, changed)| self.extend_tail(*m, changed)) {
+                Some(resized) => (Vec::new(), resized),
+                None => {
+                    let rows = self.build_rows(from, cx);
+                    let (splices, changed) = row_splice(&self.rows[at..], &rows);
+                    self.rows.truncate(at);
+                    self.rows.extend(rows);
+                    (splices, changed.into_iter().map(|r| at + r..at + r + 1).collect())
+                }
+            };
         if let Some((m, changed)) = touched {
             let start = self.rows.partition_point(|r| r.message < m);
             let end = self.rows.partition_point(|r| r.message <= m);
             let steps = self.chats[self.active].messages.get(m).map_or(&[][..], |m| &m.steps);
             let one = |r: usize| r..r + 1;
             match changed {
-                Changed::Blocks => {}
-                Changed::Thought => resized.extend(
+                Changed::Blocks | Changed::Text(_) => {}
+                Changed::Thought(_) => resized.extend(
                     (start..end)
                         .rev()
                         .find(|&r| {
@@ -463,6 +633,30 @@ impl ChatApp {
         });
     }
 
+    pub(in crate::app) fn sync_chat(
+        &mut self,
+        ix: usize,
+        touched: Option<(usize, Changed)>,
+        cx: &mut Context<Self>,
+    ) {
+        if ix == self.active {
+            self.sync(touched, cx);
+        } else if let Some(id) = self.chats.get(ix).map(|c| c.id)
+            && self.session_views.contains_key(&id)
+        {
+            self.in_session(id, cx, |this, cx| this.sync(touched, cx));
+        }
+    }
+
+    pub(crate) fn sync_chat_rows(
+        &mut self,
+        ix: usize,
+        touched: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_chat(ix, touched.map(|m| (m, Changed::All)), cx);
+    }
+
     /// Rebuilds the active chat's rows and starts the list over.
     pub(in crate::app) fn reset_rows(&mut self, cx: &mut Context<Self>) {
         self.rows = self.build_rows(0, cx);
@@ -480,6 +674,13 @@ impl ChatApp {
         if ix == self.active {
             self.sync_rows(touched, cx);
             self.scroller.update(cx, |s, cx| s.scroll_to_end(cx));
+        } else if let Some(id) = self.chats.get(ix).map(|c| c.id)
+            && self.session_views.contains_key(&id)
+        {
+            self.in_session(id, cx, |this, cx| {
+                this.sync_rows(touched, cx);
+                this.scroller.update(cx, |s, cx| s.scroll_to_end(cx));
+            });
         }
     }
 
@@ -497,7 +698,7 @@ impl ChatApp {
         })
     }
 
-    pub(super) fn persist(&self, ix: usize) {
+    pub(crate) fn persist(&self, ix: usize) {
         if let Some(store) = &self.store {
             let chat = &self.chats[ix];
             store.save(SavedChat {
@@ -509,6 +710,10 @@ impl ChatApp {
                 provider: chat.provider,
                 provider_model: chat.provider_model.clone(),
                 cli_session: chat.cli_session.clone(),
+                fork_from: chat.fork_from.clone(),
+                rollback_to: chat.rollback_to.clone(),
+                agent_sessions: chat.agent_sessions.clone(),
+                handoff_seen: chat.handoff_seen.clone(),
                 access: chat.access,
                 effort: chat.effort.clone(),
                 cwd: chat.cwd.clone(),
@@ -519,6 +724,15 @@ impl ChatApp {
                 lead: chat.lead,
                 lead_seen: chat.lead_seen,
                 handoff_from: chat.handoff_from,
+                pending_queue: chat
+                    .queue
+                    .iter()
+                    .filter(|q| !q.from_children)
+                    .map(|q| aether_agent::SavedQueued {
+                        text: q.text.clone(),
+                        attachments: q.attachments.clone(),
+                    })
+                    .collect(),
                 pending_deliveries: chat
                     .queue
                     .iter()

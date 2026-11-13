@@ -74,16 +74,24 @@ pub(super) fn project_menu(
     on_files: Option<RowHandler>,
     on_hide: Option<RowHandler>,
     on_page: Option<RowHandler>,
+    on_setup_org: Option<RowHandler>,
+    pin: Option<(bool, RowHandler)>,
 ) -> PopupMenu {
     let mut menu = menu;
     if let Some(on_page) = on_page {
-        menu = menu
-            .item(
-                PopupMenuItem::new("Open project page")
-                    .icon(Lucide::LayoutDashboard)
-                    .on_click(move |ev, window, cx| on_page(ev, window, cx)),
-            )
-            .separator();
+        menu = menu.item(
+            PopupMenuItem::new("Open project page")
+                .icon(Lucide::LayoutDashboard)
+                .on_click(move |ev, window, cx| on_page(ev, window, cx)),
+        );
+        if let Some(on_setup) = on_setup_org {
+            menu = menu.item(
+                PopupMenuItem::new("Set up organization")
+                    .icon(Lucide::Users)
+                    .on_click(move |ev, window, cx| on_setup(ev, window, cx)),
+            );
+        }
+        menu = menu.separator();
     }
     let mut menu = menu.item(
         PopupMenuItem::new("New agent chat here")
@@ -97,6 +105,13 @@ pub(super) fn project_menu(
                 .icon(IconName::Folder)
                 .disabled(missing)
                 .on_click(move |ev, window, cx| on_files(ev, window, cx)),
+        );
+    }
+    if let Some((pinned, on_pin)) = pin {
+        menu = menu.item(
+            PopupMenuItem::new(if pinned { "Unpin project" } else { "Pin project" })
+                .icon(if pinned { Lucide::PinOff } else { Lucide::Pin })
+                .on_click(move |ev, window, cx| on_pin(ev, window, cx)),
         );
     }
     let menu = menu.item(reveal_item(path.clone(), missing)).item(copy_item("Copy path", path));
@@ -122,6 +137,7 @@ pub(super) fn project_menu(
 pub(super) fn chat_menu(
     menu: PopupMenu,
     chat: &ChatItem,
+    crew: Option<(SharedString, RowHandler)>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
@@ -181,6 +197,14 @@ pub(super) fn chat_menu(
                     .on_click(move |_, window, cx| on_watch(id, window, cx)),
             )
         }
+        None => menu,
+    };
+    let menu = match crew {
+        Some((label, toggle)) => menu.item(
+            PopupMenuItem::new(label)
+                .icon(Lucide::Users)
+                .on_click(move |ev, window, cx| toggle(ev, window, cx)),
+        ),
         None => menu,
     };
     let menu = match chat.line.as_ref() {

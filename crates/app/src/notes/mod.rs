@@ -340,6 +340,25 @@ impl ChatApp {
         self.notes.form = Some(form);
         cx.notify();
     }
+    /// Save to note from a chat: into the chat's project notes, Global for a direct chat.
+    pub(crate) fn save_chat_note(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ix = self.active;
+        let project = self.chats[ix]
+            .is_agent()
+            .then(|| self.chat_project(ix))
+            .flatten()
+            .and_then(|dir| dir.file_name().map(|n| n.to_string_lossy().into_owned()));
+        self.notes_form(Form::Capture, text, window, cx);
+        if matches!(self.notes.form, Some(Form::Capture)) && self.notes.project != project {
+            self.notes.project = project;
+            self.refresh_notes(cx);
+        }
+    }
     pub(crate) fn submit_note_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(form) = self.notes.form.clone() else {
             return;

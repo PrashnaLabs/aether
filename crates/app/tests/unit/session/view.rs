@@ -2,53 +2,62 @@ use super::*;
 use gpui_kit::TestAppContext;
 
 #[gpui_kit::test]
-fn workspace_popover_opens_in_the_tabbed_chat(cx: &mut TestAppContext) {
+fn workspace_panel_opens_in_all_chat_layouts(cx: &mut TestAppContext) {
     use gpui_kit::VisualTestContext;
     cx.background_executor.allow_parking();
     cx.update(gpui_kit::init);
     cx.update(crate::actions::bind_keys);
-    let (main, app) = cx.update(|cx| {
-        gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
-            cx.new(|cx| {
-                ChatApp::with_state(
-                    Agent::new().unwrap(),
-                    Settings::default(),
-                    None,
-                    None,
-                    false,
-                    window,
-                    cx,
-                )
+    for (layout, collapsed) in [
+        (aether_core::ChatLayout::Sidebar, true),
+        (aether_core::ChatLayout::Sidebar, false),
+        (aether_core::ChatLayout::Split, false),
+        (aether_core::ChatLayout::Tabbed, false),
+    ] {
+        let (main, app) = cx.update(|cx| {
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| {
+                    ChatApp::with_state(
+                        Agent::new().unwrap(),
+                        Settings {
+                            chat_layout: layout,
+                            right_panel_collapsed: collapsed,
+                            ..Settings::default()
+                        },
+                        None,
+                        None,
+                        false,
+                        window,
+                        cx,
+                    )
+                })
             })
+            .unwrap()
+        });
+        cx.update_window(main, |_, window, cx| {
+            app.update(cx, |app, cx| {
+                app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
+                app.listing_worktrees = true;
+                app.chats[app.active].provider = aether_core::Provider::Codex;
+                app.workspace_pop.machine = Some("Test machine".into());
+                assert!(app.side_full && app.side_open());
+                cx.notify();
+            });
+            let _ = window.draw(cx);
         })
-        .unwrap()
-    });
-    cx.update_window(main, |_, window, cx| {
-        app.update(cx, |app, cx| {
-            app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
-            app.listing_worktrees = true;
-            app.chats[app.active].provider = aether_core::Provider::Codex;
-            app.workspace_pop.machine = Some("Test machine".into());
-            assert!(app.side_full && app.side_open());
-            cx.notify();
-        });
-        let _ = window.draw(cx);
-    })
-    .unwrap();
-    let mut visual = VisualTestContext::from_window(main, cx);
-    for _ in 0..2 {
-        let bounds = visual.read(|cx| app.read(cx).workspace_pop.trigger.get());
-        assert!(bounds.size.width > gpui_kit::px(0.), "Workspace button must be rendered");
-        visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
-        visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
-        visual.read(|cx| {
-            assert!(
-                app.read(cx).workspace_pop.open,
-                "clicking the Workspace button must open the Workspace popover"
-            )
-        });
-        visual.simulate_keystrokes("escape");
-        visual.read(|cx| assert!(!app.read(cx).workspace_pop.open));
+        .unwrap();
+        let mut visual = VisualTestContext::from_window(main, cx);
+        let click = |visual: &mut VisualTestContext| {
+            let bounds = visual.debug_bounds("workspace-toggle").expect("Workspace button");
+            visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
+            visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+        };
+        click(&mut visual);
+        visual.read(|cx| assert!(app.read(cx).workspace_shown(), "{layout:?} must show Workspace"));
+        assert!(visual.debug_bounds("workspace-panel").is_some(), "{layout:?} panel rendered");
+        if layout != aether_core::ChatLayout::Split {
+            click(&mut visual);
+            visual.read(|cx| assert!(!app.read(cx).workspace_shown(), "{layout:?} toggles closed"));
+        }
     }
 }
 
@@ -920,4 +929,107 @@ fn assert_session_menu(cx: &mut TestAppContext, target: SessionMenuTarget) {
             );
         }
     });
+}
+
+#[gpui_kit::test]
+fn workspace_panel_lists_a_running_subagent(cx: &mut TestAppContext) {
+    use aether_core::{Message, Step, ToolCall, ToolDetail, ToolStatus};
+    use gpui_kit::VisualTestContext;
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    cx.update(crate::actions::bind_keys);
+    let (main, app) = cx.update(|cx| {
+        gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| {
+                ChatApp::with_state(
+                    Agent::new().unwrap(),
+                    Settings::default(),
+                    None,
+                    None,
+                    false,
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap()
+    });
+    cx.update_window(main, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
+            let chat = &mut app.chats[app.active];
+            chat.provider = aether_core::Provider::Codex;
+            let detail = ToolDetail::Task {
+                description: "Map the parser".into(),
+                output: String::new(),
+                agent: "explorer".into(),
+                prompt: String::new(),
+                tools: 3,
+                tokens: 0,
+                activity: String::new(),
+            };
+            let mut call = ToolCall::new("sub-1", "Run agent", detail);
+            call.status = ToolStatus::Background;
+            let mut reply = Message::assistant();
+            reply.steps.push(Step::Tool(call));
+            chat.messages.push(reply);
+            app.workspace_open = true;
+            cx.notify();
+        });
+        let _ = window.draw(cx);
+    })
+    .unwrap();
+    let mut visual = VisualTestContext::from_window(main, cx);
+    visual.read(|cx| assert!(app.read(cx).workspace_shown()));
+    assert!(visual.debug_bounds("subagent-sub-1").is_some(), "subagent row must render");
+}
+
+#[gpui_kit::test]
+fn workspace_browse_files_shows_the_files(cx: &mut TestAppContext) {
+    use crate::side_panel::{SideTab, Surface};
+    use gpui_kit::VisualTestContext;
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    cx.update(crate::actions::bind_keys);
+    for layout in aether_core::ChatLayout::ALL {
+        let (main, app) = cx.update(|cx| {
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| {
+                    ChatApp::with_state(
+                        Agent::new().unwrap(),
+                        Settings { chat_layout: layout, ..Settings::default() },
+                        None,
+                        None,
+                        false,
+                        window,
+                        cx,
+                    )
+                })
+            })
+            .unwrap()
+        });
+        cx.update_window(main, |_, window, cx| {
+            app.update(cx, |app, cx| {
+                app.settings.workspace_root = std::env::temp_dir().to_string_lossy().into_owned();
+                app.chats[app.active].provider = aether_core::Provider::Codex;
+                app.workspace_pop.machine = Some("Test machine".into());
+                app.toggle_workspace_pop(window, cx);
+                cx.notify();
+            });
+            let _ = window.draw(cx);
+        })
+        .unwrap();
+        let mut visual = VisualTestContext::from_window(main, cx);
+        let bounds = visual.debug_bounds("pop-browse").expect("Browse files row");
+        visual.simulate_mouse_move(bounds.center(), None, gpui_kit::Modifiers::default());
+        visual.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+        visual.update(|window, cx| {
+            let app = app.read(cx);
+            let shown = match layout {
+                aether_core::ChatLayout::Tabbed => app.side_tab_in(window) == SideTab::Explorer,
+                _ => app.right_surface == Some(Surface::Files),
+            };
+            assert!(shown, "{layout:?}: Browse files must show the files");
+        });
+    }
 }

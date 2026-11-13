@@ -23,8 +23,8 @@ fn fade(color: gpui_kit::Hsla, angle: f32, opacity: f32) -> gpui_kit::Div {
 }
 
 use super::ChatSidebar;
-use super::rows::{ChatRow, chat_key, count_chip};
-use super::state::SidebarState;
+use super::rows::{ChatRow, count_chip};
+use super::state::{SidebarState, Tree, parent_rows};
 use crate::components::BrandMark;
 
 #[derive(Clone)]
@@ -99,12 +99,14 @@ impl ChatSidebar {
                             .ghost()
                             .small()
                             .icon(IconName::Plus)
-                            .accessibility_label("New chat")
+                            .accessibility_label(self.new_chat_label.clone())
                             .map(|b| match &self.new_chat_action {
-                                Some(action) => {
-                                    b.tooltip_with_action("New chat", action.as_ref(), None)
-                                }
-                                None => b.tooltip("New chat"),
+                                Some(action) => b.tooltip_with_action(
+                                    self.new_chat_label.clone(),
+                                    action.as_ref(),
+                                    None,
+                                ),
+                                None => b.tooltip(self.new_chat_label.clone()),
                             })
                             .when_some(self.on_new_chat.take(), |b, handler| b.on_click(handler)),
                     )
@@ -135,20 +137,26 @@ impl RenderOnce for ChatSidebar {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state =
             window.use_keyed_state("chat-sidebar", cx, |window, _| SidebarState::new(window));
-        self.collapsed_crews = state.read(cx).collapsed_crews.clone();
+        self.crew_open = state.read(cx).crew_open.clone();
+        self.crew_all = state.read(cx).crew_all.clone();
         let rows = self.rows();
         let keys: Vec<SharedString> = rows.iter().map(ChatRow::key).collect();
         let focusable: Vec<bool> = rows.iter().map(ChatRow::focusable).collect();
+        let parents = parent_rows(rows.iter().map(|row| match row {
+            ChatRow::Chat { chat, .. } => Tree::Chat { depth: chat.depth, pin: chat.pin },
+            ChatRow::CrewMore { .. } => Tree::Inside,
+            _ => Tree::Break,
+        }));
         let shown = rows.iter().find_map(|row| match row {
             ChatRow::Chat { chat, rename_editor, .. }
                 if rename_editor.is_some() || (chat.active && self.rename_ix.is_none()) =>
             {
-                Some(chat_key(chat.id))
+                Some(row.key())
             }
             _ => None,
         });
         state.update(cx, |s, cx| {
-            s.sync(keys.clone(), &focusable, cx);
+            s.sync(keys.clone(), &focusable, parents, cx);
             s.reveal(shown);
         });
         let list_state = state.read(cx).list.clone();
@@ -179,6 +187,10 @@ impl RenderOnce for ChatSidebar {
                 let key = keys[ix].clone();
                 div()
                     .id(ElementId::Name(key.clone()))
+                    .debug_selector({
+                        let key = key.clone();
+                        move || key.to_string()
+                    })
                     .when(ix == 0, |el| el.pt_3())
                     .when(ix + 1 == count, |el| el.pb_3())
                     .child(row.render(key, &state, window, cx))

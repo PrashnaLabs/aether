@@ -258,6 +258,17 @@ impl AgentSelectorState {
         effort: String,
         cx: &mut Context<Self>,
     ) {
+        if (
+            &self.providers,
+            &self.favorites,
+            self.provider,
+            &self.model,
+            &self.efforts,
+            &self.effort,
+        ) == (&providers, &favorites, provider, &model, &efforts, &effort)
+        {
+            return;
+        }
         self.providers = providers;
         self.favorites = favorites;
         self.provider = provider;

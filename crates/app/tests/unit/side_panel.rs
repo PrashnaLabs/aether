@@ -27,14 +27,12 @@ fn workspace_tabs_keep_changes_and_diff_inside_explorer() {
 #[test]
 fn surfaces_map_to_tabs_and_explorer_views() {
     use ExplorerView::*;
-    assert_eq!(Surface::tabs(false, false, false, false), [Surface::Terminal, Surface::Files]);
-    assert_eq!(
-        Surface::tabs(false, true, false, false),
-        [Surface::Terminal, Surface::Files, Surface::Review]
-    );
+    let (t, f, c) = (Surface::Terminal, Surface::Files, Surface::Workspace);
+    assert_eq!(Surface::tabs(false, false, false, false), [t, f, c]);
+    assert_eq!(Surface::tabs(false, true, false, false), [t, f, c, Surface::Review]);
     assert_eq!(
         Surface::tabs(false, true, true, false),
-        [Surface::Terminal, Surface::Files, Surface::Review, Surface::Browser]
+        [t, f, c, Surface::Review, Surface::Browser]
     );
     assert!(!Surface::Terminal.closable());
     assert!(!Surface::Files.closable());

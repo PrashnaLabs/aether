@@ -313,6 +313,40 @@ fn background_tasks_settle_their_original_row() {
 }
 
 #[test]
+fn background_task_done_before_its_result_still_settles() {
+    let mut s = State { active: true, ..State::default() };
+    map_line(
+        &mut s,
+        &BASH_USE.replace(r#""command":"echo hi""#, r#""command":"true","run_in_background":true"#),
+    );
+    map_line(
+        &mut s,
+        r#"{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_1","status":"completed","summary":"exit 0"}"#,
+    );
+    let started = r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Command running in background with ID: b1"}]}}"#;
+    assert_eq!(calls(map_line(&mut s, started))[0].status, ToolStatus::Done);
+    assert!(s.background.is_empty());
+}
+
+#[test]
+fn timed_out_command_goes_to_the_background() {
+    for text in [
+        "Command did not complete within its 120s timeout and was moved to the background (ID: b1). Output is being written to: /tmp/b1.out",
+        "Command was manually backgrounded by user with ID: b1. Output is being written to: /tmp/b1.out",
+        "Command was moved to the background (ID: b1) so that a message that arrived while it was running can reach you.",
+    ] {
+        let mut s = State { active: true, ..State::default() };
+        map_line(&mut s, BASH_USE);
+        let moved = format!(
+            r#"{{"type":"user","parent_tool_use_id":null,"message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_1","content":"{text}"}}]}}}}"#
+        );
+        assert_eq!(calls(map_line(&mut s, &moved))[0].status, ToolStatus::Background, "{text}");
+        let done = r#"{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_1","status":"completed","summary":"exit 0"}"#;
+        assert_eq!(calls(map_line(&mut s, done))[0].status, ToolStatus::Done, "{text}");
+    }
+}
+
+#[test]
 fn wake_without_a_reason_still_says_so() {
     let mut s = State::default();
     let woke = map_line(
@@ -486,8 +520,11 @@ fn steers_are_reported_when_claude_echoes_them() {
     let echo = |t: &str| {
         json!({"type":"user","isReplay":true,"parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":t}]}}).to_string()
     };
-    assert_eq!(map_line(&mut s, &echo("count")), []);
-    assert_eq!(map_line(&mut s, &echo("also say done")), [Update::Steered("also say done".into())]);
+    assert_eq!(map_line(&mut s, &echo("count")), [Update::Accepted]);
+    assert_eq!(
+        map_line(&mut s, &echo("also say done")),
+        [Update::Accepted, Update::Steered("also say done".into())]
+    );
 }
 
 #[test]
@@ -823,7 +860,7 @@ fn steer_missed_by_the_last_call_keeps_the_turn_open_for_its_own_result() {
     };
     assert_eq!(
         map_line(&mut s, &echo("Count from 1 to 40, one number per line, no other text.")),
-        []
+        [Update::Accepted]
     );
     let first = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"1\n2\n40","usage":{"input_tokens":2,"cache_creation_input_tokens":20243,"cache_read_input_tokens":15259,"output_tokens":88,"iterations":[{"input_tokens":2,"output_tokens":88,"cache_read_input_tokens":15259,"cache_creation_input_tokens":20243}]},"modelUsage":{"claude-haiku-5-5":{"inputTokens":2,"outputTokens":88,"cacheReadInputTokens":15259,"cacheCreationInputTokens":20243,"contextWindow":1000000}},"result_index":0}"#;
     let out = map_line(&mut s, first);
@@ -832,7 +869,12 @@ fn steer_missed_by_the_last_call_keeps_the_turn_open_for_its_own_result() {
     assert!(s.active);
     assert_eq!(
         map_line(&mut s, &echo("Also, after the numbers, write the word BANANA on its own line.")),
-        [Update::Steered("Also, after the numbers, write the word BANANA on its own line.".into())]
+        [
+            Update::Accepted,
+            Update::Steered(
+                "Also, after the numbers, write the word BANANA on its own line.".into()
+            )
+        ]
     );
     let second = first.replace(r#""result":"1\n2\n40""#, r#""result":"1\n2\n40\nBANANA""#);
     let out = map_line(&mut s, &second);
@@ -887,6 +929,8 @@ fn full_access_args_start_fresh_session() {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -915,6 +959,8 @@ fn launch_args_let_claude_read_attachments() {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -954,6 +1000,8 @@ fn auto_access_uses_auto_permission_mode_without_bypass() {
         effort: String::new(),
         access: AccessMode::Auto,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1025,6 +1073,8 @@ fn live_claude_smoke() {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: resume.into(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1113,6 +1163,8 @@ fn live_wake_smoke() {
         effort: String::new(),
         access: AccessMode::Full,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1192,6 +1244,8 @@ fn ask_opts() -> DriverStartOptions {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -1205,7 +1259,17 @@ fn launch_uses_public_flags_and_hook_events() {
     let pair = |a: &str, b: &str| args.windows(2).any(|w| w[0] == a && w[1] == b);
     assert!(pair("--permission-prompts", "host") && pair("--permission-mode", "manual"));
     assert!(args.iter().any(|a| a == "--include-hook-events"));
-    assert!(!args.iter().any(|a| a == "--permission-prompt-tool"));
+}
+
+#[test]
+fn every_mode_routes_permission_prompts_to_the_host_over_stdio() {
+    for access in AccessMode::ALL {
+        let (args, ..) = launch_args(&DriverStartOptions { access, ..ask_opts() });
+        assert!(
+            args.windows(2).any(|w| w[0] == "--permission-prompt-tool" && w[1] == "stdio"),
+            "{access:?} never asks: the CLI denies what would prompt"
+        );
+    }
 }
 
 #[test]
@@ -1722,10 +1786,10 @@ fn a_mismatched_echo_still_pops_so_the_turn_can_end() {
     let mut s = State { active: true, ..State::default() };
     on_prompt(&mut s, "count");
     on_steer(&mut s, "also say done\n\nAttached files:\n- a.png");
-    assert_eq!(map_line(&mut s, &echo("count")), []);
+    assert_eq!(map_line(&mut s, &echo("count")), [Update::Accepted]);
     assert_eq!(
         map_line(&mut s, &echo("[Image #1] also say done")),
-        [Update::Steered("also say done".into())]
+        [Update::Accepted, Update::Steered("also say done".into())]
     );
     assert!(s.echoes.is_empty());
     let result = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"ok","usage":{},"modelUsage":{}}"#;
@@ -1738,9 +1802,15 @@ fn out_of_order_echoes_mark_their_own_steers() {
     on_prompt(&mut s, "count");
     on_steer(&mut s, "first");
     on_steer(&mut s, "second");
-    assert_eq!(map_line(&mut s, &echo("second")), [Update::Steered("second".into())]);
-    assert_eq!(map_line(&mut s, &echo("first")), [Update::Steered("first".into())]);
-    assert_eq!(map_line(&mut s, &echo("count")), []);
+    assert_eq!(
+        map_line(&mut s, &echo("second")),
+        [Update::Accepted, Update::Steered("second".into())]
+    );
+    assert_eq!(
+        map_line(&mut s, &echo("first")),
+        [Update::Accepted, Update::Steered("first".into())]
+    );
+    assert_eq!(map_line(&mut s, &echo("count")), [Update::Accepted]);
     assert!(s.echoes.is_empty());
 }
 
@@ -1750,7 +1820,7 @@ fn a_trimmed_echo_matches_its_steer() {
     on_prompt(&mut s, "count");
     on_steer(&mut s, "one");
     on_steer(&mut s, "two");
-    assert_eq!(map_line(&mut s, &echo("two\n")), [Update::Steered("two".into())]);
+    assert_eq!(map_line(&mut s, &echo("two\n")), [Update::Accepted, Update::Steered("two".into())]);
     assert_eq!(s.echoes.len(), 2);
 }
 
@@ -1859,7 +1929,7 @@ fn a_stop_keeps_steers_the_cli_still_holds_and_refuses_the_rest() {
             .any(|u| matches!(u, Update::Final(_) | Update::Error(_)))
     );
     assert!(s.active, "the held steer runs next in this reply");
-    assert_eq!(map_line(&mut s, &echo("kept")), [Update::Steered("kept".into())]);
+    assert_eq!(map_line(&mut s, &echo("kept")), [Update::Accepted, Update::Steered("kept".into())]);
     let result =
         r#"{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{}}"#;
     assert_eq!(map_line(&mut s, result).last(), Some(&Update::Final("done".into())));
@@ -2060,6 +2130,8 @@ fn test_opts() -> DriverStartOptions {
         effort: "high".into(),
         access: AccessMode::Full,
         resume: "no-such-session-aether-test".into(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -2091,8 +2163,9 @@ fn lead_launch_adds_aether_mcp_server() {
     let s = &v["mcpServers"]["aether"];
     assert_eq!(s["command"], "/x/aether");
     assert_eq!(s["args"], json!(["mcp"]));
-    assert_eq!(s["env"]["AETHER_ORCH_TOKEN"], "tok123");
-    assert_eq!(s["env"]["AETHER_ORCH_SOCK"], "/s/o.sock");
+    assert_eq!(s["env"]["AETHER_ORCH_TOKEN"], "${AETHER_ORCH_TOKEN}");
+    assert_eq!(s["env"]["AETHER_ORCH_SOCK"], "${AETHER_ORCH_SOCK}");
+    assert!(!body.contains("tok123"), "serialized config must not contain the lead token");
     assert!(args.windows(2).any(|w| w[0] == "--allowedTools" && w[1].contains("mcp__aether")));
     assert!(!args.iter().any(|a| a.contains("tok123")), "token stays out of argv");
     #[cfg(unix)]
@@ -2107,6 +2180,35 @@ fn lead_launch_adds_aether_mcp_server() {
 fn non_lead_launch_has_no_mcp_flags() {
     let (args, ..) = launch_args(&test_opts());
     assert!(!args.iter().any(|a| a == "--mcp-config" || a == "--allowedTools"));
+}
+
+#[test]
+fn claude_launch_scopes_orchestration_environment_to_leads() {
+    use std::ffi::OsStr;
+
+    let mut opts = test_opts();
+    opts.binary = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+    let lead = crate::LeadTools {
+        exe: "/x/aether".into(),
+        sock: "/tmp/dummy-orch.sock".into(),
+        token: "dummy-lead-token".into(),
+        specs: Value::Null,
+    };
+    opts.lead = Some(lead);
+    let mut cmd = crate::spawn::command(&opts, "claude").unwrap();
+    crate::claude::spawn::configure_orchestration_env(&mut cmd, opts.lead.as_ref());
+    let envs: Vec<_> = cmd.get_envs().collect();
+    assert!(
+        envs.contains(&(OsStr::new("AETHER_ORCH_SOCK"), Some(OsStr::new("/tmp/dummy-orch.sock"))))
+    );
+    assert!(
+        envs.contains(&(OsStr::new("AETHER_ORCH_TOKEN"), Some(OsStr::new("dummy-lead-token"))))
+    );
+
+    let cmd = crate::spawn::command(&DriverStartOptions { lead: None, ..opts }, "claude").unwrap();
+    let envs: Vec<_> = cmd.get_envs().collect();
+    assert!(envs.contains(&(OsStr::new("AETHER_ORCH_SOCK"), None)));
+    assert!(envs.contains(&(OsStr::new("AETHER_ORCH_TOKEN"), None)));
 }
 
 #[test]
@@ -2268,4 +2370,25 @@ fn process_exit_fails_pending_side_questions() {
     s.sides.insert("aether-btw-3".into(), tx);
     on_exit(&mut s, "gone".into());
     assert_eq!(rx.try_recv().unwrap(), Update::Error("gone".into()));
+}
+
+#[test]
+fn native_fork_launches_with_resume_and_fork_flag() {
+    let opts = DriverStartOptions { resume: "source".into(), fork: true, ..test_opts() };
+    let (args, id, resumed, _) = launch_args(&opts);
+    assert!(args.windows(2).any(|pair| pair == ["--resume", "source"]));
+    assert!(args.iter().any(|arg| arg == "--fork-session"));
+    assert_eq!(id, "source");
+    assert!(resumed);
+}
+
+#[test]
+fn rollback_launches_a_resumed_fork_at_the_assistant_uuid() {
+    let opts =
+        DriverStartOptions { resume: "source".into(), rollback: "turn".into(), ..test_opts() };
+    let (args, _, resumed, _) = launch_args(&opts);
+    assert!(resumed);
+    assert!(args.windows(2).any(|a| a == ["--resume", "source"]));
+    assert!(args.windows(2).any(|a| a == ["--resume-session-at", "turn"]));
+    assert!(args.iter().any(|a| a == "--fork-session"));
 }

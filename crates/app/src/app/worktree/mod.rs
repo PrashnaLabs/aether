@@ -91,7 +91,7 @@ fn worktree_send_block(removed: bool, missing: bool) -> Option<&'static str> {
 /// Worktree chats: the draft's Local / worktree choice, making the worktree at
 /// first send, removing it later, and the cleanup list in Settings.
 impl ChatApp {
-    pub(in crate::app) fn chat_ix(&self, id: i64) -> Option<usize> {
+    pub(crate) fn chat_ix(&self, id: i64) -> Option<usize> {
         self.chats.iter().position(|c| c.id == id)
     }
 

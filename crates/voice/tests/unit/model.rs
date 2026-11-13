@@ -39,3 +39,13 @@ fn a_failed_download_is_not_a_corrupt_model() {
 fn the_model_url_is_pinned_to_a_commit() {
     assert!(URL.contains("/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/"));
 }
+
+#[test]
+fn verify_model_rejects_wrong_size_immediately() {
+    let dir = std::env::temp_dir().join(format!("aether-voice-cache-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("m.bin");
+    std::fs::write(&file, b"too small").unwrap();
+    assert!(!verify_model(&file));
+    let _ = std::fs::remove_dir_all(&dir);
+}

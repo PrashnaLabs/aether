@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use aether_agent::{ExternalAgent, HISTORY_BUDGET, SavedChat, budget_history};
+use aether_agent::{ExternalAgent, SavedChat};
 use aether_core::{
     Message, NoticeKind, NoticeState, Provider, RequestStatus, Role, Step, ToolStatus,
     attachments_dir,
@@ -63,6 +63,20 @@ pub(super) fn new_chat_folder(
         return None;
     }
     current.or(recent)
+}
+
+pub(crate) fn native_fork_source(source: &Chat, handoff: bool) -> String {
+    if !handoff
+        && matches!(
+            source.provider,
+            Provider::Claude | Provider::Codex | Provider::Pi | Provider::OpenCode
+        )
+        && !source.busy()
+    {
+        source.cli_session.clone()
+    } else {
+        String::new()
+    }
 }
 
 /// Rows a relaunch left running read as interrupted; OpenCode's shared service keeps working.
@@ -188,6 +202,7 @@ impl ChatApp {
             m.interrupt(if handoff.is_some() { "Handed off" } else { "Copied" });
             m.finish();
         }
+        let fork_from = native_fork_source(source, handoff.is_some());
         let handoff_from = handoff.is_some().then_some(source.id);
         let (provider, provider_model, access, effort, title) = match handoff {
             Some((target, model)) => {
@@ -237,10 +252,16 @@ impl ChatApp {
             self.chats.iter().map(|c| c.id),
             now_ms(),
         );
+        let source_id = source.id;
         let session = self.next_session_id();
         if self
             .agent
-            .fork_session(&session, &budget_history(&history(&messages), HISTORY_BUDGET).0)
+            .fork_session(
+                &session,
+                &aether_agent::handoff::seed_pairs(&super::handoff_selection(
+                    &messages, source_id, false,
+                )),
+            )
             .is_err()
         {
             return;
@@ -266,6 +287,10 @@ impl ChatApp {
                 access,
                 effort,
                 cli_session: String::new(),
+                fork_from,
+                rollback_to: String::new(),
+                agent_sessions: vec![],
+                handoff_seen: None,
                 queue: Vec::new(),
                 stopped: false,
                 external_pid: None,
@@ -362,6 +387,8 @@ impl ChatApp {
         // a draft bound to or still making a worktree is about to send there, so it isn't reused
         if let Some(ix) = self.chats.iter().position(|c| {
             c.workspace_draft_ready()
+                && !c.lead
+                && !c.pinned
                 && c.draft.trim().is_empty()
                 && c.pending.is_empty()
                 && self.workspace.model.pane_for(c.id).is_none()
@@ -412,6 +439,10 @@ impl ChatApp {
             access: self.settings.default_access(default_provider),
             effort: String::new(),
             cli_session: String::new(),
+            fork_from: String::new(),
+            rollback_to: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: None,
@@ -487,6 +518,10 @@ impl ChatApp {
             access: self.settings.default_access(Provider::OpenRouter),
             effort: String::new(),
             cli_session: String::new(),
+            fork_from: String::new(),
+            rollback_to: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: None,
@@ -541,6 +576,10 @@ impl ChatApp {
             provider,
             provider_model,
             cli_session,
+            fork_from,
+            rollback_to,
+            agent_sessions,
+            handoff_seen,
             access,
             effort,
             cwd,
@@ -551,6 +590,7 @@ impl ChatApp {
             lead,
             lead_seen,
             pending_deliveries,
+            pending_queue,
             handoff_from,
         } in saved
         {
@@ -584,6 +624,10 @@ impl ChatApp {
                 access: fit_access(provider, access),
                 effort,
                 cli_session,
+                fork_from,
+                rollback_to,
+                agent_sessions,
+                handoff_seen,
                 stopped: false,
                 external_pid: None,
                 turn_at: 0,
@@ -611,9 +655,16 @@ impl ChatApp {
                 lead,
                 lead_seen,
                 handoff_from,
-                queue: pending_deliveries
+                queue: pending_queue
                     .into_iter()
-                    .map(|d| Queued {
+                    .map(|q| Queued {
+                        text: q.text,
+                        attachments: q.attachments,
+                        delivering: false,
+                        from_children: false,
+                        deliveries: vec![],
+                    })
+                    .chain(pending_deliveries.into_iter().map(|d| Queued {
                         text: d.text.clone(),
                         attachments: vec![],
                         delivering: false,
@@ -623,7 +674,7 @@ impl ChatApp {
                             reply_ix: d.reply_ix,
                             text: d.text,
                         }],
-                    })
+                    }))
                     .collect(),
             });
         }
@@ -689,6 +740,10 @@ impl ChatApp {
             access: self.settings.default_access(a.provider),
             effort: String::new(),
             cli_session: a.session,
+            fork_from: String::new(),
+            rollback_to: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: a.pid,

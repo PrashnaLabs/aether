@@ -664,3 +664,72 @@ fn mid_width_clips_resources_before_the_clock(cx: &mut TestAppContext) {
         }
     }
 }
+
+#[test]
+fn org_spend_counts_replies_finished_since_midnight() {
+    use aether_core::Message;
+    let user = |at| {
+        let mut m = Message::user("go");
+        m.sent_at_ms = Some(at);
+        m
+    };
+    let reply = |micros| {
+        let mut m = Message::assistant();
+        m.cost_micros = micros;
+        m
+    };
+    let messages = [reply(7), user(50), reply(100), user(200), reply(20), reply(3)];
+    let prices = std::collections::HashMap::new();
+    assert_eq!(spend_since(&messages, &prices, 100), 23);
+    assert_eq!(spend_since(&messages, &prices, 0), 123);
+    let ran = |micros, ms| {
+        let mut m = reply(micros);
+        m.elapsed_ms = Some(ms);
+        m
+    };
+    let crossing = [user(90), ran(5, 20), user(95), ran(11, 2)];
+    assert_eq!(spend_since(&crossing, &prices, 100), 5);
+}
+
+#[gpui_kit::test]
+fn org_item_has_no_spend_and_opens_its_popover(cx: &mut TestAppContext) {
+    use crate::org::model::{Head, Org};
+    let (window, app) = open(cx, None);
+    cx.update(crate::actions::bind_keys);
+    let mut visual = VisualTestContext::from_window(window, cx);
+    visual.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.settings.org_enabled = true;
+            let folder = std::path::PathBuf::from("/tmp/aether-status-org");
+            app.new_chat_in(folder.clone(), window, cx);
+            app.chats[app.active].messages = vec![aether_core::Message::user("hi")];
+            let head = Head { chat: Some(app.chats[app.active].id), ..Head::new("CEO", 2) };
+            let project = folder.display().to_string();
+            app.org.project = Some(project.clone());
+            app.sidebar_view = SidebarView::Org;
+            app.org.orgs.push(Org { project, heads: vec![head], ..Org::default() });
+        })
+    });
+    draw(&mut visual, &app, |_| {});
+    let text = app.read_with(&visual, |app, _| app.org_status_text()).expect("org item");
+    assert!(text.starts_with("1 heads · ") && !text.contains('$'), "{text}");
+    click(&mut visual, "status-org");
+    draw(&mut visual, &app, |_| {});
+    draw(&mut visual, &app, |_| {});
+    assert!(app.read_with(&visual, |app, _| app.org_pop.open));
+    assert!(visual.debug_bounds("org-pop").is_some(), "org popover should open");
+    assert!(visual.debug_bounds("org-pop-head-0").is_some());
+    visual.simulate_keystrokes("down down");
+    let focused = visual.update(|window, cx| {
+        app.read(cx).org_pop.rows.iter().position(|row| row.is_focused(window))
+    });
+    assert_eq!(focused, Some(2), "down skips the absent need-you row");
+    visual.simulate_keystrokes("escape");
+    draw(&mut visual, &app, |_| {});
+    assert!(visual.debug_bounds("org-pop").is_none(), "escape closes");
+    click(&mut visual, "status-org");
+    draw(&mut visual, &app, |_| {});
+    click(&mut visual, "status-org");
+    draw(&mut visual, &app, |_| {});
+    assert!(!app.read_with(&visual, |app, _| app.org_pop.open), "second click closes");
+}

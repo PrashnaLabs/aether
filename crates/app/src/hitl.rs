@@ -124,6 +124,35 @@ pub(crate) fn questions_answer(
     )
 }
 
+const MASK: &str = "••••••";
+
+/// What the transcript and chat database keep of an answer: secret fields are masked.
+pub(crate) fn redact_secrets(ask: &Ask, answer: &Answer) -> Answer {
+    let mask = |values: &[String]| values.iter().map(|_| MASK.to_string()).collect();
+    match (ask, answer) {
+        (Ask::Questions(questions), Answer::Answers(answers)) => Answer::Answers(
+            answers
+                .iter()
+                .enumerate()
+                .map(|(i, values)| match questions.get(i) {
+                    Some(q) if q.secret => mask(values),
+                    _ => values.clone(),
+                })
+                .collect(),
+        ),
+        (Ask::Form(form), Answer::Form(fields)) => Answer::Form(
+            fields
+                .iter()
+                .map(|(key, values)| {
+                    let secret = form.fields.iter().any(|f| f.secret && f.key == *key);
+                    (key.clone(), if secret { mask(values) } else { values.clone() })
+                })
+                .collect(),
+        ),
+        _ => answer.clone(),
+    }
+}
+
 /// In agent chats the line is a note for the agent, sent only with a deny; elsewhere it's
 /// the edited input.
 fn approval_answer(
@@ -453,14 +482,34 @@ impl ChatApp {
         Some((request, chat, self.chats[chat].is_agent()))
     }
 
-    /// Forgets a request's fields, picks and errors once it can't be answered here. If its
-    /// card had focus, the next pending card takes it, as a new ask would, else the composer.
-    pub(crate) fn drop_request(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let input = self.request_inputs.remove(&id);
+    pub(crate) fn remove_request(&mut self, id: u64) -> Option<RequestInput> {
         self.request_subscriptions.remove(&id);
         self.editing_plans.remove(&id);
         self.request_picks.remove(&id);
         self.request_errors.remove(&id);
+        self.request_inputs.remove(&id)
+    }
+
+    pub(crate) fn expire_chat_requests(&mut self, ix: usize) {
+        let ids: Vec<u64> = self.chats[ix]
+            .messages
+            .iter_mut()
+            .flat_map(|m| {
+                m.requests.iter_mut().filter(|r| r.status == RequestStatus::Pending).map(|r| {
+                    r.status = RequestStatus::Expired;
+                    r.id
+                })
+            })
+            .collect();
+        for id in ids {
+            self.remove_request(id);
+        }
+    }
+
+    /// Forgets a request's fields, picks and errors once it can't be answered here. If its
+    /// card had focus, the next pending card takes it, as a new ask would, else the composer.
+    pub(crate) fn drop_request(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.remove_request(id);
         if !input.is_some_and(|r| r.focus.contains_focused(window, cx)) {
             return;
         }
@@ -492,11 +541,13 @@ impl ChatApp {
         };
         let agent = self.chats[chat].is_agent();
         let msg = &mut self.chats[chat].messages[message];
-        let tool = msg.requests.iter().find(|r| r.id == id).and_then(|r| match &r.ask {
+        let request = msg.requests.iter().find(|r| r.id == id);
+        let tool = request.and_then(|r| match &r.ask {
             Ask::Approval(a) => Some(a.tool.clone()),
             _ => None,
         });
-        if !msg.answer(id, answer.clone()) {
+        let kept = request.map_or_else(|| answer.clone(), |r| redact_secrets(&r.ask, &answer));
+        if !msg.answer(id, kept) {
             return;
         }
         // CLI tool names aren't aether's tools; the CLI keeps its own session allowance
@@ -507,9 +558,7 @@ impl ChatApp {
         }
         self.agent.answer(id, answer);
         self.drop_request(id, window, cx);
-        if chat == self.active {
-            self.sync_rows(Some(message), cx);
-        }
+        self.sync_chat_rows(chat, Some(message), cx);
         cx.notify();
     }
 
@@ -563,10 +612,8 @@ impl ChatApp {
     }
 
     fn refresh_request(&mut self, id: u64, cx: &mut Context<Self>) {
-        if let Some((chat, message)) = self.locate_request(id)
-            && chat == self.active
-        {
-            self.sync_rows(Some(message), cx);
+        if let Some((chat, message)) = self.locate_request(id) {
+            self.sync_chat_rows(chat, Some(message), cx);
         }
         cx.notify();
     }
@@ -694,7 +741,19 @@ impl ChatApp {
             AskKey::Dismiss if approval => self.submit_request(id, Submit::Deny, window, cx),
             AskKey::Dismiss => self.focus_composer(window, cx),
             AskKey::Primary if on_card || in_line => match (primary, current) {
-                (Some(Submit::Answers), _) => self.step_to(id, step + 1, window, cx),
+                (Some(Submit::Answers), current) => {
+                    if let (true, Some(Target::Option { i, k, multi: false })) = (on_card, current)
+                        && matches!(&request.ask, Ask::Questions(qs) if qs.get(i).is_some_and(|q| k < q.options.len()))
+                        && self
+                            .request_picks
+                            .get(&id)
+                            .and_then(|p| p.get(i))
+                            .is_none_or(BTreeSet::is_empty)
+                    {
+                        self.pick_option(id, i, k, false, cx);
+                    }
+                    self.step_to(id, step + 1, window, cx)
+                }
                 (Some(submit), _) => self.submit_request(id, submit, window, cx),
                 (None, Some(target)) => self.activate(id, target, window, cx),
                 (None, None) => {}
@@ -1219,9 +1278,10 @@ impl RenderOnce for AskCard {
                 if app
                     .request_inputs
                     .get(&self.id)
-                    .is_some_and(|input| input.window != window.window_handle().window_id())
+                    .is_none_or(|input| input.window != window.window_handle().window_id())
+                    && let Some((ix, _)) = app.locate_request(self.id)
                 {
-                    let chat = app.chats[app.active].id;
+                    let chat = app.chats[ix].id;
                     app.rebind_session_requests(chat, window, cx);
                 }
                 app.ask_card(self.id, &self.view, window, cx)

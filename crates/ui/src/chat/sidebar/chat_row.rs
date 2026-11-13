@@ -8,19 +8,22 @@ use gpui_kit::component::{
     hover_card::HoverCard,
     input::InputState,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu},
+    spinner::Spinner,
     v_flex,
 };
 use gpui_kit::{
     Anchor, AnyElement, App, ClickEvent, Div, Entity, FocusHandle, Hsla, KeyDownEvent, MouseButton,
-    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, rems,
+    Pixels, Role, SharedString, Window, div, hsla, prelude::*, px, relative, rems,
 };
 
 use super::chrome::{reveal_on_hover, row_style, swallow_click, tabular, tooltip};
+use super::crew::{Bucket, CrewSummary, Tier};
 use super::menu::chat_menu;
-use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowPlace};
+use super::{ChatItem, ChatLine, ChatStatus, LONG_BRANCH, LONG_TITLE, Pick, RowHandler, RowPlace};
 use crate::arrow_count;
-use crate::components::provider_icon;
-use aether_core::SidebarStyle;
+use crate::components::{provider_icon, provider_tint};
+use crate::theme::{danger_text, info_text, mango_text};
+use aether_core::{Provider, SidebarStyle};
 
 /// Keeps both ends of a long name, which is where branch names differ.
 pub fn middle_truncate(text: &str, max: usize) -> String {
@@ -111,6 +114,90 @@ fn mark(name: &str, cx: &App) -> Div {
         .font_bold()
 }
 
+/// Provider icon on a rounded square tinted with the provider's colour.
+fn glyph_tile(provider: Provider, size: f32) -> Div {
+    let tint = provider_tint(provider);
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(size))
+        .rounded(px(if size >= 16. { 5. } else { 4. }))
+        .bg(tint.opacity(0.16))
+        .child(provider_icon(provider).size(px(size * 0.72)).text_color(tint))
+}
+
+/// Up to three overlapping provider tiles: who works in a crew.
+fn avatars(providers: &[Provider], cx: &App) -> AnyElement {
+    let ring = cx.theme().sidebar;
+    let shown = providers.len().min(3);
+    div()
+        .relative()
+        .flex_none()
+        .w(px(14. + 10. * shown.saturating_sub(1) as f32))
+        .h(px(14.))
+        .children(providers.iter().take(3).enumerate().map(|(i, &p)| {
+            glyph_tile(p, 14.)
+                .absolute()
+                .top_0()
+                .left(px(10. * i as f32))
+                .rounded_full()
+                .border_1()
+                .border_color(ring)
+                .bg(ring.blend(provider_tint(p).opacity(0.16)))
+        }))
+        .into_any_element()
+}
+
+/// Status in a 12 px slot; an idle child counts as done, so it gets a dim check.
+pub(super) fn status_mark(status: ChatStatus, child: bool, cx: &App) -> AnyElement {
+    let info = info_text(cx);
+    let dot =
+        |color: Hsla, size: f32| div().size(px(size)).rounded_full().bg(color).into_any_element();
+    let icon = |name: Lucide, color: Hsla| {
+        Icon::new(name).size(px(11.)).text_color(color).into_any_element()
+    };
+    let mark = match status {
+        ChatStatus::Waiting => dot(mango_text(cx), 8.),
+        ChatStatus::Failed => icon(Lucide::CircleX, danger_text(cx)),
+        ChatStatus::Done => icon(Lucide::Check, info),
+        ChatStatus::Idle if child => icon(Lucide::Check, info.opacity(0.6)),
+        ChatStatus::Idle => dot(cx.theme().muted_foreground, 4.),
+        ChatStatus::Quiet { .. } => {
+            Spinner::new().xsmall().color(cx.theme().muted_foreground).into_any_element()
+        }
+        _ => Spinner::new().xsmall().color(cx.theme().foreground).into_any_element(),
+    };
+    div()
+        .flex_none()
+        .size(px(12.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(mark)
+        .into_any_element()
+}
+
+/// A status that draws the given bucket's mark.
+fn bucket_status(bucket: Bucket) -> ChatStatus {
+    match bucket {
+        Bucket::NeedsYou => ChatStatus::Waiting,
+        Bucket::Failed => ChatStatus::Failed,
+        Bucket::Working => ChatStatus::Starting,
+        Bucket::Done => ChatStatus::Idle,
+    }
+}
+
+fn bucket_label(bucket: Bucket) -> &'static str {
+    match bucket {
+        Bucket::NeedsYou => "Needs you",
+        Bucket::Failed => "Failed",
+        Bucket::Working => "Working",
+        Bucket::Done => "Done",
+    }
+}
+
 fn background_chip(count: usize, ix: usize, cx: &App) -> Option<AnyElement> {
     (count > 0).then(|| {
         h_flex()
@@ -127,12 +214,36 @@ fn background_chip(count: usize, ix: usize, cx: &App) -> Option<AnyElement> {
     })
 }
 
+/// How long a working chat has run, for rows that already show its spinner.
+pub(super) fn run_clock(status: ChatStatus, now_ms: i64) -> Option<String> {
+    match status {
+        ChatStatus::Working { since_ms } => super::live::since(Some(since_ms), now_ms),
+        _ => None,
+    }
+}
+
 fn project_label(project: Option<&SharedString>) -> SharedString {
     project.cloned().unwrap_or_else(|| "No project".into())
 }
 
 /// Row label for screen readers; also carries the hover card's lines.
-pub(super) fn aria(title: &str, status: ChatStatus, lead: bool, line: Option<&ChatLine>) -> String {
+pub(super) fn aria(
+    title: &str,
+    status: ChatStatus,
+    lead: bool,
+    line: Option<&ChatLine>,
+    crew: Option<(CrewSummary, bool, usize)>,
+) -> String {
+    if let Some((summary, open, members)) = crew {
+        let mut aria = vec!["Lead".to_string(), title.to_string()];
+        if status != ChatStatus::Idle {
+            aria.push(status.label().into());
+        }
+        aria.push(format!("{members} spawned agents"));
+        aria.push(summary.words(Tier::Wide));
+        aria.push(if open { "expanded" } else { "collapsed" }.into());
+        return aria.join(", ");
+    }
     let mut aria = vec![title.to_string()];
     if status != ChatStatus::Idle {
         aria.push(status.label().into());
@@ -164,7 +275,141 @@ pub(super) fn aria(title: &str, status: ChatStatus, lead: bool, line: Option<&Ch
     aria.join(", ")
 }
 
-fn card(title: SharedString, line: ChatLine, cx: &App) -> impl IntoElement + use<> {
+pub(super) fn rollup(summary: CrewSummary, tier: Tier, cx: &App) -> AnyElement {
+    let color = |bucket: Bucket| match bucket {
+        Bucket::NeedsYou => mango_text(cx),
+        Bucket::Failed => danger_text(cx),
+        Bucket::Working => cx.theme().foreground,
+        Bucket::Done => cx.theme().muted_foreground,
+    };
+    let glyph = |bucket: Bucket| {
+        let icon = |name: Lucide, color: Hsla| {
+            Icon::new(name).size(rems(0.75)).text_color(color).into_any_element()
+        };
+        match bucket {
+            Bucket::NeedsYou => icon(Lucide::CircleDot, color(bucket)),
+            Bucket::Failed => icon(Lucide::CircleX, color(bucket)),
+            Bucket::Working => Spinner::new().xsmall().color(color(bucket)).into_any_element(),
+            Bucket::Done => icon(Lucide::Check, info_text(cx)),
+        }
+    };
+    let words = tier != Tier::Narrow;
+    h_flex()
+        .min_w_0()
+        .overflow_hidden()
+        .gap_2()
+        .items_center()
+        .text_xs()
+        .font_features(tabular())
+        .children(summary.parts(tier).into_iter().map(|(bucket, n)| {
+            h_flex()
+                .flex_none()
+                .gap_1()
+                .items_center()
+                .text_color(color(bucket))
+                .when(bucket == Bucket::NeedsYou, |el| el.font_semibold())
+                .child(glyph(bucket))
+                .child(if words { format!("{n} {}", bucket.word()) } else { n.to_string() })
+        }))
+        .into_any_element()
+}
+
+pub(super) fn status_bar(summary: CrewSummary, cx: &App) -> AnyElement {
+    let total = summary.total().max(1) as f32;
+    let segment = |n: usize, color: Hsla| {
+        (n > 0).then(|| div().h_full().min_w(px(2.)).w(relative(n as f32 / total)).bg(color))
+    };
+    h_flex()
+        .w_full()
+        .h(px(3.))
+        .gap(px(1.))
+        .rounded(px(2.))
+        .overflow_hidden()
+        .bg(cx.theme().foreground.opacity(0.05))
+        .children(segment(summary.done, info_text(cx).opacity(0.55)))
+        .children(segment(summary.working, cx.theme().foreground.opacity(0.7)))
+        .children(segment(summary.needs_you, mango_text(cx)))
+        .children(segment(summary.failed, danger_text(cx)))
+        .into_any_element()
+}
+
+/// What the hover card shows beyond the row's line.
+#[derive(Clone, Copy)]
+struct CardState {
+    status: ChatStatus,
+    now: i64,
+    crew: Option<CrewSummary>,
+}
+
+fn with_card(
+    row: impl IntoElement + 'static,
+    ix: usize,
+    title: SharedString,
+    line: Option<ChatLine>,
+    state: CardState,
+) -> AnyElement {
+    match line {
+        Some(line) => HoverCard::new(("chat-card", ix))
+            .anchor(Anchor::LeftCenter)
+            .ml_2()
+            .trigger(row)
+            .content(move |_, _, cx| card(title.clone(), line.clone(), state, cx))
+            .into_any_element(),
+        None => row.into_any_element(),
+    }
+}
+
+/// The row's trailing time or icon, giving its place to the actions on hover or while
+/// the menu is open, so no row keeps an empty actions gap.
+fn hover_swap(content: impl IntoElement, actions: Div, group: &SharedString, show: bool) -> Div {
+    div()
+        .relative()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_end()
+        .min_w(rems(1.25))
+        .h(rems(1.25))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .when(show, |d| d.opacity(0.))
+                .when(!show, |d| d.group_hover(group.clone(), |s| s.opacity(0.)))
+                .child(content),
+        )
+        .child(div().absolute().top_0().bottom_0().right_0().flex().items_center().child(actions))
+}
+
+/// A row's place text; worktrees show only their icon, the hover card names them.
+fn place_label(place: &RowPlace) -> Option<String> {
+    match place {
+        RowPlace::Branch { worktree: true, .. } => None,
+        RowPlace::Branch { name, .. } => Some(middle_truncate(name, LONG_BRANCH)),
+        RowPlace::Folder(name) => Some(name.to_string()),
+        RowPlace::NoGit => Some("No git".to_string()),
+    }
+}
+
+fn swap(mark: AnyElement, chevron: Option<AnyElement>) -> AnyElement {
+    div()
+        .relative()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(rems(1.))
+        .child(mark)
+        .children(chevron)
+        .into_any_element()
+}
+
+fn card(
+    title: SharedString,
+    line: ChatLine,
+    state: CardState,
+    cx: &App,
+) -> impl IntoElement + use<> {
     let muted = cx.theme().muted_foreground;
     let entry = |icon: AnyElement, text: SharedString| {
         h_flex()
@@ -175,22 +420,82 @@ fn card(title: SharedString, line: ChatLine, cx: &App) -> impl IntoElement + use
             .child(div().min_w_0().truncate().child(text))
     };
     let small = |icon: Icon| icon.size(rems(0.875)).flex_none().into_any_element();
+    let gone = line.removed;
+    let struck = |icon: AnyElement, text: SharedString| {
+        h_flex()
+            .gap_2()
+            .items_center()
+            .text_color(muted)
+            .child(icon)
+            .child(div().min_w_0().truncate().when(gone, |d| d.line_through()).child(text))
+    };
+    let worktree = matches!(line.place, Some(RowPlace::Branch { worktree: true, .. }));
     let place = line.place.as_ref().map(|place| {
         let text = match place {
             RowPlace::Branch { name, .. } => name.clone(),
             RowPlace::Folder(_) => line.path.clone(),
             RowPlace::NoGit => "Not a git repository".into(),
         };
-        entry(small(Icon::new(place.icon())), text)
+        struck(small(Icon::new(place.icon())), text)
+    });
+    let tree_path = worktree.then(|| {
+        struck(small(Icon::new(Lucide::Folder)), super::project_row::tilde_path(&line.path).into())
+    });
+    let tree_gone = (worktree && gone).then(|| {
+        entry(small(Icon::new(Lucide::TriangleAlert)), "Worktree removed or unavailable".into())
+    });
+    let thinking = match line.effort.is_empty() {
+        true => "Default thinking".into(),
+        false => format!("{} thinking", capitalize(&line.effort)).into(),
+    };
+    let activity: Option<SharedString> = match state.status {
+        ChatStatus::Idle | ChatStatus::Background(_) if line.time.is_empty() => None,
+        ChatStatus::Idle | ChatStatus::Background(_) => {
+            Some(format!("Last active {}", line.time).into())
+        }
+        status => Some(status.text(state.now).into()),
+    };
+    let changes = (line.changed > 0).then(|| {
+        let files = if line.changed == 1 { "file" } else { "files" };
+        let mut text = format!("+{} −{} in {} {files}", line.added, line.deleted, line.changed);
+        if let Some((ahead, behind)) = line.ahead_behind.filter(|&(a, b)| a + b > 0) {
+            text.push_str(&format!(" · {ahead}↑ {behind}↓"));
+        }
+        entry(small(Icon::new(Lucide::FilePen)), text.into())
+    });
+    let crew = state.crew.filter(|c| c.total() > 0).map(|summary| {
+        let agents = if summary.total() == 1 {
+            "1 agent".into()
+        } else {
+            format!("{} agents", summary.total())
+        };
+        h_flex()
+            .gap_2()
+            .items_center()
+            .text_color(muted)
+            .child(small(Icon::new(Lucide::Users)))
+            .child(agents)
+            .child(rollup(summary, Tier::Wide, cx))
     });
     v_flex()
-        .max_w(rems(20.))
+        .max_w(rems(22.))
         .gap_1p5()
         .text_sm()
         .child(div().font_semibold().child(title))
+        .children(activity.map(|text| entry(small(Icon::new(Lucide::Clock)), text)))
         .child(entry(project_mark(line.project.as_ref(), cx), project_label(line.project.as_ref())))
         .children(place)
+        .children(tree_path)
+        .children(tree_gone)
+        .children(changes)
         .child(entry(small(provider_icon(line.provider)), line.model.clone()))
+        .child(entry(small(Icon::new(Lucide::Gauge)), thinking))
+        .children(crew)
+}
+
+fn capitalize(word: &str) -> String {
+    let mut chars = word.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// The row's leading mark; with bulk select on, a checkbox takes its place on hover
@@ -249,6 +554,12 @@ pub(super) fn render_chat(
     group: SharedString,
     rename: Option<Entity<InputState>>,
     style: SidebarStyle,
+    chevron: Option<AnyElement>,
+    crew: Option<(CrewSummary, bool, usize)>,
+    show_all: Option<(SharedString, RowHandler)>,
+    tier: Tier,
+    git: bool,
+    big: bool,
     cx: &App,
 ) -> AnyElement {
     let muted = cx.theme().muted_foreground;
@@ -258,18 +569,19 @@ pub(super) fn render_chat(
     let slot = |mark: AnyElement| pick_slot(mark, pick.as_ref(), &pick_group, pick_id, &title);
     let status = chat.status;
     let now = chat.now;
-    let aria = aria(&title, status, chat.lead, chat.line.as_ref());
+    let child = chat.child();
+    let aria = aria(&title, status, chat.lead, chat.line.as_ref().filter(|_| !child), crew);
     let removed = chat.line.as_ref().is_some_and(|line| line.removed);
     let menu = {
-        let chat = chat.clone();
+        let (chat, show_all) = (chat.clone(), show_all.clone());
         move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| {
-            chat_menu(menu, &chat, window, cx)
+            chat_menu(menu, &chat, show_all.clone(), window, cx)
         }
     };
     let context = {
         let chat = chat.clone();
         move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| {
-            chat_menu(menu, &chat, window, cx)
+            chat_menu(menu, &chat, show_all.clone(), window, cx)
         }
     };
     let actions = reveal_on_hover(div().flex_none().size(rems(1.25)), group.clone(), show_menu)
@@ -285,7 +597,9 @@ pub(super) fn render_chat(
                 .on_open_change(on_menu),
         ));
     let line = chat.line.clone();
-    let lead = chat.lead;
+    let users = chat.lead && crew.is_none() && !child && line.is_none();
+    let badge = chat.badge.clone();
+    let pinned = chat.pinned && !chat.pin;
     let tip = match line {
         Some(_) => None,
         None => (title.chars().count() > LONG_TITLE).then(|| title.clone()),
@@ -302,13 +616,17 @@ pub(super) fn render_chat(
             None => {
                 let title = div()
                     .id(("chat-title", ix))
-                    .flex_1()
+                    .when(!pinned, |el| el.flex_1())
                     .min_w_0()
                     .truncate()
                     .when(removed, |el| el.text_color(muted))
+                    .when(crew.is_some() && !child, |el| el.font_semibold())
+                    .when(child && style != SidebarStyle::Focus, |el| {
+                        el.flex_auto().min_w(rems(2.25))
+                    })
                     .when_some(tip, |el, tip| el.tooltip(tooltip(tip)))
                     .child(title);
-                if !lead {
+                if !users && badge.is_none() && !pinned {
                     return title.into_any_element();
                 }
                 h_flex()
@@ -316,15 +634,38 @@ pub(super) fn render_chat(
                     .min_w_0()
                     .gap_1()
                     .items_center()
-                    .child(
+                    .when(users, |el| {
+                        el.child(
+                            div()
+                                .id(("chat-lead", ix))
+                                .debug_selector(|| format!("chat-lead-{ix}"))
+                                .flex_none()
+                                .tooltip(tooltip("Lead".into()))
+                                .child(Icon::new(Lucide::Users).size(rems(0.75)).text_color(muted)),
+                        )
+                    })
+                    .children(badge.clone().map(|(text, color)| {
                         div()
-                            .id(("chat-lead", ix))
-                            .debug_selector(|| format!("chat-lead-{ix}"))
                             .flex_none()
-                            .tooltip(tooltip("Lead".into()))
-                            .child(Icon::new(Lucide::Users).size(rems(0.75)).text_color(muted)),
-                    )
+                            .px_1()
+                            .corner(px(3.))
+                            .bg(color.opacity(0.18))
+                            .text_color(color)
+                            .text_size(px(10.))
+                            .font_bold()
+                            .child(text)
+                    }))
                     .child(title)
+                    .when(pinned, |el| {
+                        el.child(
+                            div()
+                                .id(("chat-pinned", ix))
+                                .flex_none()
+                                .tooltip(tooltip("Pinned".into()))
+                                .child(Icon::new(Lucide::Pin).size(rems(0.6875)).text_color(muted)),
+                        )
+                        .child(div().flex_1())
+                    })
                     .into_any_element()
             }
         }
@@ -339,7 +680,7 @@ pub(super) fn render_chat(
         chat.active,
         cx,
     )
-    .group(group)
+    .group(group.clone())
     .w_full()
     .px_2()
     .py_1()
@@ -366,6 +707,212 @@ pub(super) fn render_chat(
                 on_click(ev, window, cx);
             })
     });
+    let card_line = line.clone();
+    let state = CardState { status, now, crew: crew.map(|(summary, ..)| summary) };
+    let time = line.as_ref().map(|line| line.time.clone()).unwrap_or_default();
+    let time_text = |time: SharedString| {
+        div().flex_none().text_xs().text_color(muted).font_features(tabular()).child(time)
+    };
+    if child && style != SidebarStyle::Focus {
+        let mark = status_mark(status, true, cx);
+        let name = title.clone();
+        let chip = line.as_ref().filter(|_| git && tier != Tier::Narrow).and_then(|line| {
+            let place = line.place.as_ref().map(|place| {
+                h_flex()
+                    .min_w_0()
+                    .gap_0p5()
+                    .items_center()
+                    .child(Icon::new(place.icon()).size(rems(0.75)).flex_none())
+                    .children(place_label(place).map(|s| div().min_w_0().truncate().child(s)))
+            });
+            let diff = line.changed > 0 && (line.added > 0 || line.deleted > 0);
+            (place.is_some() || diff).then(|| {
+                h_flex()
+                    .id(("chat-child-git", ix))
+                    .min_w_0()
+                    .max_w(rems(9.))
+                    .gap_1()
+                    .items_center()
+                    .text_xs()
+                    .text_color(muted)
+                    .font_features(tabular())
+                    .children(place)
+                    .when(diff, |el| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .text_color(crate::theme::success_text(cx))
+                                .child(format!("+{}", line.added)),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(crate::theme::danger_text(cx))
+                                .child(format!("−{}", line.deleted)),
+                        )
+                    })
+            })
+        });
+        let lead_icon = match line.as_ref() {
+            Some(line) => glyph_tile(line.provider, 14.).into_any_element(),
+            None => Icon::new(Lucide::MessageCircle)
+                .size(rems(0.75))
+                .text_color(muted)
+                .into_any_element(),
+        };
+        let one = h_flex()
+            .w_full()
+            .gap_1p5()
+            .items_center()
+            .child(slot(swap(lead_icon, chevron)))
+            .child(title_cell(name))
+            .children(chip)
+            .child(mark)
+            .children(crew.map(|(summary, ..)| rollup(summary, Tier::Narrow, cx)))
+            .when(tier == Tier::Wide, |el| el.children(approve_action))
+            .child(hover_swap(
+                div().when(tier != Tier::Narrow && !time.is_empty(), |d| d.child(time_text(time))),
+                actions,
+                &group,
+                show_menu,
+            ));
+        let stub = (style == SidebarStyle::Minimal).then(|| {
+            div()
+                .absolute()
+                .left(px(-6.))
+                .top(relative(0.5))
+                .w(px(6.))
+                .h(px(1.))
+                .bg(cx.theme().sidebar_border.opacity(0.6))
+        });
+        let row = row.relative().py(px(1.)).text_size(px(12.)).children(stub).child(one);
+        return with_card(row.context_menu(context), ix, title, card_line, state);
+    }
+    if let Some((summary, ..)) = crew {
+        let lead_status = match summary.worst() {
+            Some(bucket) if bucket < Bucket::of(status) => bucket_status(bucket),
+            _ => status,
+        };
+        let icon = match (style, line.as_ref()) {
+            (SidebarStyle::Focus, _) => status_mark(lead_status, false, cx),
+            (SidebarStyle::Default, Some(line)) => {
+                glyph_tile(line.provider, 16.).into_any_element()
+            }
+            (_, Some(line)) => provider_icon(line.provider).size(rems(0.875)).into_any_element(),
+            (_, None) => {
+                Icon::new(Lucide::Users).size(rems(0.875)).text_color(muted).into_any_element()
+            }
+        };
+        if style == SidebarStyle::Focus {
+            let one = h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(slot(swap(icon, chevron)))
+                .child(title_cell(title.clone()))
+                .children(run_clock(status, now).map(|clock| time_text(clock.into())))
+                .child(
+                    div()
+                        .flex_none()
+                        .debug_selector(move || format!("chat-rollup-{}", chat.id))
+                        .child(rollup(summary, Tier::Narrow, cx)),
+                )
+                .children(approve_action)
+                .child(match line.as_ref() {
+                    Some(l) => hover_swap(
+                        provider_icon(l.provider).size(rems(0.8125)),
+                        actions,
+                        &group,
+                        show_menu,
+                    ),
+                    None => actions,
+                });
+            let row = row.py_0p5().child(one).context_menu(context);
+            return with_card(row, ix, title, card_line, state);
+        }
+        let idle = matches!(status, ChatStatus::Idle | ChatStatus::Background(_));
+        let background = line.as_ref().and_then(|l| background_chip(l.background, ix, cx));
+        if style == SidebarStyle::Minimal {
+            let top = h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(title_cell(title.clone()))
+                .children(background)
+                .children((!idle).then(|| status.badge(("chat-status-badge", ix), Some(now), cx)))
+                .children(approve_action);
+            let folder = Icon::new(Lucide::Folder)
+                .size(rems(0.75))
+                .flex_none()
+                .when_some(line.as_ref().and_then(|l| l.project.as_ref()), |icon, name| {
+                    icon.text_color(project_color(name, cx))
+                })
+                .into_any_element();
+            let meta = h_flex()
+                .w_full()
+                .gap_1p5()
+                .items_center()
+                .text_xs()
+                .text_color(muted)
+                .child(slot(swap(folder, chevron)))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(project_label(line.as_ref().and_then(|l| l.project.as_ref()))),
+                )
+                .when(!chat.providers.is_empty(), |el| el.child(avatars(&chat.providers, cx)))
+                .child(rollup(summary, tier, cx))
+                .child(div().flex_1())
+                .child(Icon::new(Lucide::Users).size(rems(0.75)).flex_none())
+                .when(idle && !time.is_empty(), |el| {
+                    el.child(div().flex_none().font_features(tabular()).child(time.clone()))
+                })
+                .child(match line.as_ref() {
+                    Some(l) => hover_swap(
+                        provider_icon(l.provider).size(rems(0.8125)),
+                        actions,
+                        &group,
+                        show_menu,
+                    ),
+                    None => actions,
+                });
+            let row = row.gap_0p5().child(top).child(meta).context_menu(context);
+            return with_card(row, ix, title, card_line, state);
+        }
+        let trailing = match idle {
+            true => time_text(time).into_any_element(),
+            false => status.badge(("chat-status-badge", ix), Some(now), cx),
+        };
+        let top = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .child(slot(swap(icon, chevron)))
+            .child(Icon::new(Lucide::Users).size(rems(0.75)).text_color(muted).flex_none())
+            .child(title_cell(title.clone()))
+            .children(background)
+            .children(approve_action)
+            .child(hover_swap(trailing, actions, &group, show_menu));
+        if !big {
+            return with_card(row.child(top).context_menu(context), ix, title, card_line, state);
+        }
+        let second = h_flex()
+            .pl(rems(1.5))
+            .gap_1p5()
+            .items_center()
+            .when(!chat.providers.is_empty(), |el| el.child(avatars(&chat.providers, cx)))
+            .child(rollup(summary, tier, cx));
+        let row = row
+            .gap_0p5()
+            .child(top)
+            .child(second)
+            .when(style == SidebarStyle::Default, |row| {
+                row.child(div().pl(rems(1.5)).pt_1().pb_0p5().child(status_bar(summary, cx)))
+            })
+            .context_menu(context);
+        return with_card(row, ix, title, card_line, state);
+    }
     let Some(line) = line else {
         let title_row = h_flex()
             .w_full()
@@ -393,6 +940,7 @@ pub(super) fn render_chat(
             .child(actions);
         return row.child(title_row).context_menu(context).into_any_element();
     };
+    let tally = chat.tally.map(|summary| rollup(summary, Tier::Narrow, cx));
     let background = background_chip(line.background, ix, cx);
     // The chip carries the background count, so the badge would repeat it.
     let status = match status {
@@ -409,8 +957,7 @@ pub(super) fn render_chat(
                 .items_center()
                 .child(title_cell(title.clone()))
                 .children(badge)
-                .children(approve_action)
-                .child(actions);
+                .children(approve_action);
             let meta = h_flex()
                 .w_full()
                 .gap_1p5()
@@ -429,80 +976,76 @@ pub(super) fn render_chat(
                 .child(
                     div().flex_1().min_w_0().truncate().child(project_label(line.project.as_ref())),
                 )
-                .when(status == ChatStatus::Idle && !line.time.is_empty(), |el| {
-                    el.child(div().flex_none().font_features(tabular()).child(line.time.clone()))
-                })
+                .when(
+                    status == ChatStatus::Idle && !line.time.is_empty() && tally.is_none(),
+                    |el| {
+                        el.child(
+                            div().flex_none().font_features(tabular()).child(line.time.clone()),
+                        )
+                    },
+                )
+                .children(tally)
                 .children(background)
-                .child(provider_icon(line.provider).size(rems(0.8125)).flex_none());
-            return row.gap_0p5().child(top).child(meta).context_menu(context).into_any_element();
+                .child(hover_swap(
+                    provider_icon(line.provider).size(rems(0.8125)),
+                    actions,
+                    &group,
+                    show_menu,
+                ));
+            let row = row.gap_0p5().child(top).child(meta).context_menu(context);
+            return with_card(row, ix, title, Some(line), state);
         }
         SidebarStyle::Focus => {
-            let trailing = badge.unwrap_or_else(|| {
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(muted)
-                    .font_features(tabular())
-                    .child(line.time.clone())
-                    .into_any_element()
-            });
+            let words = if child {
+                bucket_label(Bucket::of(status)).into()
+            } else if status == ChatStatus::Idle {
+                line.time.clone()
+            } else {
+                status.text(now).into()
+            };
+            let trailing = div()
+                .flex_none()
+                .text_xs()
+                .text_color(muted)
+                .font_features(tabular())
+                .child(words)
+                .into_any_element();
             let one = h_flex()
                 .w_full()
                 .gap_2()
                 .items_center()
-                .child(slot(project_mark(line.project.as_ref(), cx)))
+                .child(slot(status_mark(status, child, cx)))
                 .child(title_cell(title.clone()))
-                .child(trailing)
+                .child(tally.unwrap_or(trailing))
                 .children(approve_action)
-                .child(actions);
-            return row.child(one).context_menu(context).into_any_element();
+                .child(hover_swap(
+                    provider_icon(line.provider).size(rems(0.8125)),
+                    actions,
+                    &group,
+                    show_menu,
+                ));
+            let row = row.py_0p5().child(one).context_menu(context);
+            return with_card(row, ix, title, Some(line), state);
         }
         SidebarStyle::Default => {}
     }
-    let corner = line.time.clone();
-    let (top, title_line) = if nested {
-        // Nested in project folder: omit top project label line, keep row compact (~32px)
-        let line_elem = h_flex()
-            .w_full()
-            .gap_1p5()
-            .items_center()
-            .child(title_cell(title.clone()))
-            .when(status != ChatStatus::Idle, |r| {
-                r.child(status.badge(("chat-status-badge", ix), Some(now), cx))
-            })
-            .child(actions);
-        (None, line_elem)
-    } else {
-        // Un-nested (pinned or direct): keep project tag
-        let top_elem = h_flex()
-            .w_full()
-            .gap_1p5()
-            .items_center()
-            .text_xs()
-            .text_color(muted)
-            .child(slot(project_mark(line.project.as_ref(), cx)))
-            .child(div().flex_1().min_w_0().truncate().child(project_label(line.project.as_ref())))
-            .child(
-                h_flex()
-                    .flex_none()
-                    .gap_1()
-                    .items_center()
-                    .font_features(tabular())
-                    .when(status != ChatStatus::Idle, |el| {
-                        el.child(status.badge(("chat-status-badge", ix), Some(now), cx))
-                    })
-                    .when(status == ChatStatus::Idle && !corner.is_empty(), |el| {
-                        el.child(corner.clone())
-                    }),
-            );
-        let line_elem = h_flex()
-            .w_full()
-            .gap_2()
-            .items_center()
-            .child(title_cell(title.clone()))
-            .child(actions);
-        (Some(top_elem), line_elem)
-    };
+    let trailing =
+        tally.or(badge).unwrap_or_else(|| time_text(line.time.clone()).into_any_element());
+    let one = h_flex()
+        .w_full()
+        .gap_2()
+        .items_center()
+        .child(slot(glyph_tile(line.provider, 14.).into_any_element()))
+        .child(title_cell(title.clone()))
+        .children(background)
+        .children(approve_action)
+        .child(hover_swap(trailing, actions, &group, show_menu));
+    let own_place =
+        line.removed || matches!(line.place, Some(RowPlace::Branch { worktree: true, .. }));
+    if !(nested && own_place) {
+        let row = row.child(one).context_menu(context);
+        return with_card(row, ix, title, Some(line), state);
+    }
     let clickable_chip = line.status_clickable();
     let clickable = clickable_chip.then(|| chat.on_status.clone()).flatten();
     let (ahead, behind) = line.ahead_behind.unwrap_or((0, 0));
@@ -518,18 +1061,13 @@ pub(super) fn render_chat(
         label.into()
     };
     let place = line.place.as_ref().map(|place| {
-        let short = match place {
-            RowPlace::Branch { name, .. } => middle_truncate(name, LONG_BRANCH),
-            RowPlace::Folder(name) => name.to_string(),
-            RowPlace::NoGit => "No git".to_string(),
-        };
         h_flex()
             .min_w_0()
             .gap_1()
             .items_center()
             .child(Icon::new(place.icon()).size(rems(0.75)).flex_none())
-            .child(div().min_w_0().truncate().child(short))
-            .when(line.removed, |el| el.child(div().flex_none().child("· removed")))
+            .children(place_label(place).map(|s| div().min_w_0().truncate().child(s)))
+            .when(line.removed, |el| el.child(div().flex_none().child("removed")))
     });
     let git = clickable_chip.then(|| {
         let chips = h_flex()
@@ -573,26 +1111,15 @@ pub(super) fn render_chat(
     });
     let bottom = h_flex()
         .w_full()
+        .pl(rems(1.5))
         .gap_1p5()
         .items_center()
         .text_xs()
         .text_color(muted)
         .children(place)
-        .children(git)
-        .child(div().flex_1())
-        .children(approve_action)
-        .when(nested && status == ChatStatus::Idle && !corner.is_empty(), |el| {
-            el.child(div().flex_none().font_features(tabular()).child(corner))
-        })
-        .children(background)
-        .child(provider_icon(line.provider).size(rems(0.8125)).flex_none());
-    let row = row.gap_0p5().children(top).child(title_line).child(bottom).context_menu(context);
-    HoverCard::new(("chat-card", ix))
-        .anchor(Anchor::LeftCenter)
-        .ml_2()
-        .trigger(row)
-        .content(move |_, _, cx| card(title.clone(), line.clone(), cx))
-        .into_any_element()
+        .children(git);
+    let row = row.gap_0p5().child(one).child(bottom).context_menu(context);
+    with_card(row, ix, title, Some(line), state)
 }
 
 #[cfg(test)]

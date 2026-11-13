@@ -1,9 +1,7 @@
 //! Full-width chat tabs: Agent, Terminal and Explorer followed by an optional Browser tab.
 
 use aether_core::{ChatLayout, Message, Role, Watch};
-use aether_ui::{
-    FileEdits, ReplyDiff, Tab, TabBar, anchored_popup, icon_chip, reply_edits, reveal_file,
-};
+use aether_ui::{FileEdits, ReplyDiff, Tab, TabBar, icon_chip, reply_edits, reveal_file};
 use aether_ui::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::{HandleEdge, resize_handle};
@@ -38,13 +36,14 @@ pub(crate) enum Surface {
     Btw,
     Terminal,
     Files,
+    Workspace,
     Review,
 }
 
 impl Surface {
-    /// Tab order in the right panel: Terminal and Files fixed, BTW and Review then Browser closable.
+    /// Tab order in the right panel: Terminal, Files and Workspace fixed, BTW and Review then Browser closable.
     pub(crate) fn tabs(btw: bool, review: bool, browser: bool, board: bool) -> Vec<Self> {
-        let mut tabs = vec![Self::Terminal, Self::Files];
+        let mut tabs = vec![Self::Terminal, Self::Files, Self::Workspace];
         if btw {
             tabs.push(Self::Btw);
         }
@@ -71,6 +70,7 @@ impl Surface {
             Self::Board => "Board",
             Self::Terminal => "Terminal",
             Self::Files => "Files",
+            Self::Workspace => "Workspace",
             Self::Review => "Review",
         }
     }
@@ -82,6 +82,7 @@ impl Surface {
             Self::Board => Lucide::LayoutDashboard,
             Self::Terminal => Lucide::Terminal,
             Self::Files => Lucide::Folder,
+            Self::Workspace => Lucide::LayoutList,
             Self::Review => Lucide::FileDiff,
         }
     }
@@ -93,7 +94,7 @@ impl Surface {
             Self::Board => SideTab::Board,
             Self::Terminal => SideTab::Terminal,
             Self::Files | Self::Review => SideTab::Explorer,
-            Self::Btw => SideTab::Agent,
+            Self::Btw | Self::Workspace => SideTab::Agent,
         }
     }
 
@@ -103,7 +104,7 @@ impl Surface {
             Self::Review => {
                 Some(if diff_open { ExplorerView::Diff } else { ExplorerView::Changes })
             }
-            Self::Browser | Self::Board | Self::Btw | Self::Terminal => None,
+            Self::Browser | Self::Board | Self::Btw | Self::Terminal | Self::Workspace => None,
         }
     }
 }
@@ -595,23 +596,7 @@ impl ChatApp {
         );
 
         if is_agent {
-            let pop = self.render_workspace_pop(window, cx);
-            let open = pop.is_some();
-            let toggle = icon_chip("workspace-toggle", open, cx)
-                .selected(open)
-                .toggled(open)
-                .icon(Lucide::LayoutList)
-                .accessibility_label("Workspace")
-                .tooltip("Workspace")
-                .when(!open, |d| {
-                    d.on_click(self.session_listener(cx, |this, _, window, cx| {
-                        this.toggle_workspace_pop(window, cx)
-                    }))
-                });
-            let workspace_btn =
-                anchored_popup("workspace-pop-anchor", toggle, &self.workspace_pop.trigger, true)
-                    .anchor(Anchor::TopRight)
-                    .when_some(pop, |p, pop| p.content(pop));
+            let workspace_btn = self.workspace_toggle(cx);
 
             let btw = icon_chip("btw-toggle", self.btw_open, cx)
                 .selected(self.btw_open)
@@ -620,6 +605,7 @@ impl ChatApp {
                 .tooltip("By the way")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.btw_open = !this.btw_open;
+                    this.workspace_open &= !this.btw_open;
                     cx.notify();
                 }));
             bar = bar.action(btw);
@@ -639,7 +625,7 @@ impl ChatApp {
             bar = bar.action(controls);
         }
 
-        bar.border_bottom(!self.hosts_controls(window) || self.btw_open)
+        bar.border_bottom(!self.hosts_controls(window) || self.btw_open || self.workspace_open)
     }
 
     /// Wraps the window's top-right bar so it drags the window and ends in the window controls.
@@ -693,6 +679,7 @@ impl ChatApp {
         self.right_surface = Some(surface);
         match surface {
             Surface::Btw => {}
+            Surface::Workspace => self.open_workspace_panel(cx),
             Surface::Browser => self.open_browser_tab(window, cx),
             Surface::Board => {}
             Surface::Terminal => self.open_terminal(window, cx),
@@ -713,7 +700,7 @@ impl ChatApp {
                 self.close_browser_tab(cx);
             }
             Surface::Board => self.close_board_tab(cx),
-            Surface::Terminal | Surface::Files => return,
+            Surface::Terminal | Surface::Files | Surface::Workspace => return,
         }
         let active = self.right_surface.unwrap_or(Surface::Terminal);
         if active == surface {
@@ -733,7 +720,7 @@ impl ChatApp {
         self.select_surface(Surface::Btw, window, cx);
     }
 
-    fn toggle_right_panel(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_right_panel(&mut self, cx: &mut Context<Self>) {
         self.update_settings(cx, |s| s.right_panel_collapsed = !s.right_panel_collapsed);
         cx.notify();
     }
@@ -746,10 +733,11 @@ impl ChatApp {
     ) -> AnyElement {
         match surface {
             Surface::Btw => self.render_btw_panel(false, cx),
+            Surface::Workspace => self.render_context_panel(false, window, cx),
             Surface::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
-            Surface::Board => self.render_board_tab(cx),
+            Surface::Board => self.render_board_tab(window, cx),
             Surface::Files | Surface::Review => self.render_explorer_page(window, cx),
             Surface::Terminal => {
                 self.drawer_for(self.active, window, cx);
@@ -861,23 +849,7 @@ impl ChatApp {
                 .tooltip("Add tab")
                 .dropdown_menu_with_anchor(Anchor::TopRight, add),
         );
-        let pop = self.render_workspace_pop(window, cx);
-        let open = pop.is_some();
-        let toggle = icon_chip("workspace-toggle", open, cx)
-            .selected(open)
-            .toggled(open)
-            .icon(Lucide::LayoutList)
-            .accessibility_label("Workspace")
-            .tooltip("Workspace")
-            .when(!open, |d| {
-                d.on_click(self.session_listener(cx, |this, _, window, cx| {
-                    this.toggle_workspace_pop(window, cx)
-                }))
-            });
-        let workspace_btn =
-            anchored_popup("workspace-pop-anchor", toggle, &self.workspace_pop.trigger, true)
-                .anchor(Anchor::TopRight)
-                .when_some(pop, |p, pop| p.content(pop));
+        let workspace_btn = self.workspace_toggle(cx);
         bar = bar.action(workspace_btn);
         if self.settings.chat_layout != ChatLayout::Split {
             bar = bar.action(
@@ -900,7 +872,7 @@ impl ChatApp {
         bar.into_any_element()
     }
 
-    fn right_panel_rail(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn right_panel_rail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let under_controls = self.host_of(window) == 0
             && cfg!(any(target_os = "linux", target_os = "windows"))
             && !window.is_fullscreen();
@@ -929,6 +901,10 @@ impl ChatApp {
             self.board_tab,
         );
         for (index, surface) in tabs.into_iter().enumerate() {
+            if surface == Surface::Workspace {
+                rail = rail.child(self.workspace_toggle(cx));
+                continue;
+            }
             let active = self.right_surface == Some(surface);
             rail = rail.child(
                 icon_chip(("right-panel-rail", index), active, cx)
@@ -1113,11 +1089,11 @@ impl ChatApp {
             SideTab::Browser => {
                 self.browser_content(!self.palette_open && !self.notes.search_ui.open, cx)
             }
-            SideTab::Board => self.render_board_tab(cx),
+            SideTab::Board => self.render_board_tab(window, cx),
         };
         let bar = self.side_tab_bar(window, cx).into_any_element();
         let controls = self.hosts_controls(window);
-        let bar = if controls && !self.btw_open {
+        let bar = if controls && !self.btw_open && !self.workspace_open {
             self.window_bar(bar, 38., true, true, cx)
         } else {
             bar
@@ -1130,7 +1106,7 @@ impl ChatApp {
             .child(bar)
             .child(content)
             .into_any_element();
-        if self.btw_open {
+        if self.btw_open || self.workspace_open {
             let (resize, resize_end) = (cx.entity(), cx.entity());
             let panel = v_flex()
                 .id("btw-sidebar")
@@ -1167,7 +1143,11 @@ impl ChatApp {
                         cx.new(|_| RightPanelResize)
                     }),
                 )
-                .child(self.render_btw_panel(controls, cx))
+                .child(if self.btw_open {
+                    self.render_btw_panel(controls, cx)
+                } else {
+                    self.render_context_panel(controls, window, cx)
+                })
                 .into_any_element();
             Some(
                 h_flex()

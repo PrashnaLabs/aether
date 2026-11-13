@@ -164,11 +164,16 @@ fn cli_settings() -> Settings {
 fn chat(effort: &str) -> ChatSession {
     ChatSession {
         ephemeral: false,
+        delta_from: None,
+        window: None,
+        used: None,
         key: "1".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,
         effort: effort.into(),
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         lead: false,
     }
 }
@@ -183,11 +188,24 @@ fn drain(agent: &Agent, mut reply: Reply) -> Vec<Update> {
     })
 }
 
+fn historical(role: Role, text: &str, i: usize) -> HistoricalMessage {
+    HistoricalMessage {
+        role,
+        kind: if role == Role::User { "user_message" } else { "assistant_message" },
+        text: text.into(),
+        chat: 1,
+        message: i,
+        item: i.to_string(),
+        model: None,
+        status: "completed".into(),
+    }
+}
+
 #[test]
 fn live_session_is_reused_and_seeded_only_once() {
     let (agent, log, spawns) = fake_agent(false, Duration::from_secs(600));
     let s = cli_settings();
-    let history = [(Role::User, "earlier".to_string())];
+    let history = [historical(Role::User, "earlier", 0)];
     let first =
         drain(&agent, agent.send("x", "hi".into(), vec![], &s, "", vec![], &history, &chat("")));
     assert!(matches!(first.last(), Some(Update::Final(_))));
@@ -201,7 +219,7 @@ fn live_session_is_reused_and_seeded_only_once() {
 #[test]
 fn resumed_session_is_not_seeded() {
     let (agent, log, _) = fake_agent(true, Duration::from_secs(600));
-    let history = [(Role::User, "earlier".to_string())];
+    let history = [historical(Role::User, "earlier", 0)];
     drain(
         &agent,
         agent.send("x", "hi".into(), vec![], &cli_settings(), "", vec![], &history, &chat("")),
@@ -237,18 +255,19 @@ fn a_cli_that_loads_history_gets_it_natively_and_a_bare_prompt() {
     let l = log.clone();
     let factory: Factory = Arc::new(move |_, _, tx| Box::new(Native(tx, l.clone())));
     let agent = Agent::with_factory(factory, Duration::from_secs(600)).unwrap();
-    let history = [(Role::User, "earlier".to_string()), (Role::Assistant, "sure".to_string())];
+    let history = [historical(Role::User, "earlier", 0), historical(Role::Assistant, "sure", 1)];
     drain(
         &agent,
         agent.send("x", "hi".into(), vec![], &cli_settings(), "", vec![], &history, &chat("")),
     );
     let log = log.lock().unwrap();
     assert!(
-        log[0].starts_with("seed:Earlier conversation in this chat: messages 0-1."),
+        log[0].starts_with("seed:Context handoff (full_thread_summary):\nAgent context handoff. Chat: 1. Covered messages: 0-1."),
         "{}",
         log[0]
     );
-    assert!(log[0].ends_with("|[0] earlier|[1] sure"), "{}", log[0]);
+    assert!(log[0].contains("item=0; model=none; status=completed]\nearlier"));
+    assert!(log[0].contains("item=1; model=none; status=completed]\nsure"));
     assert_eq!(log[1], "prompt:hi");
 }
 
@@ -629,11 +648,16 @@ fn forked_sessions_start_with_their_history() {
 fn missing_chat() -> ChatSession {
     ChatSession {
         ephemeral: false,
+        delta_from: None,
+        window: None,
+        used: None,
         key: "m".into(),
         cwd: "/tmp".into(),
         access: aether_core::AccessMode::Ask,
         effort: String::new(),
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         lead: false,
     }
 }
@@ -677,66 +701,6 @@ fn opencode_send_with_missing_binary_and_no_hub_errors_and_closes() {
     let first = agent.rt.block_on(updates.next()).unwrap();
     assert!(matches!(first, Update::Error(ref e) if e.contains("opencode")), "got {first:?}");
     assert!(agent.rt.block_on(updates.next()).is_none());
-}
-
-#[test]
-fn cli_prompt_numbers_the_transcript_and_points_at_read_history() {
-    let history = [(Role::User, "hi".to_string()), (Role::Assistant, "yo".to_string())];
-    assert_eq!(
-        context_prompt(&history, "again", true),
-        "Earlier conversation in this chat: messages 0-1. Tool calls and their output aren't included; call the Aether read_history tool (offset, limit) to read any message in full, with its tool calls. Treat it as context only, not a new request; files on disk are the source of truth.\n\n<conversation_so_far>\n[0] User: hi\n[1] Assistant: yo\n</conversation_so_far>\n\nYour task now:\nagain"
-    );
-    assert!(!context_prompt(&history, "again", false).contains("read_history"));
-    assert_eq!(context_prompt(&[], "bare", true), "bare");
-}
-
-#[test]
-fn history_budget_keeps_first_and_latest_exchange_then_newest() {
-    let m = |role, text: &str| (role, text.to_string());
-    assert_eq!(budget_history(&[], 10), (vec![], 0));
-    let all = vec![
-        m(Role::User, "first"),
-        m(Role::Assistant, "aaaaaaaaaa"),
-        m(Role::User, "bbbb"),
-        m(Role::Assistant, "cccc"),
-    ];
-    assert_eq!(budget_history(&all, 100), (all.clone(), 0));
-    let (kept, omitted) = budget_history(&all, 5 + 8);
-    assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()]);
-    assert_eq!(omitted, 1);
-    let (kept, omitted) = budget_history(&all, 0);
-    assert_eq!(kept, vec![all[0].clone(), all[2].clone(), all[3].clone()], "never dropped");
-    assert_eq!(omitted, 1);
-    let skip = vec![
-        m(Role::User, "u"),
-        m(Role::Assistant, "x"),
-        m(Role::User, "huge huge huge"),
-        m(Role::Assistant, "y"),
-        m(Role::User, "v"),
-        m(Role::Assistant, "w"),
-    ];
-    let (kept, omitted) = budget_history(&skip, 5);
-    assert_eq!(kept.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(), ["u", "x", "y", "v", "w"]);
-    assert_eq!(omitted, 1, "a message that does not fit is skipped whole, older ones still fit");
-}
-
-#[test]
-fn cli_prompt_keeps_numbers_when_messages_are_left_out() {
-    let history: Vec<_> = (0..4)
-        .map(|i| {
-            (if i % 2 == 0 { Role::User } else { Role::Assistant }, format!("{i}").repeat(9_000))
-        })
-        .collect();
-    let prompt = context_prompt(&history, "again", true);
-    assert!(
-        prompt.starts_with(
-            "Earlier conversation in this chat: messages 0-3, 1 omitted to save space."
-        )
-    );
-    assert!(!prompt.contains("[1] "), "oldest reply dropped");
-    assert!(prompt.contains(&format!("[0] User: {}", "0".repeat(9_000))));
-    assert!(prompt.contains(&format!("[2] User: {}", "2".repeat(9_000))));
-    assert!(prompt.contains(&format!("[3] Assistant: {}", "3".repeat(9_000))));
 }
 
 fn png(path: &str) -> Attachment {

@@ -542,9 +542,16 @@ pub(crate) fn shell_env(path: String, is_set: impl Fn(&str) -> bool) -> HashMap<
 /// Inherited variables that would make the shell and its tools think they run in
 /// the terminal Aether was launched from.
 pub(crate) fn foreign_terminal_vars(names: impl Iterator<Item = String>) -> Vec<String> {
-    const EXACT: [&str; 2] = ["TERM_PROGRAM_VERSION", "TERM_SESSION_ID"];
-    const PREFIXES: [&str; 6] =
-        ["ITERM_", "LC_TERMINAL", "KITTY_", "ALACRITTY_", "WEZTERM_", "VSCODE_"];
+    const EXACT: [&str; 6] = [
+        "TERM_PROGRAM_VERSION",
+        "TERM_SESSION_ID",
+        "AETHER_ORCH_SOCK",
+        "AETHER_ORCH_TOKEN",
+        "AETHER_ORCH_SPECS",
+        "OPENCODE_CONFIG_CONTENT",
+    ];
+    const PREFIXES: [&str; 7] =
+        ["ITERM_", "LC_TERMINAL", "KITTY_", "ALACRITTY_", "WEZTERM_", "VSCODE_", "AETHER_ORCH_"];
     let mut found: Vec<String> = names
         .filter(|n| EXACT.contains(&n.as_str()) || PREFIXES.iter().any(|p| n.starts_with(p)))
         .collect();

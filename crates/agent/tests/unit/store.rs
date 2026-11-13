@@ -21,6 +21,21 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         provider: Provider::Claude,
         provider_model: "sonnet".into(),
         cli_session: "sid".into(),
+        fork_from: "source".into(),
+        rollback_to: "turn-1".into(),
+        agent_sessions: vec![AgentSession {
+            provider: Provider::Codex,
+            session: "saved".into(),
+            seen: 3,
+            context_tokens: Some(20),
+            context_window: Some(100),
+        }],
+        handoff_seen: Some(HandoffSeen {
+            pending: false,
+            seen: 4,
+            context_tokens: Some(30),
+            context_window: Some(200),
+        }),
         access: AccessMode::Auto,
         effort: "high".into(),
         cwd: "/tmp/p".into(),
@@ -30,6 +45,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         parent: None,
         lead: false,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: Some(3),
     };
@@ -42,6 +58,10 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         provider: Provider::OpenRouter,
         provider_model: String::new(),
         cli_session: String::new(),
+        fork_from: String::new(),
+        rollback_to: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -51,6 +71,7 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
         parent: None,
         lead: false,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     };
@@ -63,11 +84,15 @@ fn saved_chats_load_back_oldest_first_and_saving_again_replaces() {
     let chats = store.load().unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(chats.iter().map(|c| c.id).collect::<Vec<_>>(), [3, 7]);
+    assert_eq!(chats[1].agent_sessions, chat.agent_sessions);
+    assert_eq!(chats[1].handoff_seen, chat.handoff_seen);
     assert_eq!(chats[1].title, "Renamed");
     assert!(chats[1].pinned);
     assert_eq!(chats[1].provider, Provider::Claude);
     assert_eq!(chats[1].provider_model, "sonnet");
     assert_eq!(chats[1].cli_session, "sid");
+    assert_eq!(chats[1].fork_from, "source");
+    assert_eq!(chats[1].rollback_to, "turn-1");
     assert_eq!(chats[1].access, AccessMode::Auto);
     assert_eq!(chats[1].effort, "high");
     assert_eq!(chats[1].cwd, "/tmp/p");
@@ -167,6 +192,10 @@ fn ids_include_every_row() {
             provider: Provider::Claude,
             provider_model: String::new(),
             cli_session: String::new(),
+            fork_from: String::new(),
+            rollback_to: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             access: AccessMode::Ask,
             effort: String::new(),
             cwd: String::new(),
@@ -176,6 +205,7 @@ fn ids_include_every_row() {
             parent: None,
             lead: false,
             lead_seen: None,
+            pending_queue: vec![],
             pending_deliveries: vec![],
             handoff_from: None,
         };
@@ -202,6 +232,10 @@ fn flush_returns_once_queued_saves_are_written() {
             provider: Provider::Claude,
             provider_model: String::new(),
             cli_session: String::new(),
+            fork_from: String::new(),
+            rollback_to: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             access: AccessMode::Ask,
             effort: String::new(),
             cwd: String::new(),
@@ -211,6 +245,7 @@ fn flush_returns_once_queued_saves_are_written() {
             parent: None,
             lead: false,
             lead_seen: None,
+            pending_queue: vec![],
             pending_deliveries: vec![],
             handoff_from: None,
         });
@@ -247,6 +282,10 @@ fn parent_and_lead_round_trip() {
         provider: Provider::Claude,
         provider_model: String::new(),
         cli_session: String::new(),
+        fork_from: String::new(),
+        rollback_to: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -256,6 +295,7 @@ fn parent_and_lead_round_trip() {
         parent: Some(5),
         lead: true,
         lead_seen: None,
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     });
@@ -292,6 +332,7 @@ fn old_file_gains_parent_and_lead_as_none_false() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(chats[0].parent, None);
     assert!(!chats[0].lead);
+    assert!(chats[0].pending_queue.is_empty());
 }
 
 #[test]
@@ -309,6 +350,10 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         provider: Provider::Claude,
         provider_model: String::new(),
         cli_session: String::new(),
+        fork_from: String::new(),
+        rollback_to: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -318,6 +363,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         parent: Some(5),
         lead: false,
         lead_seen: Some(3),
+        pending_queue: vec![],
         pending_deliveries: vec![],
         handoff_from: None,
     });
@@ -330,6 +376,10 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         provider: Provider::Claude,
         provider_model: String::new(),
         cli_session: String::new(),
+        fork_from: String::new(),
+        rollback_to: String::new(),
+        agent_sessions: vec![],
+        handoff_seen: None,
         access: AccessMode::Ask,
         effort: String::new(),
         cwd: String::new(),
@@ -339,6 +389,7 @@ fn lead_seen_and_pending_deliveries_round_trip() {
         parent: None,
         lead: true,
         lead_seen: None,
+        pending_queue: vec![SavedQueued { text: "also run the tests".into(), attachments: vec![] }],
         pending_deliveries: vec![SavedDelivery {
             child: 9,
             reply_ix: Some(3),
@@ -354,6 +405,8 @@ fn lead_seen_and_pending_deliveries_round_trip() {
     let child = chats.iter().find(|c| c.id == 9).unwrap();
     let lead = chats.iter().find(|c| c.id == 5).unwrap();
     assert_eq!(child.lead_seen, Some(3));
+    assert_eq!(lead.pending_queue[0].text, "also run the tests");
+    assert!(child.pending_queue.is_empty());
     assert_eq!(lead.pending_deliveries.len(), 1);
     assert_eq!(lead.pending_deliveries[0].child, 9);
     assert_eq!(lead.pending_deliveries[0].reply_ix, Some(3));
@@ -384,6 +437,7 @@ fn card(id: i64, col: &str, position: f64) -> SavedCard {
         project: "/code/p".into(),
         updated_at: 99,
         by_agent: false,
+        meta: String::new(),
     }
 }
 
@@ -394,7 +448,12 @@ fn cards_round_trip() {
     let rt = Runtime::new().unwrap();
     let store = Store::open(&path, rt.handle().clone()).unwrap();
     let mut a = card(1, "todo", 2.0);
-    let b = SavedCard { chat: None, by_agent: true, ..card(2, "doing", 0.5) };
+    let b = SavedCard {
+        chat: None,
+        by_agent: true,
+        meta: r#"{"labels":["ui"]}"#.into(),
+        ..card(2, "doing", 0.5)
+    };
     store.save_card(a.clone());
     store.save_card(b.clone());
     a.title = "Renamed".into();
@@ -438,4 +497,50 @@ fn old_db_gains_cards_table() {
     let cards = store.load_cards();
     let _ = std::fs::remove_file(&path);
     assert_eq!(cards.unwrap(), vec![]);
+}
+
+#[test]
+fn old_card_tables_gain_meta() {
+    let path =
+        std::env::temp_dir().join(format!("aether-store-cardmeta-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    rt.block_on(async {
+        let options = SqliteConnectOptions::new().filename(&path).create_if_missing(true);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE cards (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+             col TEXT NOT NULL DEFAULT 'todo', position REAL NOT NULL DEFAULT 0, chat INTEGER,
+             project TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0,
+             by_agent INTEGER NOT NULL DEFAULT 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO cards (id, title, chat) VALUES (1, 'Old', 7)")
+            .execute(&pool)
+            .await
+            .unwrap();
+    });
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let cards = store.load_cards().unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!((cards[0].chat, cards[0].meta.as_str()), (Some(7), ""));
+}
+
+#[test]
+fn card_seq_only_rises_and_survives_reopen() {
+    let path = std::env::temp_dir().join(format!("aether-store-cardseq-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let rt = Runtime::new().unwrap();
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    assert_eq!(store.card_seq(), 0);
+    store.save_card_seq(7);
+    store.save_card_seq(3);
+    store.flush();
+    drop(store);
+    let store = Store::open(&path, rt.handle().clone()).unwrap();
+    let seq = store.card_seq();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(seq, 7);
 }

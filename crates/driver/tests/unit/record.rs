@@ -70,3 +70,16 @@ fn last_calls_keeps_the_latest_snapshot_per_id() {
         last_calls(&out).into_iter().map(|c| (c.id, c.status)).collect();
     assert_eq!(last, [("a".into(), ToolStatus::Done), ("b".into(), ToolStatus::Running)]);
 }
+
+#[cfg(unix)]
+#[test]
+fn recorder_creates_private_files_and_directories() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("aether-rec-mode-{}", std::process::id()));
+    let rec = Recorder::create(&dir, "pi", Path::new("/tmp")).unwrap();
+    let file = std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
+    drop(rec);
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -101,3 +101,11 @@ fn numbers_are_never_reused_after_a_removal() {
     assert_ne!(c.path, b.path);
     assert_eq!(fs::read_to_string(&c.path).unwrap(), "three");
 }
+
+#[test]
+fn oversized_bytes_are_rejected_before_writing() {
+    let root = tmp("oversize");
+    let big = vec![0u8; (aether_core::MAX_ATTACHMENT_BYTES + 1) as usize];
+    assert!(store_bytes(&root, 1, "big.txt", &big).is_err());
+    assert!(!root.join("1").exists());
+}

@@ -70,3 +70,68 @@ fn failed_temp_write_keeps_previous_layout_file() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "replacement");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn unchanged_inputs_skip_serialization_but_layout_and_drafts_save() {
+    let mut inputs = None;
+    let mut model = WorkspaceModel::default();
+    let mut drafts =
+        BTreeMap::from([(11, SessionSnapshot { text: "draft".into(), ..Default::default() })]);
+    assert!(SaveState::payload(&mut inputs, &model, drafts.clone()).is_some());
+    assert!(SaveState::payload(&mut inputs, &model, drafts.clone()).is_none());
+
+    model.windows.get_mut(&0).unwrap().shown = Some(99);
+    assert!(
+        SaveState::payload(&mut inputs, &model, drafts.clone()).is_none(),
+        "transient layout fields must not trigger a save"
+    );
+
+    model.open(11, 0);
+    let (layout, _) = SaveState::payload(&mut inputs, &model, drafts.clone()).unwrap();
+    let saved: SavedWorkspace = serde_json::from_str(&layout).unwrap();
+    assert_eq!(saved.model, model);
+    drafts.get_mut(&11).unwrap().text.push_str(" edited");
+    let (_, encoded) = SaveState::payload(&mut inputs, &model, drafts.clone()).unwrap();
+    let saved: SavedDrafts = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(saved.drafts[&11].text, "draft edited");
+    assert!(SaveState::payload(&mut inputs, &model, drafts).is_none());
+}
+
+#[gpui::test]
+fn live_composer_edits_invalidate_saved_inputs(cx: &mut gpui_kit::TestAppContext) {
+    use gpui_kit::AppContext;
+    cx.update(gpui_kit::init);
+    cx.update(crate::actions::bind_keys);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    let app = window.root(cx).unwrap();
+    cx.update_window(*window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            let mut inputs = None;
+            let mut payload = |app: &ChatApp, cx: &App| {
+                SaveState::payload(&mut inputs, &app.workspace.model, app.session_snapshots(cx))
+            };
+            assert!(payload(app, cx).is_some());
+            assert!(payload(app, cx).is_none());
+            let id = app.chats[app.active].id;
+            app.activate_session_ui(id, window, cx);
+            app.composer.update(cx, |composer, cx| {
+                composer.set_value("edited composer draft", window, cx);
+            });
+            let (_, encoded) = payload(app, cx).unwrap();
+            let saved: SavedDrafts = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(saved.drafts[&id].text, "edited composer draft");
+            assert!(payload(app, cx).is_none());
+        });
+    })
+    .unwrap();
+}

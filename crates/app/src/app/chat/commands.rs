@@ -5,19 +5,29 @@ use crate::app::ChatApp;
 
 impl ChatApp {
     pub(crate) fn clear_chat(&mut self, cx: &mut Context<Self>) {
-        let ix = self.active;
+        self.clear_chat_at(self.active, cx);
+    }
+
+    pub(crate) fn clear_chat_at(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.chats[ix].cancel.is_some() {
             return;
         }
+        self.expire_chat_requests(ix);
         let chat = &mut self.chats[ix];
         chat.messages.clear();
         chat.lead_seen = None;
         chat.title = "New chat".into();
         chat.epoch += 1;
         chat.cli_session.clear();
+        chat.fork_from.clear();
+        chat.rollback_to.clear();
+        chat.agent_sessions.clear();
+        chat.handoff_seen = None;
         self.agent.close_session(&chat.id.to_string());
         self.persist(ix);
-        self.reset_rows(cx);
+        if ix == self.active {
+            self.reset_rows(cx);
+        }
         cx.notify();
     }
 

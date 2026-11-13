@@ -19,6 +19,7 @@ fn removed_row_git_chip_is_not_clickable() {
         provider: Provider::Claude,
         project: None,
         model: SharedString::from(""),
+        effort: SharedString::default(),
         place: None,
         time: SharedString::from(""),
         path: SharedString::from("/repo"),
@@ -47,7 +48,10 @@ fn status_text_pairs_every_state_with_words() {
     assert_eq!(ChatStatus::Working { since_ms: 80_000 }.text(now), "Working · 22m 00s");
     assert_eq!(ChatStatus::Waiting.text(now), "Needs you");
     assert_eq!(ChatStatus::Background(2).text(now), "2 in background");
-    assert_eq!(ChatStatus::Quiet { since_ms: now - 120_000 }.text(now), "No output 2m 00s");
+    assert_eq!(
+        ChatStatus::Quiet { since_ms: now - 120_000, turn_ms: 0 }.text(now),
+        "No output 2m 00s"
+    );
     assert_eq!(ChatStatus::Retrying.text(now), "Retrying");
     assert_eq!(ChatStatus::Idle.text(now), "");
 }

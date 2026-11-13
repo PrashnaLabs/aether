@@ -11,6 +11,7 @@ use gpui_kit::{
 
 use super::{ChatApp, Page, SidebarView};
 
+mod org;
 mod usage;
 
 const GB: f64 = (1u64 << 30) as f64;
@@ -55,7 +56,28 @@ fn resource_item(
         .child(text)
 }
 
+pub(crate) use org::OrgPop;
 pub(crate) use usage::UsagePop;
+
+/// Micros spent on replies finished at or after `since_ms` (end time, else turn time plus run time).
+pub(super) fn spend_since(
+    messages: &[aether_core::Message],
+    prices: &std::collections::HashMap<String, (f64, f64)>,
+    since_ms: i64,
+) -> u64 {
+    let mut turn = None;
+    messages
+        .iter()
+        .filter_map(|m| {
+            if m.role == aether_core::Role::User {
+                turn = m.sent_at_ms;
+                return None;
+            }
+            let at = m.ended_at_ms.or_else(|| turn.map(|t| t + m.elapsed_ms.unwrap_or(0) as i64));
+            at.is_some_and(|t| t >= since_ms).then(|| super::format::reply_spend(m, prices).0)
+        })
+        .sum()
+}
 
 pub(super) fn direct_label(count: usize) -> String {
     if count > 0 { format!("Direct Chats · {count}") } else { "Direct Chats".into() }
@@ -123,6 +145,17 @@ fn badged_nav_button(
 }
 
 impl ChatApp {
+    /// Dollars spent on this chat's turns sent since local midnight.
+    pub(crate) fn spend_today(&self, chat: &super::Chat) -> f64 {
+        let midnight = Local::now()
+            .date_naive()
+            .and_time(chrono::NaiveTime::MIN)
+            .and_local_timezone(Local)
+            .earliest()
+            .map_or(0, |t| t.timestamp_millis());
+        spend_since(&chat.messages, &self.model_prices, midnight) as f64 / 1e6
+    }
+
     fn render_status_nav(&self, view: &Entity<ChatApp>, cx: &App) -> Div {
         let (page, sidebar) = (self.page, self.sidebar_view);
         let (outside, direct) = (self.external.len(), self.direct_chat_count());
@@ -299,6 +332,7 @@ impl ChatApp {
 
         let clock_click_view = view.clone();
         let nav = self.render_status_nav(view, cx);
+        let org = self.render_org_status(view, window, cx);
         let usage = self.render_usage_strip(view, window, cx);
         let visible = |key: &str| !self.settings.bottom_bar_hidden.iter().any(|k| k == key);
         let resources = self.sys_sample.filter(|_| visible("cpu") || visible("memory")).map(|s| {
@@ -361,6 +395,7 @@ impl ChatApp {
                     .min_w_0()
                     .gap_2()
                     .items_center()
+                    .children(org)
                     .children(resources)
                     // Right Side: Global Date & Time Clock
                     .when(visible("clock"), |row| {

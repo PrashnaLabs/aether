@@ -260,3 +260,10 @@ fn search_term_and_snapshot_highlight_matches() {
     assert_eq!(frame.rows[0].bgs, vec![(6, 9, SEARCH_MATCH_BG)]);
     assert_eq!(frame.rows[1].bgs, vec![(7, 10, ACTIVE_SEARCH_MATCH_BG)]);
 }
+
+#[test]
+fn search_lines_caps_matches_at_limit() {
+    let lines = (0..2000).map(|i| (i, "a a a a a"));
+    let hits = search_lines(lines, "a");
+    assert_eq!(hits.len(), 1000);
+}

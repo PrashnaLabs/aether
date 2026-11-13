@@ -91,6 +91,30 @@ impl FileTreeState {
         self.rebuild();
     }
 
+    /// Applies disk listings without replacing interactions made during the scan.
+    pub(crate) fn apply_refresh(&mut self, before: &Self, mut refreshed: Self) {
+        if self.root != refreshed.root {
+            return;
+        }
+        if self.expanded == before.expanded && self.selected == before.selected {
+            self.expanded = refreshed.expanded;
+            self.selected = refreshed.selected;
+        }
+        for dir in &before.expanded {
+            if self.expanded.contains(dir) && !refreshed.listings.contains_key(dir) {
+                self.expanded.remove(dir);
+                self.listings.remove(dir);
+            }
+        }
+        for (dir, nodes) in refreshed.listings.drain() {
+            if self.expanded.contains(&dir) {
+                self.listings.insert(dir, nodes);
+            }
+        }
+        self.listings.retain(|dir, _| self.expanded.contains(dir));
+        self.rebuild();
+    }
+
     /// Marks `dir` open, reading its children the first time.
     fn open(&mut self, dir: &Path) {
         if !self.listings.contains_key(dir)

@@ -23,6 +23,33 @@ pub(crate) fn chat_layout_allows_monocle(layout: ChatLayout) -> bool {
     layout != ChatLayout::Split
 }
 
+pub(super) fn leading_pane(layout: &WindowLayout) -> Option<PaneId> {
+    let leaves = layout.root.as_ref().map(DockNode::leaves).unwrap_or_default();
+    [layout.maximized, layout.shown]
+        .into_iter()
+        .flatten()
+        .find(|p| leaves.contains(p))
+        .or(leaves.first().copied())
+}
+
+fn float_draw_bounds(layout: &WindowLayout, available: [f32; 2]) -> Vec<(PaneId, Rect)> {
+    let mut floats: Vec<_> =
+        layout.floats.iter().filter(|f| layout.maximized != Some(f.pane)).collect();
+    floats.sort_by_key(|f| layout.stack.iter().position(|p| *p == f.pane).unwrap_or(0));
+    floats.into_iter().map(|f| (f.pane, f.bounds.sanitize(available))).collect()
+}
+
+fn dock_all_floats(model: &mut WorkspaceModel, host: WindowId) {
+    let floats: Vec<_> = model
+        .windows
+        .get(&host)
+        .map(|w| w.floats.iter().map(|f| f.pane).collect())
+        .unwrap_or_default();
+    for pane in floats {
+        let _ = model.dock(pane, None, DockSide::Right);
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct PaneDrag {
     pub(super) pane: PaneId,
@@ -92,9 +119,6 @@ impl ChatApp {
         self.workspace.model.retile(host, tiling, self.settings.tile_ratio.clamp(0.3, 0.8));
         let mut tabs = Vec::new();
         if let Some(layout) = self.workspace.model.windows.get_mut(&host) {
-            for float in &mut layout.floats {
-                float.bounds = float.bounds.sanitize(available);
-            }
             if tiling == TileLayout::Monocle
                 && chat_layout_allows_monocle(self.settings.chat_layout)
                 && layout.maximized.is_none()
@@ -126,6 +150,27 @@ impl ChatApp {
             }
         } else if let Some(root) = &layout.root {
             self.session_split_element(root, host, cx)
+        } else if !layout.floats.is_empty() {
+            let count = layout.floats.len();
+            let app = cx.entity();
+            v_flex()
+                .flex_1()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{count} session{} floating", if count == 1 { "" } else { "s" }))
+                .child(aether_ui::button("dock-all-floats").small().label("Dock all").on_click(
+                    move |_, _, cx| {
+                        app.update(cx, |app, cx| {
+                            dock_all_floats(&mut app.workspace.model, host);
+                            cx.notify();
+                        });
+                    },
+                ))
+                .into_any_element()
         } else {
             div()
                 .flex_1()
@@ -203,25 +248,19 @@ impl ChatApp {
                 }
             }))
             .child(canvas);
-        if layout.maximized.is_none() {
-            let mut floats = layout.floats.clone();
-            floats.sort_by_key(|f| layout.stack.iter().position(|p| *p == f.pane).unwrap_or(0));
-            for float in floats {
-                let bounds = float.bounds.sanitize(available);
-                let pane = float.pane;
-                let content = self.session_pane_element(pane, host, cx);
-                body = body.child(
-                    div()
-                        .absolute()
-                        .left(px(bounds.x))
-                        .top(px(bounds.y))
-                        .w(px(bounds.w))
-                        .h(px(bounds.h))
-                        .corner(px(12.))
-                        .shadow_lg()
-                        .child(content),
-                );
-            }
+        for (pane, bounds) in float_draw_bounds(&layout, available) {
+            let content = self.session_pane_element(pane, host, cx);
+            body = body.child(
+                div()
+                    .absolute()
+                    .left(px(bounds.x))
+                    .top(px(bounds.y))
+                    .w(px(bounds.w))
+                    .h(px(bounds.h))
+                    .corner(px(12.))
+                    .shadow_lg()
+                    .child(content),
+            );
         }
         if let Some(error) = self.workspace.error.as_ref().or(self.workspace.save_error.as_ref()) {
             body = body.child(

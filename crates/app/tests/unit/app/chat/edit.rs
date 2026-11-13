@@ -98,3 +98,29 @@ fn an_emptied_chat_drops_its_old_title(cx: &mut gpui_kit::TestAppContext) {
         })
         .unwrap();
 }
+
+#[test]
+fn rewind_retains_only_sessions_with_surviving_history() {
+    let mut chat = chat_with("t", &["question", "answer"]);
+    for seen in [0, 1, 2] {
+        chat.agent_sessions.push(aether_agent::AgentSession {
+            provider: Provider::Codex,
+            session: seen.to_string(),
+            seen,
+            context_tokens: None,
+            context_window: None,
+        });
+    }
+    chat.handoff_seen = Some(aether_agent::HandoffSeen {
+        seen: 1,
+        pending: true,
+        context_tokens: Some(42),
+        context_window: Some(200_000),
+    });
+    let handoff = chat.handoff_seen.clone();
+    retain_sessions(&mut chat, 1);
+    assert_eq!(chat.agent_sessions.iter().map(|s| s.seen).collect::<Vec<_>>(), [0, 1]);
+    assert_eq!(chat.handoff_seen, handoff);
+    retain_sessions(&mut chat, 0);
+    assert!(chat.handoff_seen.is_none());
+}

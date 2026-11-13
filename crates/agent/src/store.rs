@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use aether_core::{AccessMode, Message, Provider};
+use aether_core::{AccessMode, Attachment, Message, Provider};
 use futures::StreamExt;
 use futures::channel::mpsc::{self, UnboundedSender};
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,12 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS chats (
     lead INTEGER NOT NULL DEFAULT 0,
     lead_seen INTEGER,
     pending_deliveries TEXT NOT NULL DEFAULT '[]',
-    handoff_from INTEGER
+    handoff_from INTEGER,
+    pending_queue TEXT NOT NULL DEFAULT '[]',
+    agent_sessions TEXT NOT NULL DEFAULT '[]',
+    fork_from TEXT NOT NULL DEFAULT '',
+    rollback_to TEXT NOT NULL DEFAULT '',
+    handoff_seen TEXT
 )";
 
 const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
@@ -39,10 +44,35 @@ const CARDS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cards (
     chat INTEGER,
     project TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL DEFAULT 0,
-    by_agent INTEGER NOT NULL DEFAULT 0
+    by_agent INTEGER NOT NULL DEFAULT 0,
+    meta TEXT NOT NULL DEFAULT ''
+)";
+
+/// The highest card id ever handed out, so deleted ids aren't reused.
+const CARD_SEQ_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS card_seq (
+    id INTEGER PRIMARY KEY CHECK (id = 0),
+    last INTEGER NOT NULL
 )";
 
 // Added after the first release; existing files gain them with zero values.
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSession {
+    pub provider: Provider,
+    pub session: String,
+    pub seen: usize,
+    pub context_tokens: Option<u64>,
+    pub context_window: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandoffSeen {
+    #[serde(default)]
+    pub pending: bool,
+    pub seen: usize,
+    pub context_tokens: Option<u64>,
+    pub context_window: Option<u64>,
+}
 
 /// A chat as kept on disk. `id` also orders chats, oldest first.
 pub struct SavedChat {
@@ -54,6 +84,10 @@ pub struct SavedChat {
     pub provider: Provider,
     pub provider_model: String,
     pub cli_session: String,
+    pub agent_sessions: Vec<AgentSession>,
+    pub fork_from: String,
+    pub rollback_to: String,
+    pub handoff_seen: Option<HandoffSeen>,
     pub access: AccessMode,
     pub effort: String,
     pub cwd: String,
@@ -68,8 +102,18 @@ pub struct SavedChat {
     pub lead_seen: Option<usize>,
     /// Child results queued for this lead but not yet delivered as a turn.
     pub pending_deliveries: Vec<SavedDelivery>,
+    /// Messages the user queued while a turn ran, not yet sent.
+    pub pending_queue: Vec<SavedQueued>,
     /// Chat this one was handed off from.
     pub handoff_from: Option<i64>,
+}
+
+/// A message the user queued, waiting for its turn.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedQueued {
+    pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 /// A child result waiting to be handed to its lead.
@@ -94,6 +138,8 @@ pub struct SavedCard {
     pub updated_at: i64,
     /// Added by an agent's add_card or spawn_agent, not the user.
     pub by_agent: bool,
+    /// JSON for the fields the app owns (linked chats, labels, blockers, notes); empty when none.
+    pub meta: String,
 }
 
 /// Chats in a SQLite file. Saves queue up and are written in order.
@@ -107,6 +153,7 @@ enum Write {
     Save(Box<SavedChat>),
     SaveCard(SavedCard),
     DeleteCard(i64),
+    CardSeq(i64),
     /// Answered once every write queued before it is done.
     Flush(std::sync::mpsc::Sender<()>),
 }
@@ -130,6 +177,7 @@ impl Store {
             let pool = SqlitePool::connect_with(options).await?;
             sqlx::query(SCHEMA).execute(&pool).await?;
             sqlx::query(CARDS_SCHEMA).execute(&pool).await?;
+            sqlx::query(CARD_SEQ_SCHEMA).execute(&pool).await?;
             let card_cols: Vec<String> = sqlx::query("PRAGMA table_info(cards)")
                 .fetch_all(&pool)
                 .await?
@@ -138,6 +186,11 @@ impl Store {
                 .collect();
             if !card_cols.iter().any(|c| c == "by_agent") {
                 sqlx::query("ALTER TABLE cards ADD COLUMN by_agent INTEGER NOT NULL DEFAULT 0")
+                    .execute(&pool)
+                    .await?;
+            }
+            if !card_cols.iter().any(|c| c == "meta") {
+                sqlx::query("ALTER TABLE cards ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
                     .execute(&pool)
                     .await?;
             }
@@ -202,7 +255,21 @@ impl Store {
                     "pending_deliveries",
                     "ALTER TABLE chats ADD COLUMN pending_deliveries TEXT NOT NULL DEFAULT '[]'",
                 ),
+                (
+                    "agent_sessions",
+                    "ALTER TABLE chats ADD COLUMN agent_sessions TEXT NOT NULL DEFAULT '[]'",
+                ),
+                (
+                    "rollback_to",
+                    "ALTER TABLE chats ADD COLUMN rollback_to TEXT NOT NULL DEFAULT ''",
+                ),
+                ("fork_from", "ALTER TABLE chats ADD COLUMN fork_from TEXT NOT NULL DEFAULT ''"),
+                ("handoff_seen", "ALTER TABLE chats ADD COLUMN handoff_seen TEXT"),
                 ("handoff_from", "ALTER TABLE chats ADD COLUMN handoff_from INTEGER"),
+                (
+                    "pending_queue",
+                    "ALTER TABLE chats ADD COLUMN pending_queue TEXT NOT NULL DEFAULT '[]'",
+                ),
             ] {
                 if !cols.iter().any(|c| c == col) {
                     sqlx::query(add).execute(&pool).await?;
@@ -234,6 +301,18 @@ impl Store {
                             eprintln!("aether: couldn't delete card {id}: {e}");
                         }
                     }
+                    Write::CardSeq(last) => {
+                        if let Err(e) = sqlx::query(
+                            "INSERT INTO card_seq (id, last) VALUES (0, ?)
+                             ON CONFLICT(id) DO UPDATE SET last = max(last, excluded.last)",
+                        )
+                        .bind(last)
+                        .execute(&writer)
+                        .await
+                        {
+                            eprintln!("aether: couldn't save card id {last}: {e}");
+                        }
+                    }
                     Write::Flush(done) => {
                         let _ = done.send(());
                     }
@@ -246,7 +325,7 @@ impl Store {
     /// Every chat whose row and messages still parse, oldest first.
     pub fn load(&self) -> sqlx::Result<Vec<SavedChat>> {
         let rows = self.rt.block_on(
-            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from FROM chats ORDER BY id")
+            sqlx::query("SELECT id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from, pending_queue, agent_sessions, handoff_seen, fork_from, rollback_to FROM chats ORDER BY id")
                 .fetch_all(&self.pool),
         )?;
         Ok(rows
@@ -263,6 +342,11 @@ impl Store {
                     provider: parse_provider(&text("provider")?),
                     provider_model: text("provider_model")?,
                     cli_session: text("cli_session")?,
+                    fork_from: text("fork_from")?,
+                    rollback_to: text("rollback_to")?,
+                    agent_sessions: serde_json::from_str(&text("agent_sessions")?)
+                        .unwrap_or_default(),
+                    handoff_seen: text("handoff_seen").and_then(|s| serde_json::from_str(&s).ok()),
                     access: parse_access(&text("access")?),
                     effort: text("effort")?,
                     cwd: text("cwd")?,
@@ -277,6 +361,8 @@ impl Store {
                         .and_then(|v| usize::try_from(v).ok()),
                     pending_deliveries: parse_pending_deliveries(&text("pending_deliveries")?),
                     handoff_from: row.try_get("handoff_from").ok()?,
+                    pending_queue: serde_json::from_str(&text("pending_queue")?)
+                        .unwrap_or_default(),
                 })
             })
             .collect())
@@ -296,10 +382,25 @@ impl Store {
         }
     }
 
+    /// The highest card id ever handed out; 0 for a new file.
+    pub fn card_seq(&self) -> i64 {
+        let row = self.rt.block_on(
+            sqlx::query("SELECT last FROM card_seq WHERE id = 0").fetch_optional(&self.pool),
+        );
+        row.ok().flatten().and_then(|r| r.try_get("last").ok()).unwrap_or(0)
+    }
+
+    /// Raises the stored highest card id to `last` in the background; never lowers it.
+    pub fn save_card_seq(&self, last: i64) {
+        if let Err(e) = self.writes.unbounded_send(Write::CardSeq(last)) {
+            eprintln!("aether: couldn't queue card id {last}: {e}");
+        }
+    }
+
     /// Every card, ordered by column then position.
     pub fn load_cards(&self) -> sqlx::Result<Vec<SavedCard>> {
         let rows = self.rt.block_on(
-            sqlx::query("SELECT id, title, body, col, position, chat, project, updated_at, by_agent FROM cards ORDER BY col, position")
+            sqlx::query("SELECT id, title, body, col, position, chat, project, updated_at, by_agent, meta FROM cards ORDER BY col, position")
                 .fetch_all(&self.pool),
         )?;
         rows.iter()
@@ -314,6 +415,7 @@ impl Store {
                     project: row.try_get("project")?,
                     updated_at: row.try_get("updated_at")?,
                     by_agent: row.try_get("by_agent")?,
+                    meta: row.try_get("meta")?,
                 })
             })
             .collect()
@@ -375,8 +477,18 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
             .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
     let pending_deliveries = serde_json::to_string(&chat.pending_deliveries)
         .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
+    let pending_queue = serde_json::to_string(&chat.pending_queue)
+        .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
+    let agent_sessions = serde_json::to_string(&chat.agent_sessions)
+        .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
+    let handoff_seen = chat
+        .handoff_seen
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
     sqlx::query(
-        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO chats (id, title, messages, pinned, archived, provider, provider_model, cli_session, access, effort, cwd, project, worktree_path, worktree_branch, parent, lead, lead_seen, pending_deliveries, handoff_from, pending_queue, agent_sessions, handoff_seen, fork_from, rollback_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, messages = excluded.messages,
          pinned = excluded.pinned, archived = excluded.archived,
          provider = excluded.provider, provider_model = excluded.provider_model,
@@ -384,7 +496,8 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
          effort = excluded.effort, cwd = excluded.cwd, project = excluded.project,
          worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
          parent = excluded.parent, lead = excluded.lead, lead_seen = excluded.lead_seen,
-         pending_deliveries = excluded.pending_deliveries, handoff_from = excluded.handoff_from",
+         pending_deliveries = excluded.pending_deliveries, handoff_from = excluded.handoff_from,
+         pending_queue = excluded.pending_queue, agent_sessions = excluded.agent_sessions, handoff_seen = excluded.handoff_seen, fork_from = excluded.fork_from, rollback_to = excluded.rollback_to",
     )
     .bind(chat.id)
     .bind(&chat.title)
@@ -405,6 +518,11 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
     .bind(chat.lead_seen.map(i64::try_from).transpose().ok().flatten())
     .bind(pending_deliveries)
     .bind(chat.handoff_from)
+    .bind(pending_queue)
+    .bind(agent_sessions)
+    .bind(handoff_seen)
+    .bind(&chat.fork_from)
+    .bind(&chat.rollback_to)
     .execute(pool)
     .await?;
     Ok(())
@@ -412,10 +530,11 @@ async fn save(pool: &SqlitePool, chat: &SavedChat) -> sqlx::Result<()> {
 
 async fn save_card(pool: &SqlitePool, card: &SavedCard) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO cards (id, title, body, col, position, chat, project, updated_at, by_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO cards (id, title, body, col, position, chat, project, updated_at, by_agent, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
          col = excluded.col, position = excluded.position, chat = excluded.chat,
-         project = excluded.project, updated_at = excluded.updated_at, by_agent = excluded.by_agent",
+         project = excluded.project, updated_at = excluded.updated_at, by_agent = excluded.by_agent,
+         meta = excluded.meta",
     )
     .bind(card.id)
     .bind(&card.title)
@@ -426,6 +545,7 @@ async fn save_card(pool: &SqlitePool, card: &SavedCard) -> sqlx::Result<()> {
     .bind(&card.project)
     .bind(card.updated_at)
     .bind(card.by_agent)
+    .bind(&card.meta)
     .execute(pool)
     .await?;
     Ok(())

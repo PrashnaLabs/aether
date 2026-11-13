@@ -13,7 +13,7 @@ use gpui_kit::{Context, Window};
 use crate::app::{ChatApp, Page, now_ms};
 use crate::project_page::model::{CardStatus, card_status};
 use crate::side_panel::{SideTab, Surface};
-use model::{BoardCard, Col, Turn, auto_move, next_id, slot, tidy};
+use model::{BoardCard, Col, Note, Turn, auto_move, next_id, slot, tidy};
 
 impl ChatApp {
     pub(crate) fn board_add(
@@ -25,7 +25,11 @@ impl ChatApp {
         chat: Option<i64>,
         by_agent: bool,
     ) -> i64 {
-        let id = next_id(&self.cards);
+        let id = next_id(&self.cards, self.card_seq);
+        self.card_seq = id;
+        if let Some(store) = &self.store {
+            store.save_card_seq(id);
+        }
         let position = slot(&self.cards, id, col, None);
         self.cards.push(BoardCard {
             id,
@@ -33,10 +37,14 @@ impl ChatApp {
             body,
             col,
             position,
-            chat,
+            chats: chat.into_iter().collect(),
             project,
             updated_at: now_ms(),
             by_agent,
+            labels: vec![],
+            blocked_by: vec![],
+            notes: vec![],
+            author: String::new(),
         });
         self.board_save(id);
         id
@@ -44,8 +52,10 @@ impl ChatApp {
 
     /// `homes`: worktree folder -> its project.
     pub(crate) fn board_tidy(&mut self, homes: &HashMap<String, String>) {
-        let Some(retired) = tidy(&mut self.cards, homes) else { return };
+        let Some(retired) = tidy(&mut self.cards, homes, self.card_seq) else { return };
+        self.card_seq = next_id(&self.cards, self.card_seq) - 1;
         let Some(store) = &self.store else { return };
+        store.save_card_seq(self.card_seq);
         for id in retired {
             store.delete_card(id);
         }
@@ -63,10 +73,30 @@ impl ChatApp {
     pub(crate) fn board_move(&mut self, id: i64, col: Col, before: Option<i64>) {
         let position = slot(&self.cards, id, col, before);
         let Some(card) = self.cards.iter_mut().find(|c| c.id == id) else { return };
+        let entered_review = card.col != Col::Review && col == Col::Review;
         card.col = col;
         card.position = position;
         card.updated_at = now_ms();
         self.board_save(id);
+        if col == Col::Done {
+            self.board_unblock(id);
+        }
+        if entered_review {
+            self.org_card_review(id);
+        }
+    }
+
+    /// Drops `id` from every card's blockers once it is done or deleted.
+    fn board_unblock(&mut self, id: i64) {
+        let waiting: Vec<i64> =
+            self.cards.iter().filter(|c| c.blocked_by.contains(&id)).map(|c| c.id).collect();
+        for card in self.cards.iter_mut().filter(|c| waiting.contains(&c.id)) {
+            card.blocked_by.retain(|b| *b != id);
+            card.updated_at = now_ms();
+        }
+        for card in waiting {
+            self.board_save(card);
+        }
     }
 
     pub(crate) fn board_toggle_pick(&mut self, id: i64) {
@@ -80,12 +110,15 @@ impl ChatApp {
         if let Some(store) = &self.store {
             store.delete_card(id);
         }
+        self.board_unblock(id);
     }
 
     pub(crate) fn board_link(&mut self, id: i64, chat: i64) {
         let position = slot(&self.cards, id, Col::Doing, None);
         let Some(card) = self.cards.iter_mut().find(|c| c.id == id) else { return };
-        card.chat = Some(chat);
+        if !card.linked(chat) {
+            card.chats.push(chat);
+        }
         if card.col != Col::Doing {
             card.col = Col::Doing;
             card.position = position;
@@ -96,11 +129,10 @@ impl ChatApp {
 
     /// Keeps the cards of a deleted chat, without the link.
     pub(crate) fn board_unlink(&mut self, chat: i64) {
-        let ids: Vec<i64> =
-            self.cards.iter().filter(|c| c.chat == Some(chat)).map(|c| c.id).collect();
+        let ids: Vec<i64> = self.cards.iter().filter(|c| c.linked(chat)).map(|c| c.id).collect();
         for id in ids {
             if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
-                card.chat = None;
+                card.chats.retain(|c| *c != chat);
                 card.updated_at = now_ms();
             }
             self.board_save(id);
@@ -108,19 +140,65 @@ impl ChatApp {
     }
 
     pub(crate) fn board_on_turn(&mut self, chat: i64, turn: Turn) {
+        let busy = |id: i64| id != chat && self.chats.iter().any(|c| c.id == id && c.busy());
         let moves: Vec<(i64, Col)> = self
             .cards
             .iter()
-            .filter(|c| c.chat == Some(chat))
+            .filter(|c| c.linked(chat))
+            // a card with several agents reaches Review only when the last one finishes
+            .filter(|c| matches!(turn, Turn::Started) || !c.chats.iter().any(|id| busy(*id)))
             .filter_map(|c| auto_move(c.col, turn).map(|to| (c.id, to)))
             .collect();
+        if let Turn::Finished { failed } = turn {
+            self.board_note_result(chat, failed);
+        }
         for (id, to) in moves {
             self.board_move(id, to, None);
         }
     }
 
+    /// Files a finished agent's final reply on each card it is linked to.
+    fn board_note_result(&mut self, chat: i64, failed: bool) {
+        let Some(reply) =
+            self.chats.iter().find(|c| c.id == chat).and_then(|c| {
+                c.messages.iter().rev().find(|m| m.role == aether_core::Role::Assistant)
+            })
+        else {
+            return;
+        };
+        let mut text = reply.text.trim().to_string();
+        if failed {
+            let error = reply.error.as_deref().unwrap_or("failed");
+            text = format!("Failed: {error}\n\n{text}").trim().to_string();
+        }
+        if text.is_empty() {
+            return;
+        }
+        // ponytail: 20k char cap keeps cards.db small; full text stays in the chat
+        if let Some((cut, _)) = text.char_indices().nth(20_000) {
+            text.truncate(cut);
+            text.push('…');
+        }
+        let now = now_ms();
+        let ids: Vec<i64> = self.cards.iter().filter(|c| c.linked(chat)).map(|c| c.id).collect();
+        for card in self.cards.iter_mut().filter(|c| ids.contains(&c.id)) {
+            card.notes.push(Note { at: now, by: format!("agent {chat}"), text: text.clone() });
+            card.updated_at = now;
+        }
+        for id in ids {
+            self.board_save(id);
+        }
+    }
+
     pub(crate) fn board_status(&self, card: &BoardCard, now: i64) -> Option<CardStatus> {
-        let chat = self.chats.iter().find(|c| Some(c.id) == card.chat && !c.archived)?;
+        let live = |id: &&i64| self.chats.iter().any(|c| c.id == **id && !c.archived);
+        let pick = card
+            .chats
+            .iter()
+            .filter(live)
+            .find(|id| self.chats.iter().any(|c| c.id == **id && c.busy()))
+            .or_else(|| card.chats.iter().rev().find(live))?;
+        let chat = self.chats.iter().find(|c| c.id == *pick)?;
         Some(card_status(
             chat.status(now),
             chat.messages.last().is_some_and(|m| m.failed),
@@ -161,7 +239,7 @@ impl ChatApp {
         let title = self.board_title.read(cx).value().trim().to_string();
         let body = self.board_body.read(cx).value().to_string();
         let card = self.cards.iter_mut().find(|c| c.id == id)?;
-        if title.is_empty() && body.trim().is_empty() && card.chat.is_none() {
+        if title.is_empty() && body.trim().is_empty() && card.chats.is_empty() {
             self.board_delete(id);
             self.board_selected = None;
             cx.notify();
@@ -247,5 +325,91 @@ impl ChatApp {
         let Some(ix) = self.chats.iter().position(|c| c.id == chat) else { return };
         self.select(ix, window, cx);
         self.open_page(Page::Chat, cx);
+    }
+
+    pub(crate) fn board_set_labels(&mut self, id: i64, text: &str, cx: &mut Context<Self>) {
+        let labels = parse_label_text(text);
+        let Some(card) = self.cards.iter_mut().find(|c| c.id == id) else { return };
+        if card.labels == labels {
+            return;
+        }
+        card.labels = labels;
+        card.updated_at = now_ms();
+        self.board_save(id);
+        cx.notify();
+    }
+
+    /// Keeps only open cards that exist; a card can't wait on itself or on one waiting on it.
+    pub(crate) fn board_set_blockers(&mut self, id: i64, text: &str, cx: &mut Context<Self>) {
+        let allowed: Vec<i64> = self
+            .cards
+            .iter()
+            .filter(|c| c.id != id && c.col != Col::Done && !c.blocked_by.contains(&id))
+            .map(|c| c.id)
+            .collect();
+        let blocked_by = parse_id_text(text, &allowed);
+        let Some(card) = self.cards.iter_mut().find(|c| c.id == id) else { return };
+        if card.blocked_by == blocked_by {
+            return;
+        }
+        card.blocked_by = blocked_by;
+        card.updated_at = now_ms();
+        self.board_save(id);
+        cx.notify();
+    }
+
+    pub(crate) fn board_add_note(&mut self, id: i64, text: &str, cx: &mut Context<Self>) {
+        let text = text.trim();
+        let Some(card) = self.cards.iter_mut().find(|c| c.id == id) else { return };
+        if text.is_empty() {
+            return;
+        }
+        let now = now_ms();
+        card.notes.push(Note { at: now, by: "user".into(), text: text.to_string() });
+        card.updated_at = now;
+        self.board_save(id);
+        cx.notify();
+    }
+}
+
+/// Comma separated; trimmed, lowercase, deduplicated.
+fn parse_label_text(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for label in text.split(',').map(|l| l.trim().to_lowercase()) {
+        if !label.is_empty() && !out.contains(&label) {
+            out.push(label);
+        }
+    }
+    out
+}
+
+/// "#3, 5 7": ids found in `allowed`, in typed order, deduplicated.
+fn parse_id_text(text: &str, allowed: &[i64]) -> Vec<i64> {
+    let mut out = Vec::new();
+    for part in text.split(|c: char| c == ',' || c.is_whitespace()) {
+        if let Ok(id) = part.trim_start_matches('#').parse::<i64>()
+            && allowed.contains(&id)
+            && !out.contains(&id)
+        {
+            out.push(id);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_are_trimmed_lowercase_and_unique() {
+        assert_eq!(parse_label_text(" Bug, UI ,,bug,  "), ["bug", "ui"]);
+        assert!(parse_label_text(" , ").is_empty());
+    }
+
+    #[test]
+    fn ids_keep_only_allowed_in_typed_order() {
+        assert_eq!(parse_id_text("#3, 5 3 x 9", &[5, 3]), [3, 5]);
+        assert!(parse_id_text("", &[1]).is_empty());
     }
 }

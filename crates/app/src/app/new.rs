@@ -73,6 +73,7 @@ impl ChatApp {
             })
         });
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("Chat name"));
+        let sidebar_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search chats"));
         let btw_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(1, 5)
@@ -130,6 +131,12 @@ impl ChatApp {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search stories..."));
         let skill_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
         let board_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search cards"));
+        let org_goal = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(1, 8)
+                .submit_on_enter(true)
+                .placeholder("Give the org a goal. The CEO turns it into cards and routes them.")
+        });
         let explorer_quick_open_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search files by name..."));
         let grep_tip = key_hint(&SearchWorkspace, cx)
@@ -248,6 +255,11 @@ impl ChatApp {
                     _ => {}
                 }
             }),
+            cx.subscribe_in(&org_goal, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = ev {
+                    this.org_goal_submit(window, cx);
+                }
+            }),
             cx.subscribe_in(&instructions, window, |this, input, ev: &InputEvent, _, cx| {
                 if let InputEvent::Change = ev {
                     this.settings.instructions = input.read(cx).value().to_string();
@@ -259,6 +271,20 @@ impl ChatApp {
                     this.save_key(window, cx);
                 }
             }),
+            cx.subscribe_in(
+                &sidebar_search,
+                window,
+                |this, _, ev: &InputEvent, window, cx| match ev {
+                    InputEvent::Change => cx.notify(),
+                    InputEvent::PressEnter { .. } => {
+                        if let Some(&ix) = this.chat_search_results(cx).first() {
+                            this.select(ix, window, cx);
+                        }
+                    }
+                    InputEvent::Blur => this.close_empty_search(cx),
+                    _ => {}
+                },
+            ),
             cx.subscribe_in(
                 &rename_input,
                 window,
@@ -471,7 +497,7 @@ impl ChatApp {
                 this.flush_workspace(cx);
             }
             for ix in 0..this.chats.len() {
-                if this.chats[ix].cancel.is_some() {
+                if this.chats[ix].cancel.is_some() || !this.chats[ix].queue.is_empty() {
                     this.persist(ix);
                 }
             }
@@ -489,6 +515,8 @@ impl ChatApp {
             chat_id_highwater: 0,
             stopped_by_lead: HashSet::new(),
             spawn_nonces: HashMap::new(),
+            spawn_queue: Vec::new(),
+            card_seq: store.as_ref().map_or(0, |s| s.card_seq()),
             session_views: HashMap::new(),
             session_subscriptions: HashMap::new(),
             session_windows: HashMap::new(),
@@ -533,6 +561,7 @@ impl ChatApp {
             detected_provider: None,
             sys_sample: None,
             usage_pop: super::status_bar::UsagePop::new(cx),
+            org_pop: super::status_bar::OrgPop::new(cx),
             crew_pop: false,
             crew_pop_trigger: Default::default(),
             show_usage_limits: false,
@@ -547,6 +576,8 @@ impl ChatApp {
             renaming: None,
             rename_in_tab: false,
             rename_input,
+            sidebar_search,
+            sidebar_search_open: false,
             worktree_name_input,
             worktree_base_select: None,
             pending_worktree_dialog: false,
@@ -608,6 +639,12 @@ impl ChatApp {
             quotes: HashMap::new(),
             btw: HashMap::new(),
             btw_open: false,
+            workspace_open: false,
+            inventory: None,
+            context_expanded: HashSet::new(),
+            connectors_all: false,
+            subagents_all: false,
+            probing: None,
             tab_bar_controls: false,
             btw_input,
             file_selection_bar: None,
@@ -638,6 +675,10 @@ impl ChatApp {
             board_picks: HashSet::new(),
             archive_picks: Default::default(),
             project_picks: Default::default(),
+            stored_files: Vec::new(),
+            stored_file_picks: HashSet::new(),
+            stored_files_error: None,
+            stored_files_project_filter: Default::default(),
             right_panel_resizing: false,
             side_tabs: HashMap::new(),
             side_back: crate::side_panel::SideTab::Agent,
@@ -683,6 +724,10 @@ impl ChatApp {
             hn_browser,
             hn_reader_open: false,
             hn_search_input,
+            org: crate::org::OrgState::new(
+                if background_services { crate::org::load_orgs() } else { vec![] },
+                org_goal,
+            ),
             _subscriptions: subscriptions,
         };
         app.workspace.persistence_enabled = background_services;
@@ -717,6 +762,13 @@ impl ChatApp {
                 .flat_map(|m| &m.attachments)
                 .map(|a| a.path.clone())
                 .chain(app.chats.iter().flat_map(|c| &c.pending).map(|a| a.path.clone()))
+                .chain(
+                    app.chats
+                        .iter()
+                        .flat_map(|c| &c.queue)
+                        .flat_map(|q| &q.attachments)
+                        .map(|a| a.path.clone()),
+                )
                 .chain(
                     app.chats
                         .iter()

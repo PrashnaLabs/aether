@@ -18,6 +18,7 @@ use super::model::{
 };
 use crate::app::ChatApp;
 use crate::open_in;
+use crate::side_panel::Surface;
 
 pub(super) struct Where {
     pub(super) folder: Option<PathBuf>,
@@ -45,7 +46,7 @@ pub(super) fn row(
         .gap(px(8.))
         .items_center()
         .px(px(10.))
-        .py(px(8.))
+        .py(px(4.))
         .text_sm();
     match off {
         None => row_style(base, false, cx),
@@ -254,12 +255,17 @@ impl ChatApp {
 
         let browse_ix = g + if not_repo { 1 } else { 2 };
         let browse = row("pop-browse", &h[browse_ix], "Browse files".into(), no_folder, cx)
+            .debug_selector(|| "pop-browse".into())
             .child(icon(Lucide::Folder, cx))
             .child(text("Browse files", no_folder.map(Into::into), cx))
             .when(at.folder_ok, |r| {
                 r.on_click(cx.listener(|this, _, window, cx| {
                     this.close_workspace_pop(window, cx);
-                    this.toggle_explorer_page(window, cx);
+                    if this.settings.chat_layout == ChatLayout::Tabbed {
+                        this.toggle_explorer_page(window, cx);
+                    } else {
+                        this.select_surface(Surface::Files, window, cx);
+                    }
                 }))
             });
         let resume_off = self.resume_command_of(self.active).is_none().then(|| {
@@ -329,7 +335,12 @@ impl ChatApp {
             .when(changes_off.is_none(), |r| {
                 r.on_click(cx.listener(|this, _, window, cx| {
                     this.close_workspace_pop(window, cx);
-                    this.toggle_changes(true, window, cx);
+                    if this.settings.chat_layout == ChatLayout::Tabbed {
+                        this.toggle_changes(true, window, cx);
+                    } else {
+                        this.right_review_open = true;
+                        this.select_surface(Surface::Review, window, cx);
+                    }
                 }))
             });
 

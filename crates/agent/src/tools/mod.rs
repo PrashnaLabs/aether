@@ -21,7 +21,11 @@ pub(crate) struct Tools {
 
 impl Tools {
     pub(crate) fn new() -> Self {
-        Self { http: reqwest::Client::new() }
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
+        Self { http }
     }
 
     pub(crate) fn enabled(
@@ -46,7 +50,7 @@ impl Tools {
                 is_lead
                     || matches!(
                         tool.name(),
-                        "list_cards" | "add_card" | "move_card" | "update_card"
+                        "list_cards" | "read_card" | "add_card" | "move_card" | "update_card"
                     )
             }));
         }

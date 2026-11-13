@@ -1,18 +1,24 @@
-use crate::theme::Corners;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt,
     button::ButtonVariants,
     h_flex,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu},
+    v_flex,
 };
 use gpui_kit::{
-    Anchor, AnyElement, App, FocusHandle, KeyDownEvent, Role, SharedString, Window, div,
+    Anchor, AnyElement, App, FocusHandle, Hsla, KeyDownEvent, Role, SharedString, Window, div,
     prelude::*, px, relative, rems,
 };
 
+use super::chat_row::status_mark;
 use super::chrome::{nest, reveal_on_hover, row_style, swallow_click, tabular, tooltip};
+use super::crew::Bucket;
 use super::menu::project_menu;
-use super::{ChatStatus, CollapseHandler, NEST, ProjectHeader, RowHandler};
+use super::{
+    ChatStatus, CollapseHandler, LONG_BRANCH, NEST, ProjectHeader, RowHandler, middle_truncate,
+};
+use crate::theme::{danger_text, mango_text, success_text};
 
 pub fn project_aria(
     name: &str,
@@ -35,6 +41,18 @@ pub fn project_aria(
     aria
 }
 
+const LONG_PATH: usize = 32;
+
+/// `path` with the home folder shortened to `~`, for the no-git line.
+pub fn tilde_path(path: &str) -> String {
+    let home = aether_core::home_dir();
+    match std::path::Path::new(path).strip_prefix(&home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.to_string(),
+    }
+}
+
 pub fn project_chevron_icon(collapsed: bool) -> IconName {
     if collapsed { IconName::ChevronRight } else { IconName::ChevronDown }
 }
@@ -50,11 +68,15 @@ pub(super) struct ProjectRow {
     pub(super) guide: bool,
     pub(super) nested: bool,
     pub(super) worktree: bool,
+    pub(super) active: bool,
     pub(super) on_collapse: CollapseHandler,
     pub(super) on_new: RowHandler,
     pub(super) on_files: Option<RowHandler>,
     pub(super) on_hide: Option<RowHandler>,
     pub(super) on_page: Option<RowHandler>,
+    pub(super) org: Option<(bool, RowHandler)>,
+    pub(super) pin: Option<(bool, RowHandler)>,
+    pub(super) on_open: Option<RowHandler>,
     pub(super) now: i64,
 }
 
@@ -75,14 +97,32 @@ impl ProjectRow {
             guide,
             nested,
             worktree,
+            active,
             on_collapse,
             on_new,
             on_files,
             on_hide,
             on_page,
+            org,
+            pin,
+            on_open,
             now,
         } = self;
-        let ProjectHeader { name, path, count, collapsed, status, missing } = header;
+        let ProjectHeader {
+            name,
+            path,
+            count,
+            collapsed,
+            status,
+            missing,
+            branch,
+            no_git,
+            added,
+            deleted,
+            ahead,
+            needs_you,
+            failed,
+        } = header;
         let muted = cx.theme().muted_foreground;
         let color = if missing || worktree { muted } else { super::project_color(&name, cx) };
         let aria = project_aria(&name, count, worktree, missing, collapsed, status);
@@ -90,12 +130,26 @@ impl ProjectRow {
             if missing { format!("Folder not found: {path}").into() } else { path.clone() };
         let new_tip: SharedString = if missing {
             "Folder not found".into()
+        } else if on_open.is_some() {
+            format!("Hire in {name}").into()
         } else {
             format!("New agent chat in {name}").into()
         };
+        let (on_org, on_setup) = match org {
+            Some((true, on_click)) => (Some(on_click), None),
+            Some((false, on_click)) => (None, Some(on_click)),
+            None => (None, None),
+        };
+        let pinned = pin.as_ref().is_some_and(|(pinned, _)| *pinned);
         let menu = {
-            let (path, on_new, on_files, on_hide, on_page) =
-                (path.clone(), on_new.clone(), on_files.clone(), on_hide.clone(), on_page.clone());
+            let (path, on_new, on_files, on_hide, on_page, pin) = (
+                path.clone(),
+                on_new.clone(),
+                on_files.clone(),
+                on_hide.clone(),
+                on_page.clone(),
+                pin.clone(),
+            );
             move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
                 project_menu(
                     menu,
@@ -105,21 +159,30 @@ impl ProjectRow {
                     on_files.clone(),
                     on_hide.clone(),
                     on_page.clone(),
+                    on_setup.clone(),
+                    pin.clone(),
                 )
             }
         };
         let context = menu.clone();
-        let count_label = div()
+        let chip = |n: usize, mark: AnyElement, color: Hsla| {
+            (n > 0).then(|| {
+                h_flex().gap_1().items_center().text_color(color).child(mark).child(n.to_string())
+            })
+        };
+        let chips = h_flex()
             .absolute()
             .right_0()
-            .px_1p5()
-            .py_0p5()
-            .corner(px(4.))
-            .bg(cx.theme().muted.opacity(0.3))
-            .text_color(muted)
+            .gap_2()
+            .items_center()
             .text_xs()
             .font_features(tabular())
-            .child(if missing { "Missing".to_string() } else { count.to_string() })
+            .when(missing, |el| el.text_color(muted).child("Missing"))
+            .children(chip(needs_you, status_mark(ChatStatus::Waiting, false, cx), mango_text(cx)))
+            .children(chip(failed, status_mark(ChatStatus::Failed, false, cx), danger_text(cx)))
+            .when(collapsed && Bucket::of(status) == Bucket::Working, |el| {
+                el.child(status.badge(("project-status", id), Some(now), cx))
+            })
             .map(|el| {
                 if show_actions {
                     el.opacity(0.)
@@ -127,11 +190,82 @@ impl ProjectRow {
                     el.group_hover(group.clone(), |s| s.opacity(0.))
                 }
             });
+        let diff = added > 0 || deleted > 0;
+        let no_git = (branch.is_none() && no_git).then(|| {
+            h_flex()
+                .ml(-(rems(0.8125) + rems(0.5)))
+                .h(px(15.))
+                .gap_1()
+                .items_center()
+                .text_size(px(10.5))
+                .text_color(muted.opacity(0.7))
+                .child(
+                    div().size(px(6.)).mx(px(3.)).rounded_full().bg(muted.opacity(0.7)).flex_none(),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(middle_truncate(&tilde_path(&path), LONG_PATH)),
+                )
+        });
+        let git = branch.map(|branch| {
+            h_flex()
+                .ml(-(rems(0.8125) + rems(0.5)))
+                .flex_wrap()
+                .h(px(15.))
+                .overflow_hidden()
+                .gap_x(px(7.))
+                .items_center()
+                .text_size(px(10.5))
+                .text_color(muted)
+                .font_features(tabular())
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .max_w_full()
+                        .gap_1()
+                        .items_center()
+                        .child(Icon::new(Lucide::GitBranch).size(px(12.)).flex_none())
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .child(middle_truncate(&branch, LONG_BRANCH)),
+                        ),
+                )
+                .when(diff, |el| {
+                    el.child(
+                        h_flex()
+                            .flex_none()
+                            .gap(px(6.))
+                            .child(div().text_color(success_text(cx)).child(format!("+{added}")))
+                            .child(div().text_color(danger_text(cx)).child(format!("−{deleted}"))),
+                    )
+                })
+                .when(ahead > 0, |el| el.child(div().flex_none().child(format!("↑{ahead}"))))
+        });
         let actions = reveal_on_hover(
             h_flex().flex_none().justify_end().items_center().gap_1(),
             group.clone(),
             show_actions,
         )
+        .when_some(on_org, |act, on_org| {
+            act.child(
+                crate::components::button(("project-org", id))
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Users)
+                    .accessibility_label("Organization")
+                    .tooltip("Organization")
+                    .on_click(move |ev, window, cx| {
+                        cx.stop_propagation();
+                        on_org(ev, window, cx)
+                    }),
+            )
+        })
         .when_some(on_files, |act, on_files| {
             act.child(
                 crate::components::button(("project-files", id))
@@ -160,18 +294,22 @@ impl ProjectRow {
                     on_new(ev, window, cx)
                 }),
         )
-        .child(swallow_click(
-            ("project-menu-slot", id),
-            crate::components::button(("project-menu", id))
-                .ghost()
-                .xsmall()
-                .icon(IconName::Ellipsis)
-                .accessibility_label(format!("Project actions for {name}"))
-                .tooltip("Project actions")
-                .dropdown_menu_with_anchor(Anchor::TopRight, menu)
-                .on_open_change(on_menu),
-        ));
+        .when(on_open.is_none(), |act| {
+            act.child(swallow_click(
+                ("project-menu-slot", id),
+                crate::components::button(("project-menu", id))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Ellipsis)
+                    .accessibility_label(format!("Project actions for {name}"))
+                    .tooltip("Project actions")
+                    .dropdown_menu_with_anchor(Anchor::TopRight, menu)
+                    .on_open_change(on_menu),
+            ))
+        });
         let toggle = on_collapse.clone();
+        let fold = on_collapse.clone();
+        let org_row = on_open.is_some();
         let row = row_style(
             h_flex()
                 .id(("project", id))
@@ -179,44 +317,82 @@ impl ProjectRow {
                 .role(Role::Button)
                 .aria_label(aria)
                 .aria_expanded(!collapsed),
-            false,
+            active,
             cx,
         )
+        .when(active, |row| row.bg(cx.theme().sidebar_accent))
         .group(group)
         .relative()
         .w_full()
         .when(spaced, |row| row.mt_0p5())
+        .items_start()
         .gap_2()
         .px_2()
         .py_1()
         .text_sm()
         .text_color(muted)
         .child(
-            Icon::new(project_chevron_icon(collapsed))
-                .size(rems(0.6875))
-                .text_color(muted)
-                .flex_none(),
+            h_flex()
+                .id(("project-fold", id))
+                .debug_selector({
+                    let path = path.clone();
+                    move || format!("project-fold:{path}")
+                })
+                .flex_none()
+                .h(rems(1.25))
+                .gap_2()
+                .items_center()
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    fold(&!collapsed, window, cx)
+                })
+                .child(
+                    Icon::new(project_chevron_icon(collapsed)).size(rems(0.6875)).text_color(muted),
+                )
+                .child(
+                    Icon::new(project_folder_icon(collapsed)).size(rems(0.8125)).text_color(color),
+                ),
         )
         .child(
-            Icon::new(project_folder_icon(collapsed))
-                .size(rems(0.8125))
-                .text_color(color)
-                .flex_none(),
-        )
-        .child(
-            div()
-                .id(("project-name", id))
-                .text_color(color)
+            v_flex()
                 .flex_1()
                 .min_w_0()
-                .truncate()
-                .font_medium()
-                .tooltip(tooltip(name_tip))
-                .child(name),
+                .child(
+                    h_flex()
+                        .h(rems(1.25))
+                        .gap_1p5()
+                        .items_center()
+                        .child(
+                            div()
+                                .id(("project-name", id))
+                                .text_color(if missing {
+                                    muted
+                                } else {
+                                    cx.theme().sidebar_foreground
+                                })
+                                .flex_shrink(1.)
+                                .min_w_0()
+                                .truncate()
+                                .font_semibold()
+                                .tooltip(tooltip(name_tip))
+                                .child(name),
+                        )
+                        .when(pinned, |el| {
+                            el.child(
+                                div()
+                                    .id(("project-pinned", id))
+                                    .flex_none()
+                                    .tooltip(tooltip("Pinned".into()))
+                                    .child(
+                                        Icon::new(Lucide::Pin).size(rems(0.6875)).text_color(muted),
+                                    ),
+                            )
+                        })
+                        .child(div().flex_1()),
+                )
+                .children(git)
+                .children(no_git),
         )
-        .when(collapsed && status != ChatStatus::Idle, |row| {
-            row.child(status.badge(("project-status", id), Some(now), cx))
-        })
         .child(
             div()
                 .relative()
@@ -224,7 +400,7 @@ impl ProjectRow {
                 .h(rems(1.25))
                 .flex()
                 .items_center()
-                .child(count_label)
+                .child(chips)
                 .child(actions),
         )
         .when(guide, |row| {
@@ -240,7 +416,10 @@ impl ProjectRow {
                     .bg(cx.theme().sidebar_border),
             )
         })
-        .on_click(move |_, window, cx| toggle(&!collapsed, window, cx))
+        .on_click(move |ev, window, cx| match &on_open {
+            Some(open) => open(ev, window, cx),
+            None => toggle(&!collapsed, window, cx),
+        })
         .on_key_down(move |ev, window, cx| {
             let fold = match ev.keystroke.key.as_str() {
                 "left" => true,
@@ -254,9 +433,12 @@ impl ProjectRow {
             if fold != collapsed {
                 on_collapse(&fold, window, cx);
             }
-        })
-        .context_menu(context)
-        .into_any_element();
+        });
+        let row = if org_row {
+            row.into_any_element()
+        } else {
+            row.context_menu(context).into_any_element()
+        };
         nest(row, nested, cx)
     }
 }

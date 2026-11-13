@@ -88,6 +88,9 @@ impl ChatApp {
             return Some(editor.clone());
         }
         let (lang, text) = (language_from_path(&buf.path), buf.original.clone());
+        if super::editor::is_markdown_file(&buf.path) && super::editor::too_big_to_preview(&text) {
+            self.explorer_markdown_source.insert(id);
+        }
         let editor = cx.new(|cx| {
             EditorState::new(window, cx).line_number(true).language(lang).default_value(text)
         });

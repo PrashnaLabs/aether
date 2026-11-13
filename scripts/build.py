@@ -135,6 +135,18 @@ def debian(stage, artifact, version, arch, maintainer):
     run("dpkg-deb", "--root-owner-group", "--build", stage, artifact)
 
 
+def tar_filter(tarinfo):
+    tarinfo.uid = 0
+    tarinfo.gid = 0
+    tarinfo.uname = "root"
+    tarinfo.gname = "root"
+    if tarinfo.isdir():
+        tarinfo.mode = 0o755
+    elif tarinfo.isreg():
+        tarinfo.mode = 0o755 if (tarinfo.mode & 0o111) else 0o644
+    return tarinfo
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--format", choices=("app", "dmg", "tar", "deb", "zip"),
@@ -222,7 +234,7 @@ def main():
         elif fmt == "tar":
             with tarfile.open(artifact, "w:gz") as archive:
                 for child in sorted(stage.iterdir()):
-                    archive.add(child, arcname=f"{stem}/{child.name}")
+                    archive.add(child, arcname=f"{stem}/{child.name}", filter=tar_filter)
         elif fmt == "zip":
             with zipfile.ZipFile(artifact, "w", zipfile.ZIP_DEFLATED) as archive:
                 for child in sorted(stage.iterdir()):

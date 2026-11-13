@@ -10,7 +10,9 @@ pub(crate) use persistence::SessionSnapshot;
 #[derive(Clone, Copy)]
 pub(crate) enum PaneAction {
     SplitRight,
+    SplitLeft,
     SplitDown,
+    SplitUp,
     Float,
     Dock,
     Detach,

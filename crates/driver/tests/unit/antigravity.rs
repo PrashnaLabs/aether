@@ -82,6 +82,8 @@ fn opts(model: &str, effort: &str, access: AccessMode) -> DriverStartOptions {
         effort: effort.into(),
         access,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -145,6 +147,7 @@ fn text_turn_streams_deltas_and_per_call_usage() {
     assert_eq!(
         feed(&mut s, TEXT_TURN),
         [
+            Update::Accepted,
             Update::Delta("OK".into()),
             Update::Delta("\n".into()),
             Update::Usage(13854),
@@ -619,7 +622,7 @@ fn steers_are_marked_at_their_user_input_step_and_results_pair_up() {
     let mut s = State::default();
     on_prompt(&mut s, "count");
     on_steer(&mut s, "also say done");
-    assert_eq!(feed(&mut s, USER_INPUT), []);
+    assert_eq!(feed(&mut s, USER_INPUT), [Update::Accepted]);
     assert_eq!(feed(&mut s, USER_INPUT), [Update::Steered("also say done".into())]);
     assert_eq!(feed(&mut s, RESULT_OK), [], "the steer's own agy turn is still running");
     assert_eq!(feed(&mut s, RESULT_OK), [Update::Final(String::new())]);
@@ -1361,4 +1364,35 @@ fn forget_conversation_removes_only_that_conversation() {
     assert!(!root.join("brain").join(id).exists());
     assert!(root.join(format!("conversations/{keep}.db")).exists());
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_oversized_stream_line_warns_and_the_next_event_still_maps() {
+    let script = format!(
+        "echo '{INIT}'; head -c {} /dev/zero | tr '\\0' x; echo; \
+         echo '{{\"event\":\"step_update\",\"step_update\":{{\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"text_delta\":\"after\"}}}}'",
+        crate::lines::MAX_LINE + 1000
+    );
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", &script])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let state = Arc::new(Mutex::new(State { active: true, ..State::default() }));
+    read(child.stdout.take().unwrap(), 0, &state, &tx, None, None);
+    child.wait().unwrap();
+    let out = drain(&mut rx);
+    assert!(out.iter().any(|u| matches!(u, Update::Warning(w) if w.contains("16 MB"))), "{out:?}");
+    assert!(delta(&out).contains("after"), "{out:?}");
+}
+
+#[test]
+fn completed_user_input_accepts_prompt_once() {
+    let mut s = State::default();
+    on_prompt(&mut s, "hello");
+    let v: Value = serde_json::from_str(USER_INPUT).unwrap();
+    assert_eq!(map_event(&mut s, &v), [Update::Accepted]);
+    assert_eq!(map_event(&mut s, &v), []);
 }

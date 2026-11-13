@@ -9,14 +9,18 @@ fn card(id: i64, title: &str, place: &str, status: CardStatus, activity_ms: i64)
         title: title.into(),
         provider: Provider::Claude,
         model: "Claude Opus 5.5".into(),
+        effort: String::new(),
         status,
         since_ms: 0,
         place: place.into(),
         added: 0,
         removed: 0,
+        ahead: 0,
         activity_ms,
         text: String::new(),
         cwd: PathBuf::from("/p"),
+        worktree: false,
+        gone: false,
     }
 }
 

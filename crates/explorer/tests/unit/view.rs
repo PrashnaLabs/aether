@@ -144,3 +144,48 @@ fn renamed_paths_retarget_their_tabs() {
     assert_eq!(paths, [moved.to_str().unwrap(), "/r/x.rs", "/r/dirt.rs"]);
     assert_eq!(state.tabs[1].title, "x.rs");
 }
+
+#[test]
+fn tree_refresh_defers_reads_and_reveal_and_drops_stale_results() {
+    let dir = std::env::temp_dir().join(format!(
+        "aether_refresh_{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let mut state = ExplorerState::new(dir.clone());
+    let path = dir.join("sub/new.txt");
+    let (old, old_scan) = state.begin_tree_refresh(Some(path.clone()));
+    // Neither preparing nor applying the result may perform directory reads.
+    std::fs::write(&path, "").unwrap();
+    assert!(state.tree_state.selected.is_none());
+    let old_result = std::thread::spawn(old_scan).join().unwrap();
+    let (latest, scan) = state.begin_tree_refresh(None);
+    state.finish_tree_refresh(old, old_result);
+    assert!(state.tree_state.selected.is_none());
+    let result = std::thread::spawn(scan).join().unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    state.finish_tree_refresh(latest, result);
+    assert_eq!(state.tree_state.selected, Some(path.clone()));
+    assert!(state.tree_state.rows().iter().any(|node| node.path == path));
+}
+
+#[test]
+fn tree_refresh_preserves_selection_and_expansion_changes() {
+    let dir = std::env::temp_dir().join(format!(
+        "aether_refresh_interaction_{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let mut state = ExplorerState::new(dir.clone());
+    state.tree_state.toggle_expand(&dir.join("sub"));
+    let (generation, scan) = state.begin_tree_refresh(Some(dir.join("sub/new.txt")));
+    std::fs::write(dir.join("new.txt"), "").unwrap();
+    let result = std::thread::spawn(scan).join().unwrap();
+    state.tree_state.collapse_all();
+    state.tree_state.select(dir.join("new.txt"));
+    state.finish_tree_refresh(generation, result);
+    assert!(!state.tree_state.is_expanded(&dir.join("sub")));
+    assert_eq!(state.tree_state.selected, Some(dir.join("new.txt")));
+    assert!(state.tree_state.rows().iter().any(|node| node.path == dir.join("new.txt")));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

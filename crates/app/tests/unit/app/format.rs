@@ -33,6 +33,33 @@ fn reply_cost_uses_its_own_model_prices() {
 }
 
 #[test]
+fn chat_spend_prefers_reported_cost_and_falls_back_to_prices() {
+    let mut chat = chat_with("c", &["q", "a", "q2", "b"]);
+    let prices = HashMap::from([("m".to_string(), (1e-6, 0.))]);
+    for ix in [1, 3] {
+        chat.messages[ix].model = Some("m".into());
+        chat.messages[ix].apply(Update::Count { prompt: 1_000_000, completion: 0, cached: 0 });
+    }
+    chat.messages[1].cost_micros = 1_234_567;
+    assert_eq!(reply_spend(&chat.messages[1], &prices), (1_234_567, false));
+    assert_eq!(reply_spend(&chat.messages[3], &prices), (1_000_000, true));
+    assert_eq!(chat_spend(&chat, &prices), 2.23);
+    assert_eq!(chat_spend(&chat, &HashMap::new()), 1.23);
+}
+
+#[test]
+fn chat_spend_uses_reported_cost_even_without_model_prices() {
+    let mut chat = chat_with("reported", &["q", "a"]);
+    chat.messages[1].model = Some("m".into());
+    chat.messages[1].prompt_tokens = 1_000_000;
+    chat.messages[1].cost_micros = 120_000;
+    let prices = HashMap::from([("m".to_string(), (1e-6, 0.))]);
+    assert_eq!(message_cost(&chat.messages[1], &prices), Some(1.));
+    assert_eq!(chat_spend(&chat, &prices), 0.12);
+    assert_eq!(chat_spend(&chat, &HashMap::new()), 0.12);
+}
+
+#[test]
 fn costs_read_in_cents() {
     assert_eq!(cost_text(0, false), None);
     assert_eq!(cost_text(4_000, false).as_deref(), Some("<$0.01"));

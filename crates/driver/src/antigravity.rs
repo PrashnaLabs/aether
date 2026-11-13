@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -15,6 +15,7 @@ use aether_core::{
     repaired_path, without_attached_files,
 };
 
+use super::lines::{MAX_LINE, capped_lines, oversized};
 use super::record::{self, Recorder};
 use super::spawn::{StderrTail, command, log_unknown, spawn_logged};
 use super::tool::{finish, halted, set_output, start};
@@ -195,7 +196,7 @@ impl AntigravityDriver {
         if let Some(stderr) = child.stderr.take() {
             let (state, tx) = (self.state.clone(), self.tx.clone());
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     let mut s = state.guard();
                     if s.epoch != epoch {
                         continue;
@@ -507,7 +508,11 @@ fn read(
     waiter: Option<Sender<Result<String, String>>>,
 ) {
     let mut up = false;
-    for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+    for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+        let Some(line) = line else {
+            let _ = tx.unbounded_send(oversized("agy"));
+            continue;
+        };
         if let Some(rec) = &rec {
             rec.line(&line);
         }
@@ -955,9 +960,10 @@ fn step(s: &mut State, st: &Value) -> Vec<Update> {
                 return Vec::new();
             }
             let Some(input) = s.inputs.get(s.taken) else { return Vec::new() };
-            let steered = input.steer.then(|| Update::Steered(input.text.clone()));
+            let update =
+                if input.steer { Update::Steered(input.text.clone()) } else { Update::Accepted };
             s.taken += 1;
-            steered.into_iter().collect()
+            vec![update]
         }
         other => {
             log_unknown("agy", other.unwrap_or("step_update without a type"));

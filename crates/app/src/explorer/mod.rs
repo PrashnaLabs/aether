@@ -158,8 +158,28 @@ impl ChatApp {
         explorer: &Entity<ExplorerState>,
         cx: &mut Context<Self>,
     ) {
-        explorer.update(cx, |exp, _| exp.refresh_tree());
+        self.refresh_explorer_tree(explorer, None, cx);
         self.load_explorer_index(explorer, cx);
+    }
+
+    pub(crate) fn refresh_explorer_tree(
+        &mut self,
+        explorer: &Entity<ExplorerState>,
+        reveal: Option<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        let (generation, scan) = explorer.update(cx, |exp, _| exp.begin_tree_refresh(reveal));
+        let task = cx.background_executor().spawn(async move { scan() });
+        let target = explorer.clone();
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |_, cx| {
+                target.update(cx, |exp, _| exp.finish_tree_refresh(generation, result));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Lists the explorer's files off the UI thread for Quick Open, grep and

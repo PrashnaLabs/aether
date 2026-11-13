@@ -108,7 +108,7 @@ const HANDLED: &str = r#"{"type":"response","id":"aether-1","command":"prompt","
 #[test]
 fn handled_prompt_waits_for_a_run_an_extension_starts() {
     let mut s = State { active: true, prompt: "aether-1".into(), ..State::default() };
-    assert_eq!(ev(&mut s, HANDLED), []);
+    assert_eq!(ev(&mut s, HANDLED), [Update::Accepted]);
     assert!(s.grace && s.active);
     assert_eq!(ev(&mut s, r#"{"type":"agent_start"}"#), []);
     assert!(!s.grace);
@@ -117,7 +117,7 @@ fn handled_prompt_waits_for_a_run_an_extension_starts() {
     assert!(matches!(&late[..], [Update::Wake, Update::Notice(_)]), "{late:?}");
     s.active = true;
     s = State { active: true, running: true, prompt: "aether-1".into(), ..State::default() };
-    assert_eq!(ev(&mut s, HANDLED), []);
+    assert_eq!(ev(&mut s, HANDLED), [Update::Accepted]);
     assert!(!s.grace);
     assert_eq!(ev(&mut s, SETTLED), [Update::Final(String::new())]);
 }
@@ -128,7 +128,7 @@ fn settle_waits_for_an_unacked_prompt() {
         State { active: true, running: true, prompt: "aether-2".into(), ..State::default() };
     assert_eq!(ev(&mut s, SETTLED), []);
     let started = r#"{"type":"response","id":"aether-2","command":"prompt","success":true,"data":{"disposition":"started"}}"#;
-    assert_eq!(ev(&mut s, started), []);
+    assert_eq!(ev(&mut s, started), [Update::Accepted]);
     ev(&mut s, r#"{"type":"agent_start"}"#);
     assert_eq!(ev(&mut s, SETTLED), [Update::Final(String::new())]);
     let untracked = r#"{"type":"response","command":"clear_queue","success":true,"data":{"steering":["x"],"followUp":[]}}"#;
@@ -333,6 +333,8 @@ fn opts_for_test() -> DriverStartOptions {
         effort: "high".into(),
         access: AccessMode::ReadOnly,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -513,6 +515,8 @@ fn live_pi_smoke() {
         effort: String::new(),
         access: AccessMode::ReadOnly,
         resume: resume.into(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -617,6 +621,14 @@ fn stderr_warns_instead_of_failing() {
     let line = "Warning: Extension \"x\" project_trust error: boom";
     assert_eq!(stderr_update(line), Some(Update::Warning(line.into())));
     assert_eq!(stderr_update("debug: cache warm"), None);
+}
+
+#[test]
+fn launch_forks_by_session_id() {
+    let opts = DriverStartOptions { resume: "partial-id".into(), fork: true, ..opts_for_test() };
+    let args = launch_args(&opts, false);
+    assert!(args.windows(2).any(|w| w == ["--fork", "partial-id"]));
+    assert!(!args.iter().any(|a| a == "--session"));
 }
 
 #[test]
@@ -1103,7 +1115,7 @@ fn a_rejected_steer_returns_to_the_queue_without_failing_the_reply() {
     assert!(s.steers.is_empty());
     assert_eq!(s.prompt, "aether-1", "the prompt still waits for its own ack");
     let started = r#"{"type":"response","id":"aether-1","command":"prompt","success":true,"data":{"disposition":"started"}}"#;
-    assert_eq!(ev(&mut s, started), []);
+    assert_eq!(ev(&mut s, started), [Update::Accepted]);
     assert_eq!(ev(&mut s, SETTLED), [Update::Final(String::new())]);
 }
 
@@ -1168,4 +1180,50 @@ fn a_model_switched_by_command_is_the_model_options_compare_to() {
     let model = r#"{"id":"a2","type":"response","command":"set_model","success":true,"data":{"id":"glm-5","provider":"openrouter"}}"#;
     ev(&mut s, model);
     assert_eq!(s.model, "openrouter/glm-5");
+}
+
+#[test]
+fn fragmented_tool_arguments_scan_boundaries_once() {
+    let mut args = StreamedArgs::default();
+    assert!(args.push(r#"{"command":""#).is_none());
+    // Every fragment ends in a brace, including escaped quotes across fragments.
+    for _ in 0..10_000 {
+        assert!(args.push(r#"abc\"}"#).is_none());
+        assert!(!args.complete);
+    }
+    let input = args.push(r#"" ,"nested":[{},{"x":{}}]}"#).unwrap();
+    assert_eq!(input["command"].as_str().unwrap().len(), 50_000);
+    assert!(args.complete);
+    // A completed root cannot trigger another whole-buffer parse.
+    let len = args.json.len();
+    assert!(args.push("}").is_none());
+    assert_eq!(args.json.len(), len);
+}
+
+#[test]
+fn streamed_argument_escapes_can_cross_delta_boundaries() {
+    let mut args = StreamedArgs::default();
+    assert!(args.push("{\"command\":\"a\\").is_none());
+    assert!(args.push("\"}").is_none());
+    assert!(!args.complete);
+    assert_eq!(args.push("\"}").unwrap()["command"], "a\"}");
+}
+
+#[test]
+fn prompt_acceptance_follows_successful_response() {
+    let mut s = State::default();
+    on_prompt(&mut s, "p");
+    assert_eq!(
+        ev(&mut s, r#"{"type":"response","id":"p","command":"prompt","success":true}"#),
+        [Update::Accepted]
+    );
+    assert_eq!(ev(&mut s, r#"{"type":"response","id":"p","command":"prompt","success":true}"#), []);
+    on_prompt(&mut s, "q");
+    assert!(
+        !ev(
+            &mut s,
+            r#"{"type":"response","id":"q","command":"prompt","success":false,"error":"no"}"#
+        )
+        .contains(&Update::Accepted)
+    );
 }

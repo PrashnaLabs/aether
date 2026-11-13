@@ -56,3 +56,19 @@ fn lead_capable_covers_every_harness() {
         assert!(lead_capable(p), "{p:?}");
     }
 }
+
+#[test]
+fn window_move_rows_depend_on_host() {
+    use crate::session_workspace::PaneAction;
+    let main: Vec<_> = session_pane_actions(0).into_iter().collect();
+    assert!(
+        main.iter().any(|(l, a)| *l == "Open in new window" && matches!(a, PaneAction::Detach))
+    );
+    assert!(!main.iter().any(|(_, a)| matches!(a, PaneAction::Return)));
+    let side: Vec<_> = session_pane_actions(3).into_iter().collect();
+    assert!(
+        side.iter()
+            .any(|(l, a)| *l == "Move back to main window" && matches!(a, PaneAction::Return))
+    );
+    assert!(!side.iter().any(|(_, a)| matches!(a, PaneAction::Detach)));
+}

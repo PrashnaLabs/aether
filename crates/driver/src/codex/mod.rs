@@ -16,7 +16,7 @@ use aether_core::{
 use super::Driver;
 use super::record::Recorder;
 use super::spawn::StderrTail;
-use super::tool::{Throttle, clean};
+use super::tool::{OUTPUT_CAP, Throttle, cap_output, clean};
 
 #[cfg(test)]
 use super::DriverStartOptions;
@@ -156,8 +156,6 @@ pub(crate) struct Side {
     text: String,
 }
 
-const LIVE_OUTPUT_CAP: usize = 64 * 1024;
-
 /// A command's streamed output. Finished lines are cleaned once; the open last line stays
 /// raw so escapes and `\r` redraws split across deltas still clean right.
 #[derive(Default)]
@@ -169,23 +167,19 @@ pub(crate) struct LiveOutput {
 impl LiveOutput {
     fn push(&mut self, delta: &str) -> String {
         self.partial.push_str(delta);
-        if self.partial.len() > LIVE_OUTPUT_CAP {
-            let mut cut = self.partial.len() - LIVE_OUTPUT_CAP;
+        if self.partial.len() > OUTPUT_CAP {
+            let mut cut = self.partial.len() - OUTPUT_CAP;
             while !self.partial.is_char_boundary(cut) {
                 cut += 1;
             }
-            self.partial.drain(..cut);
+            let dropped: String = self.partial.drain(..cut).collect();
+            self.done.push_str(&clean(&dropped));
         }
         if let Some(at) = self.partial.rfind('\n') {
             let lines: String = self.partial.drain(..=at).collect();
             self.done.push_str(&clean(&lines));
-            while self.done.len() > LIVE_OUTPUT_CAP {
-                match self.done.find('\n') {
-                    Some(i) => self.done.drain(..=i),
-                    None => self.done.drain(..),
-                };
-            }
         }
+        cap_output(&mut self.done);
         format!("{}{}", self.done, clean(&self.partial))
     }
 }

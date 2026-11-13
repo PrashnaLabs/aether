@@ -28,7 +28,7 @@ use daily::{usage_metric_strip, usage_quality_panel};
 use format::{format_count, format_day_short, format_month_short, window_choice_label};
 use skeleton::usage_skeleton;
 
-/// Rendered chart height, matching Waku and T3 Code's `h-56` plot.
+/// Rendered chart height, matching Waku's `h-56` plot.
 const CHART_HEIGHT: f32 = 224.0;
 /// Sliver above the top gridline so a peak's 2px stroke is not shaved off.
 const CHART_PLOT_TOP: f32 = 8.0;
@@ -195,6 +195,10 @@ impl ChatApp {
                 provider: c.provider,
                 provider_model: c.provider_model.clone(),
                 cli_session: c.cli_session.clone(),
+                fork_from: c.fork_from.clone(),
+                rollback_to: c.rollback_to.clone(),
+                agent_sessions: vec![],
+                handoff_seen: None,
                 access: c.access_mode(),
                 effort: c.effort_level().to_owned(),
                 cwd: c.cwd_str().to_owned(),
@@ -204,6 +208,7 @@ impl ChatApp {
                 parent: c.parent,
                 lead: c.lead,
                 lead_seen: c.lead_seen,
+                pending_queue: vec![],
                 pending_deliveries: vec![],
                 handoff_from: c.handoff_from,
             })

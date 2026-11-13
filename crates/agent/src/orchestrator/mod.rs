@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream as Stream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::channel::mpsc::UnboundedSender;
 use serde_json::{Value, json};
@@ -46,6 +46,7 @@ pub struct OrchCall {
     pub lead: String,
     pub tool: String,
     pub args: Value,
+    pub deadline: Instant,
     pub reply: std::sync::mpsc::Sender<Result<Value, String>>,
 }
 
@@ -61,7 +62,10 @@ pub(crate) fn connect(sock: &Path) -> std::io::Result<Stream> {
 }
 
 pub fn socket_path() -> Option<PathBuf> {
-    Some(aether_core::config_dir()?.join("orchestrator.sock"))
+    let dir = aether_core::config_dir()?;
+    #[cfg(unix)]
+    let dir = dir.join("orch");
+    Some(dir.join("orchestrator.sock"))
 }
 
 fn chat_filter(about: &str) -> Value {
@@ -90,9 +94,18 @@ fn card_filter(about: &str) -> Value {
             "col": {"type": "string", "description": "One of: backlog, todo, doing, review, done"},
             "project": {"type": "string", "description": "Project folder name or path; \"all\" for every project. Default: your own project"},
             "added_by": {"type": "string", "description": "agent or user"},
-            "search": {"type": "string", "description": "Words that must all appear in the title or body"}
+            "search": {"type": "string", "description": "Words that must all appear in the title or body"},
+            "label": {"type": "string", "description": "Only cards with this label"}
         }
     })
+}
+
+fn labels() -> Value {
+    json!({"type": "array", "items": {"type": "string"}, "description": "Labels, e.g. [\"ui\", \"bug\"]; replaces the card's labels"})
+}
+
+fn blocked_by() -> Value {
+    json!({"type": "array", "items": {"type": "integer"}, "description": "Ids of open cards this one waits on; replaces the list, [] clears it. Ids drop out when their card is done or deleted"})
 }
 
 fn chat_id() -> Value {
@@ -121,6 +134,23 @@ pub fn tool_specs() -> Value {
                     "worktree": {"type": "boolean", "description": "Own git branch + folder off the lead's current branch; lead's uncommitted changes aren't included"},
                     "nonce": {"type": "string", "description": "Idempotency key for this spawn; retrying with the same key returns the existing child instead of creating a second"},
                     "card": {"type": "integer", "description": "Optional board card id to link; omitted adds a card for this agent"}
+                },
+                "required": ["title", "task"]
+            }
+        },
+        {
+            "name": "request_worker",
+            "description": "Org heads only: ask to hire a worker under you. The org's hiring rules (card, your worker cap, the org pool) and policy decide: replies {\"status\":\"hired\",\"id\":..}, {\"status\":\"denied\",\"reasons\":[..]}, or {\"status\":\"pending\",\"request\":..} when the user must decide; that decision arrives as your next turn, so don't poll.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short worker title"},
+                    "task": {"type": "string", "description": "What the worker should do"},
+                    "card": {"type": "integer", "description": "Board card id the work is tracked on"},
+                    "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity; default your own"},
+                    "model": {"type": "string", "description": "Model id for the provider; default your own"},
+                    "effort": {"type": "string", "description": "Optional reasoning effort for the model"},
+                    "why": {"type": "string", "description": "One line on why this worker is needed"}
                 },
                 "required": ["title", "task"]
             }
@@ -179,9 +209,23 @@ pub fn tool_specs() -> Value {
                 "properties": {
                     "title": {"type": "string", "description": "Short card title"},
                     "body": {"type": "string", "description": "Optional details"},
-                    "col": {"type": "string", "description": "One of: backlog, todo, doing, review"}
+                    "col": {"type": "string", "description": "One of: backlog, todo, doing, review"},
+                    "labels": labels(),
+                    "blocked_by": blocked_by()
                 },
                 "required": ["title"]
+            }
+        },
+        {
+            "name": "read_card",
+            "description": "Read one task-board card in full: description, labels, blockers, linked chats with their state, and every note, including linked agents' final results.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "Card id from the list_cards tool"},
+                    "brief": {"type": "boolean", "description": "Leave out the description"}
+                },
+                "required": ["id"]
             }
         },
         {
@@ -198,7 +242,7 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "update_card",
-            "description": "Edit a task-board card: any of its title, description and column; omitted fields stay.",
+            "description": "Edit a task-board card: any of its title, description, column, position, labels, blockers and linked chats, or add a dated note; omitted fields stay.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -206,9 +250,12 @@ pub fn tool_specs() -> Value {
                     "title": {"type": "string", "description": "New title"},
                     "body": {"type": "string", "description": "New description, replacing the old one; empty clears it"},
                     "append": {"type": "string", "description": "Text added to the end of the description, as a new paragraph"},
+                    "note": {"type": "string", "description": "Add a dated note signed by you (progress, decisions); the description stays"},
                     "col": {"type": "string", "description": "One of: backlog, todo, doing, review"},
                     "before": {"type": "integer", "description": "Place the card just above this card id in its column"},
-                    "chat": {"type": "integer", "description": "Link the card to this chat id"}
+                    "chat": {"type": "integer", "description": "Also link this chat id; a card can track several chats"},
+                    "labels": labels(),
+                    "blocked_by": blocked_by()
                 },
                 "required": ["id"]
             }
@@ -226,20 +273,24 @@ pub fn tool_specs() -> Value {
         },
         {
             "name": "read_history",
-            "description": "Read earlier messages of this chat (or, for a lead, any chat) in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted.",
+            "description": "Read earlier messages of this chat (or, for a lead, any chat) in full, with the tool calls and output a context handoff leaves out. Messages are numbered from 0, oldest first, as in the handed-over context; this still works after your own context was compacted. Follow next_text_offset to continue long messages.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": {"type": "integer", "description": "Leads only: another chat's id from list_chats (default: this chat)"},
                     "offset": {"type": "integer", "description": "First message number (default 0); negative counts back from the end, so -3 reads the last 3"},
-                    "limit": {"type": "integer", "description": "How many messages, 1 to 20 (default 5)"},
-                    "max_chars": {"type": "integer", "description": "Cap per message, 500 to 20000 (default 4000)"}
+                    "view": {"type": "string", "enum": ["messages", "items"], "description": "History view (default messages)"},
+                    "after_position": {"type": "integer", "description": "Items after this position (default -1); follow next_position"},
+                    "item": {"type": "string", "description": "Read one handoff item by id"},
+                    "limit": {"type": "integer", "description": "Page size, 1 to 20 (default 5 messages or 20 items)"},
+                    "max_chars": {"type": "integer", "description": "Cap per text, 500 to 20000 (default 4000)"},
+                    "text_offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Character offset into text; follow next_text_offset"}
                 }
             }
         },
         {
             "name": "list_chats",
-            "description": "List Aether chats matching a filter, with id, title, project, provider, state and last activity.",
+            "description": "List Aether chats matching a filter, with id, title, project, provider, model, state, queued message count, cost in USD and last activity.",
             "inputSchema": {"type": "object", "properties": {"filter": chat_filter("Which chats; all fields optional")}}
         },
         {
@@ -265,7 +316,7 @@ pub fn tool_specs() -> Value {
                 "properties": {
                     "id": chat_id(),
                     "title": {"type": "string", "description": "New title"},
-                    "pinned": {"type": "boolean", "description": "Pin (true) or unpin (false)"}
+                    "pinned": {"type": "boolean", "description": "Pin (true) or unpin (false); at most 3 pinned chats per project"}
                 },
                 "required": ["id"]
             }
@@ -281,6 +332,35 @@ pub fn tool_specs() -> Value {
             "inputSchema": {"type": "object", "properties": {"id": chat_id()}, "required": ["id"]}
         }
     ])
+}
+
+/// Rejects arguments `tool`'s schema doesn't name, top level and one object deep,
+/// so a misplaced field fails instead of being silently ignored.
+pub fn check_args(tool: &str, args: &Value) -> Result<(), String> {
+    let specs = tool_specs();
+    let Some(spec) = specs.as_array().into_iter().flatten().find(|s| s["name"] == tool) else {
+        return Ok(());
+    };
+    fn walk(path: &str, args: &Value, schema: &Value) -> Result<(), String> {
+        let (Some(args), Some(props)) = (args.as_object(), schema["properties"].as_object()) else {
+            return Ok(());
+        };
+        for (key, value) in args {
+            let Some(inner) = props.get(key) else {
+                let mut known: Vec<&str> = props.keys().map(String::as_str).collect();
+                known.sort_unstable();
+                return Err(format!(
+                    r#"unknown argument "{path}{key}"; expected one of: {}"#,
+                    known.join(", ")
+                ));
+            };
+            if inner["type"] == "object" {
+                walk(&format!("{path}{key}."), value, inner)?;
+            }
+        }
+        Ok(())
+    }
+    walk("", args, &spec["inputSchema"])
 }
 
 /// What a chat that isn't a lead gets: only read_history, for its handed-over context.
@@ -307,7 +387,7 @@ pub fn board_specs() -> Value {
             .filter(|s| {
                 matches!(
                     s["name"].as_str(),
-                    Some("list_cards" | "add_card" | "move_card" | "update_card")
+                    Some("list_cards" | "read_card" | "add_card" | "move_card" | "update_card")
                 )
             })
             .cloned()

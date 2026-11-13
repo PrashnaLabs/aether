@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -15,6 +15,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::DriverStartOptions;
+use crate::lines::{MAX_LINE, capped_lines, oversized};
 use crate::record::{self};
 use crate::spawn::{StderrTail, command, spawn_logged};
 use crate::version::gate_binary;
@@ -55,6 +56,7 @@ impl ClaudeDriver {
                 me.die("claude is not installed; install it or set an explicit binary path".into());
                 return me;
             };
+            configure_orchestration_env(&mut cmd, opts.lead.as_ref());
             cmd.args(&args).stdin(Stdio::piped()).stdout(Stdio::piped());
             let child = match spawn_logged(&mut cmd) {
                 Ok(child) => child,
@@ -73,7 +75,9 @@ impl ClaudeDriver {
                 chosen: opts.model.clone(),
                 ..State::default()
             }));
-            let _ = me.tx.unbounded_send(Update::Session(id.clone()));
+            if !(opts.fork || !opts.rollback.is_empty()) || !resumed {
+                let _ = me.tx.unbounded_send(Update::Session(id.clone()));
+            }
             if let Some(n) = note.take() {
                 me.notice(n);
             }
@@ -92,11 +96,42 @@ impl ClaudeDriver {
                     let _ = me.tx.unbounded_send(Update::Warning(why.into()));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    let fix = resume_fix(&me.state.guard().stderr);
+                    let fix = if opts.fork || !opts.rollback.is_empty() {
+                        Some(ResumeFix::Fresh(me.state.guard().stderr.fatal("")))
+                    } else {
+                        resume_fix(&me.state.guard().stderr)
+                    };
                     match fix {
                         Some(fix) if attempt == 0 => {
                             me.stop_child();
+                            if opts.fork || !opts.rollback.is_empty() {
+                                args.retain(|a| a != "--fork-session");
+                                if let Some(i) =
+                                    args.iter().position(|a| a == "--resume-session-at")
+                                {
+                                    args.drain(i..i + 2);
+                                }
+                            }
                             (args, id, resumed, note) = apply_fix(args, fix);
+                            if !opts.rollback.is_empty() {
+                                let reason = me.state.guard().stderr.fatal("");
+                                note = Some(Notice::new(
+                                    "info-rollback",
+                                    NoticeKind::Info,
+                                    format!(
+                                        "Could not roll back the conversation natively ({reason}). Started a fresh session with its history."
+                                    ),
+                                ));
+                            } else if opts.fork {
+                                let reason = me.state.guard().stderr.fatal("");
+                                note = Some(Notice::new(
+                                    "info-fork",
+                                    NoticeKind::Info,
+                                    format!(
+                                        "Could not fork the source conversation natively ({reason}). Started a fresh session with its history."
+                                    ),
+                                ));
+                            }
                             continue;
                         }
                         _ => {
@@ -138,7 +173,7 @@ impl ClaudeDriver {
         if let Some(stderr) = child.stderr.take() {
             let state = self.state.clone();
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     state.guard().stderr.push(&line);
                 }
                 drop(stderr_done);
@@ -150,7 +185,11 @@ impl ClaudeDriver {
             let (stdin, child, rec) = (self.stdin.clone(), self.child.clone(), self.rec.clone());
             let mut init_tx: Option<Sender<Result<(), String>>> = Some(init_tx);
             std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+                    let Some(line) = line else {
+                        let _ = tx.unbounded_send(oversized("claude"));
+                        continue;
+                    };
                     if let Some(rec) = &rec {
                         rec.line(&line);
                     }
@@ -217,6 +256,16 @@ impl ClaudeDriver {
         if let Some(rec) = &self.rec {
             rec.line(&v.to_string());
         }
+    }
+}
+
+pub(crate) fn configure_orchestration_env(
+    cmd: &mut std::process::Command,
+    lead: Option<&crate::LeadTools>,
+) {
+    if let Some(lead) = lead {
+        cmd.env("AETHER_ORCH_SOCK", &lead.sock);
+        cmd.env("AETHER_ORCH_TOKEN", &lead.token);
     }
 }
 
@@ -324,6 +373,8 @@ pub(crate) fn launch_args(
         "--include-hook-events",
         "--permission-prompts",
         "host",
+        "--permission-prompt-tool",
+        "stdio",
         "--permission-mode",
         mode,
     ]
@@ -354,10 +405,19 @@ pub(crate) fn launch_args(
             Err(e) => eprintln!("aether: lead tools unavailable: {e}"),
         }
     }
-    let resumed = !opts.resume.is_empty() && session_exists(&opts.resume);
+    let resumed = !opts.resume.is_empty()
+        && (opts.fork || !opts.rollback.is_empty() || session_exists(&opts.resume));
     let note = lost_resume(&opts.resume, resumed);
     let id = if resumed { opts.resume.clone() } else { new_uuid() };
     args.extend([if resumed { "--resume" } else { "--session-id" }.to_string(), id.clone()]);
+    if !opts.rollback.is_empty() && resumed {
+        args.extend(["--resume-session-at".into(), opts.rollback.clone(), "--fork-session".into()]);
+        return (args, id, resumed, note);
+    }
+    if opts.fork && resumed {
+        let (args, id, resumed, _) = apply_fix(args, ResumeFix::Fork);
+        return (args, id, resumed, note);
+    }
     (args, id, resumed, note)
 }
 
@@ -370,7 +430,11 @@ pub(crate) fn write_mcp_config(lead: &crate::LeadTools) -> std::io::Result<PathB
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-    opts.open(&path)?.write_all(crate::mcp_config_json(lead).as_bytes())?;
+    let mut config: Value = serde_json::from_str(&crate::mcp_config_json(lead))
+        .expect("serialized MCP config is valid JSON");
+    config["mcpServers"]["aether"]["env"]["AETHER_ORCH_SOCK"] = json!("${AETHER_ORCH_SOCK}");
+    config["mcpServers"]["aether"]["env"]["AETHER_ORCH_TOKEN"] = json!("${AETHER_ORCH_TOKEN}");
+    opts.open(&path)?.write_all(config.to_string().as_bytes())?;
     Ok(path)
 }
 

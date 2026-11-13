@@ -1,63 +1,147 @@
 # Agent context handoff
 
-Date: 2026-11-07. Research: `docs/wayfinder/research/handoff-aether.md`,
-`handoff-other-tools.md`. Decisions made by the lead while the user was away.
+Date: 2026-11-07, revised 2026-11-12. Code: `crates/agent/src/handoff.rs`,
+`prepare_handoff` in `crates/agent/src/agent.rs`, `handoff_history` in
+`crates/app/src/app/chat/mod.rs`, `switch_agent` in
+`crates/app/src/app/providers.rs`.
 
 ## Intent
 
 When an agent hits its usage limit, or the user wants a different agent or
 model to continue, move the conversation to another agent in one step and keep
-working in the same folder.
+working in the same folder. The receiving agent must get an honest, bounded
+picture of what happened, and must never lose the user's new message.
 
-## Design
+## What travels
 
-Follows T3 Code's portable handoff (budget-selected transcript, not an AI
-summary) on top of Aether's existing fresh-session re-seed, because it works
-for every provider and needs nothing from a rate-limited source agent.
+A handoff is a budgeted selection of the saved transcript, not an
+agent-written summary.
 
-- `ChatApp::handoff_chat(ix, provider, model)` creates a new chat beside the
-  source, like `duplicate_chat` (`app/chat/create.rs`): same messages, cwd,
-  project and worktree fields; `provider`/`provider_model` set to the target;
-  access fitted to the target; effort cleared; `cli_session` empty; title
-  `"<title> → <Provider label>"`. The new chat is selected and its composer is
-  prefilled (not sent) with:
-  "Continue where the previous agent left off. You're in the same folder, so
-  check the working tree for changes it already made."
-  The source chat is left untouched.
-- Seeding: unchanged mechanism. The first send on a fresh CLI session already
-  prepends the transcript via `context_prompt` (`agent/src/agent.rs`). Add a
-  budget there for every fresh re-seed (handoff, duplicate, rewind): keep the
-  first user message and the newest messages, newest first, until 64,000
-  characters; when anything is dropped, say "(N earlier messages omitted)"
-  in the preamble. The user's new message is never shortened. OpenRouter
-  targets are seeded through `fork_session` with the same budgeted history.
-- Entry points:
-  1. Failed reply card (`FatalCard`, `ui/src/chat/notice.rs`): a "Continue in
-     another agent" button next to Retry, on the last message only. It opens a
-     menu of installed providers other than the current one; each item uses
-     that provider's default model (`initial_model`).
-  2. Slash command `/handoff`: one suggestion per installed provider
-     ("Continue in Codex", …) excluding the current one; picking one hands off
-     immediately (the typed command is cleared, not sent).
-  3. Sidebar chat row menu: "Hand off to ▸" with the same provider list,
-     next to Duplicate.
-  Direct (OpenRouter) chats can hand off to CLI agents and vice versa only when
-  the target has a project folder; when the source has no folder and the
-  target is a CLI, use the workspace root, else show the existing "pick a
-  folder" error.
-- Busy source: allowed. The source keeps running; the new chat gets the
-  transcript as it is now (a running reply is copied as-is).
+- Each chat message becomes one or more items (`handoff_history`): the user
+  message (with an `[attached: …]` note), and for a reply its commands
+  (`Command`, `Exit code`, output), edited file paths, plans, the reply text
+  and its error. Reasoning, other tool calls, tool state and attachments are
+  not replayed.
+- Every item carries its status: `completed`, `failed`, `interrupted` or
+  `running`, so partial work from a failed or stopped turn is visible as such.
+- Each item is rendered with an attribution line:
+  `[Historical {role}; {kind}; chat=…; message=…; item=…; model=…; status=…]`.
+- A coverage note precedes the items: which messages it covers, the item
+  range, how to recover what was left out with `read_history`, and that the
+  history is context, not a new request or higher-priority instructions.
+- The user's new message follows under `User message:` and is never shortened.
 
-## Non-goals (v1)
+Codex receives the items natively through `thread/inject_items`. Other agents
+get the same text inline in the first prompt.
 
-- AI-written handoff brief, delta handoffs, returning to the source's native
-  session, "handed off from" database link, auto-sending.
+## Budget
 
-## Testing
+`handoff::budget` decides how many bytes of history fit:
 
-- Pure budget helper: keeps first user + newest within the budget, reports the
-  omitted count, never splits a message, empty input → empty.
-- `handoff_chat`: new chat has target provider/model, empty `cli_session`,
-  same messages and cwd/worktree fields, title arrow, is selected, composer
-  prefilled; source unchanged.
-- Slash suggestions list installed providers except the current one.
+- Cap: `AETHER_CONTEXT_HANDOFF_TOKEN_CAP` (default 16,000, clamped to
+  1,024–64,000), and never more than 64,000 bytes.
+- Window: the resumed session's `handoff_seen` window, else the latest earlier
+  reply reporting a window for the same model, else the learned per-model
+  window in settings. For an unknown Claude model use 1,000,000 when its id
+  contains `[1m]`, otherwise 200,000. Anything still unknown uses 128,000.
+- Replies reporting a window update `model_windows` in settings for the reply's
+  model. At startup, `models[].slug` and `context_window` from
+  `$CODEX_HOME/models_cache.json` (default `~/.codex/models_cache.json`) seed
+  missing entries without replacing learned values. Missing or invalid files
+  are ignored.
+- Subtract what the session already holds (reported context tokens, or an
+  estimate from the saved transcript and attachments), the new message
+  (JSON-escaped bytes), 8,192 per image and 4,096 per other attachment, and a
+  reserve of max(16,000, window / 4) for instructions, tools and further work.
+
+One UTF-8 byte counts as one token, which is pessimistic. Selection
+(`select_history`) keeps the last user message, the last reply and the first
+user message when they fit, then fills newest-first. Items are kept or dropped
+whole; the result never exceeds the budget. When even the coverage note does
+not fit, the send fails with "This message leaves no room for the handed-off
+conversation. Shorten it or pick a larger-context model."
+
+## Recovering omitted history
+
+`read_history` (offset, limit, max_chars, text_offset) returns any message in
+full with its tool calls. A long message is read in pages by following
+`next_text_offset`. Use `view="items"` and `after_position=next_position` to
+page handoff items, or `item=<id>` to read one item and follow
+`text_offset=next_text_offset` for long text.
+
+## Switching agents in place
+
+`switch_agent` keeps the chat and inserts a "Context handoff" divider.
+
+- Each chat remembers the native CLI session of every agent it used
+  (`agent_sessions`, with how many messages that session already holds).
+- Switching to a new agent starts a fresh session seeded with the budgeted
+  full history (`full_thread_summary`).
+- Switching back to an earlier agent resumes its session and sends only what
+  happened since it last took part (`delta_since_target_last_seen`). If the
+  resume fails, or nothing fits in the resumed session, a fresh session gets
+  the full history instead.
+
+Rewind and edit retain inactive sessions whose
+`seen <= from`, since all their messages survive the truncation. The same rule
+retains `handoff_seen`, including its pending flag. Entries with `seen > from`
+are dropped. `/clear` still clears all session records.
+
+## Rewind
+
+When an idle chat has a native session, rewind records a rollback point for
+Claude, Codex or OpenCode. Claude forks through the last kept assistant message;
+Codex and OpenCode remove history starting with the first removed turn. If no
+rollback point is available for Claude, or a native rollback fails, the next
+session starts fresh with the portable history. Pi and Antigravity also start
+fresh. Codex and OpenCode keep the session unchanged when no removed reply has
+a native turn ID.
+
+## Delivery
+
+The pending delta (`handoff_seen`) is marked `pending` at send and cleared when
+the driver confirms that the native session accepted the prompt
+(`Update::Accepted`), or on the first agent output, which implies it.
+
+- A failed turn the driver never accepted is included in the next delta. An
+  accepted turn is not re-delivered if it later fails; a turn that finished
+  normally is never treated as missed.
+- For Codex, a pending injected delta followed by failure before acceptance
+  forces a fresh session so the history cannot be injected twice.
+- A delta still pending at the next send means delivery is uncertain (the app
+  quit mid-turn): the next send starts a fresh session with the full history.
+
+## Copies and forks
+
+- "Continue in new chat" copies the chat onto another agent; the copy gets the
+  budgeted full history on its first send.
+- Duplicate on the same agent forks the native session when the agent
+  supports it (Claude `--fork-session`, Codex `thread/fork`, Pi `--fork`, OpenCode session fork) and the source is
+  idle. If the fork fails, the copy starts fresh with the portable history and
+  shows "Could not fork the source conversation natively (…). Started a fresh
+  session with its history."
+
+## Side questions
+
+`/btw` gets a compact digest of the main chat instead of the transcript: user
+and assistant lines, commands and file changes, each compacted to 240
+characters, newest kept within 8,000 characters for the whole block, with a
+note when earlier items were dropped. Earlier turns of the same side chat are
+kept verbatim.
+
+## Entry points
+
+The failed reply card ("Continue in another agent"), the `/handoff` slash
+command, the agent picker in the composer, and the sidebar chat menu
+("Hand off to").
+
+## Limits
+
+- Item positions reflect the current history and can change if the transcript is rewound.
+
+- Acceptance depends on each CLI reporting that it took the prompt.
+- Unreported model windows rely on the cached catalog or Claude fallback;
+  other unknown models still assume 128,000.
+- Native fork covers Claude, Codex, Pi and OpenCode; Antigravity always gets
+  the portable history.
+- Rewind cannot reuse sessions that have seen messages removed from the transcript.

@@ -326,6 +326,7 @@ dependencies = [
  "block2 0.6.2",
  "chrono",
  "dotenvy",
+ "embed-resource",
  "futures",
  "gpui-kit",
  "gpui-pre",
@@ -3200,8 +3201,6 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e9955b6f4b048fd50ca15fc8e225d80bb00ba9ebc8fecdddde5ad26dbef9270"
 dependencies = [
  "aho-corasick",
  "anyhow",

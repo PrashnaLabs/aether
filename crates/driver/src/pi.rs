@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{Sender, channel};
@@ -17,13 +17,14 @@ use aether_core::{
     without_attached_files,
 };
 
+use super::lines::{MAX_LINE, capped_lines, oversized};
 use super::record::{self, Recorder};
 use super::spawn::{
     StderrTail, command as spawn_command, log_unknown, spawn_logged, visible_stderr,
 };
 use super::tool::{
-    Throttle, apply_patch_text, clean, finish, halted, now_ms, result_text, save_images,
-    set_output, start,
+    Throttle, append_output, apply_patch_text, clean, finish, halted, now_ms, result_text,
+    save_images, set_output, start,
 };
 use super::version::gate_binary;
 use super::{Driver, DriverStartOptions};
@@ -71,7 +72,7 @@ struct State {
     stderr: StderrTail,
     attachments: Option<PathBuf>,
     /// Content index to (tool call id, streamed argument JSON).
-    args: HashMap<u64, (String, String)>,
+    args: HashMap<u64, (String, StreamedArgs)>,
     names: HashMap<String, String>,
     retry: Option<Notice>,
     compactions: u32,
@@ -90,6 +91,49 @@ struct State {
     outbox: Vec<Value>,
     /// The model Aether set or a `/model` switched to, as `provider/id`.
     model: String,
+}
+
+/// Tracks JSON boundaries once per byte; only a closed root is parsed.
+#[derive(Default)]
+struct StreamedArgs {
+    json: String,
+    depth: usize,
+    in_string: bool,
+    escaped: bool,
+    complete: bool,
+}
+
+impl StreamedArgs {
+    fn push(&mut self, delta: &str) -> Option<Value> {
+        if self.complete {
+            return None;
+        }
+        self.json.push_str(delta);
+        for byte in delta.bytes() {
+            if self.in_string {
+                if self.escaped {
+                    self.escaped = false;
+                } else if byte == b'\\' {
+                    self.escaped = true;
+                } else if byte == b'"' {
+                    self.in_string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => self.in_string = true,
+                b'{' | b'[' => self.depth += 1,
+                b'}' | b']' => {
+                    self.depth = self.depth.saturating_sub(1);
+                    if self.depth == 0 {
+                        self.complete = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.complete.then(|| serde_json::from_str(&self.json).ok()).flatten()
+    }
 }
 
 impl PiDriver {
@@ -144,7 +188,11 @@ impl PiDriver {
             let stdin = me.stdin.clone();
             std::thread::spawn(move || {
                 let throttle = Throttle::new(tx.clone());
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stdout), MAX_LINE) {
+                    let Some(line) = line else {
+                        throttle.send(oversized("pi"));
+                        continue;
+                    };
                     if let Some(rec) = &rec {
                         rec.line(&line);
                     }
@@ -204,7 +252,7 @@ impl PiDriver {
         if let Some(stderr) = child.stderr.take() {
             let (tx, state) = (me.tx.clone(), me.state.clone());
             std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                for line in capped_lines(BufReader::new(stderr), MAX_LINE).flatten() {
                     state.guard().stderr.push(&line);
                     if let Some(u) = stderr_update(&line)
                         && tx.unbounded_send(u).is_err()
@@ -217,6 +265,18 @@ impl PiDriver {
         *me.child.guard() = Some(child);
         if let Err(e) = me.handshake(&opts) {
             let why = me.state.guard().stderr.fatal(&format!("pi didn't start: {e}"));
+            if opts.fork && !opts.resume.is_empty() {
+                me.die(why.clone());
+                shut(&me.child, &me.stdin);
+                let _ = me.tx.unbounded_send(Update::Notice(Notice::new(
+                    "info-fork", NoticeKind::Info,
+                    format!("Could not fork the source conversation natively ({why}). Started a fresh session with its history."),
+                )));
+                let mut fresh = opts;
+                fresh.resume.clear();
+                fresh.fork = false;
+                return Self::launch(fresh, me.tx.clone(), approve);
+            }
             me.die(why);
         }
         me
@@ -230,7 +290,7 @@ impl PiDriver {
     fn handshake(&mut self, opts: &DriverStartOptions) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(30);
         self.request(json!({"type": "get_state"}), deadline)?;
-        self.resumed = Path::new(&opts.resume).is_file();
+        self.resumed = (opts.fork && !opts.resume.is_empty()) || Path::new(&opts.resume).is_file();
         self.startup("startup-spawn", "Starting pi", NoticeState::Done);
         if !opts.resume.is_empty() {
             self.startup("startup-session", "Loading session", NoticeState::Done);
@@ -547,6 +607,7 @@ impl PiDriver {
     fn respawn(&mut self) {
         let mut opts = self.opts.clone();
         opts.effort = self.effort.clone();
+        opts.fork = false;
         if !self.session.is_empty() {
             opts.resume = self.session.clone();
         }
@@ -658,7 +719,9 @@ fn launch_args_with(opts: &DriverStartOptions, approve: bool, ext: Option<&Path>
     if let Some((_, path)) = lead {
         args.extend(["-e".into(), path.to_string_lossy().into_owned()]);
     }
-    if Path::new(&opts.resume).is_file() {
+    if opts.fork && !opts.resume.is_empty() {
+        args.extend(["--fork".into(), opts.resume.clone()]);
+    } else if Path::new(&opts.resume).is_file() {
         args.extend(["--session".into(), opts.resume.clone()]);
     }
     if approve {
@@ -923,7 +986,7 @@ fn map_event(s: &mut State, v: &Value) -> Vec<Update> {
             }
             // extensions start runs unawaited, so one may still follow the ack
             s.grace = v["data"]["disposition"] == "handled" && !s.running;
-            vec![]
+            vec![Update::Accepted]
         }
         "message_start" if v["message"]["role"] == "user" => {
             let blocks = v["message"]["content"].as_array().into_iter().flatten();
@@ -1102,12 +1165,7 @@ fn map_event(s: &mut State, v: &Value) -> Vec<Update> {
                 {
                     note.push_str(&format!(" Full output: {path}"));
                 }
-                if let ToolDetail::Command { output, .. }
-                | ToolDetail::Search { output, .. }
-                | ToolDetail::Other { output, .. } = &mut call.detail
-                {
-                    output.push_str(&note);
-                }
+                append_output(&mut call.detail, &note);
             }
             call.images = save_images(&result["content"], s.attachments.as_deref());
             vec![Update::Tool(call)]
@@ -1298,16 +1356,16 @@ fn message_update(s: &mut State, e: &Value) -> Vec<Update> {
         Some("toolcall_start") => {
             let (id, name) = (string_of(&e["id"]), string_of(&e["toolName"]));
             let call = start(id.clone(), &name, &Value::Null);
-            s.args.insert(index, (id.clone(), String::new()));
+            s.args.insert(index, (id.clone(), StreamedArgs::default()));
             s.names.insert(id.clone(), name);
             s.tools.insert(id, call.clone());
             vec![Update::Tool(call)]
         }
         Some("toolcall_delta") => {
             let Some((id, json)) = s.args.get_mut(&index) else { return vec![] };
-            json.push_str(e["delta"].as_str().unwrap_or_default());
-            // ponytail: re-parses the whole buffer per delta, quadratic in argument size
-            let Ok(input) = serde_json::from_str::<Value>(json) else { return vec![] };
+            let Some(input) = json.push(e["delta"].as_str().unwrap_or_default()) else {
+                return vec![];
+            };
             let id = id.clone();
             reclassify(s, &id, &input)
         }

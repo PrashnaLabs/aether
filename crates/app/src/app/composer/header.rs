@@ -4,15 +4,13 @@ use aether_ui::theme::Corners;
 use std::path::{Path, PathBuf};
 
 use aether_core::Provider;
-use aether_ui::{
-    anchored_popup, icon_chip, overlay, project_color, project_mark, provider_icon, theme,
-};
+use aether_ui::{overlay, project_color, project_mark, provider_icon, theme};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::ButtonVariants;
-use gpui_kit::component::{ActiveTheme, IconName, Selectable, h_flex};
+use gpui_kit::component::{ActiveTheme, IconName, h_flex};
 use gpui_kit::{
-    Anchor, AnyElement, Context, MouseButton, Role, SharedString, Window, div, prelude::*, px,
+    AnyElement, Context, MouseButton, Role, SharedString, Window, div, prelude::*, px,
     transparent_black,
 };
 
@@ -160,6 +158,20 @@ impl ChatApp {
                         this.toggle_sidebar(window, cx)
                     }))
             });
+        let back = aether_ui::button("project-back")
+            .ghost()
+            .small()
+            .icon(Lucide::ArrowLeft)
+            .accessibility_label("Back")
+            .tooltip("Back")
+            .on_click(cx.listener(|this, _, _, cx| {
+                if this.project_view.attachments {
+                    this.project_view.attachments = false;
+                    cx.notify();
+                } else {
+                    this.open_page(crate::app::Page::Chat, cx);
+                }
+            }));
         let name = self.project_page.as_deref().map(|dir| self.project_name(dir));
         h_flex()
             .flex_none()
@@ -168,6 +180,7 @@ impl ChatApp {
             .gap(px(8.))
             .items_center()
             .children(expand_btn)
+            .child(back)
             .children(name.map(|name| {
                 h_flex()
                     .id("breadcrumb")
@@ -191,24 +204,19 @@ impl ChatApp {
             .children(self.open_error_line(cx))
     }
 
-    pub(in crate::app) fn render_header(
-        &self,
-        pop: Option<AnyElement>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        self.render_header_content(pop, None, true, true, 0, cx)
+    pub(in crate::app) fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        self.render_header_content(None, true, true, 0, cx)
     }
 
     pub(crate) fn render_header_with_pane(
         &self,
-        pop: Option<AnyElement>,
         controls: AnyElement,
         show_sidebar: bool,
         show_tools: bool,
         host: WindowId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_header_content(pop, Some(controls), show_sidebar, show_tools, host, cx)
+        self.render_header_content(Some(controls), show_sidebar, show_tools, host, cx)
             .into_any_element()
     }
 
@@ -219,7 +227,6 @@ impl ChatApp {
 
     fn render_header_content(
         &self,
-        pop: Option<AnyElement>,
         pane_controls: Option<AnyElement>,
         show_sidebar: bool,
         show_tools: bool,
@@ -317,24 +324,7 @@ impl ChatApp {
                     }
                 }))
         });
-        let workspace_btn = (is_agent && show_tools).then(|| {
-            let open = pop.is_some();
-            let toggle = icon_chip("workspace-toggle", open, cx)
-                .selected(open)
-                .toggled(open)
-                .icon(Lucide::LayoutList)
-                .accessibility_label("Workspace")
-                .tooltip("Workspace")
-                .when(!open, |d| {
-                    // open only: outside mouse-down already closed it, a click would reopen
-                    d.on_click(self.session_listener(cx, |this, _, window, cx| {
-                        this.toggle_workspace_pop(window, cx)
-                    }))
-                });
-            anchored_popup("workspace-pop-anchor", toggle, &self.workspace_pop.trigger, true)
-                .anchor(Anchor::TopRight)
-                .when_some(pop, |p, pop| p.content(pop))
-        });
+        let workspace_btn = (is_agent && show_tools).then(|| self.workspace_toggle(cx));
 
         h_flex()
             .flex_none()

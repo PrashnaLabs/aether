@@ -19,6 +19,7 @@ use super::service::{
 };
 use super::{Child, Conn, State};
 use crate::DriverStartOptions;
+use crate::lines::{MAX_LINE, oversized};
 use crate::record::Recorder;
 use crate::tool::{Throttle, start as start_call};
 
@@ -32,8 +33,20 @@ pub(super) fn start(
 ) -> Result<Conn, String> {
     let (api, server) = connect(opts, tx)?;
     let api = Arc::new(api);
-    let resume = opts.resume.starts_with("ses_");
-    let session = if resume { opts.resume.clone() } else { new_session_id() };
+    let mut resume = opts.resume.starts_with("ses_");
+    let mut forked = None;
+    if opts.fork && !opts.resume.is_empty() {
+        forked =
+            fork_or_fresh(&opts.resume, tx, |path, body| api.call(Method::POST, path, Some(body)));
+        resume = false;
+    }
+    let session = if let Some(info) = &forked {
+        info["data"]["id"].as_str().unwrap().to_string()
+    } else if resume {
+        opts.resume.clone()
+    } else {
+        new_session_id()
+    };
     {
         let mut s = state.guard();
         s.root = session.clone();
@@ -51,7 +64,9 @@ pub(super) fn start(
     let label = if resume { "Resuming session" } else { "Creating session" };
     step(tx, NoticeState::Running, label);
     let setup = || -> Result<Option<Value>, String> {
-        let info = if resume {
+        let info = if forked.is_some() {
+            forked.clone()
+        } else if resume {
             match c.api.send(Method::GET, &c.path(""), None, REQUEST_TIMEOUT)? {
                 (200, text) => Some(serde_json::from_str::<Value>(&text).unwrap_or_default()),
                 (404, _) => None,
@@ -73,7 +88,27 @@ pub(super) fn start(
         }
         Ok(info)
     };
-    let info = setup().inspect_err(|_| step(tx, NoticeState::Failed, label))?;
+    let setup_result = setup();
+    if !opts.rollback.is_empty() {
+        let result = match &setup_result {
+            Ok(Some(_)) => rollback_session(&c.session, &opts.rollback, |method, path, body| {
+                c.api.call(method, path, body)
+            }),
+            Ok(None) => Err("session not found".into()),
+            Err(e) => Err(e.clone()),
+        };
+        if let Err(e) = result {
+            let _ = tx.unbounded_send(Update::Notice(Notice::new("info-rollback", NoticeKind::Info,
+                format!("Could not roll back the conversation natively ({e}). Started a fresh session with its history."))));
+            drop(c);
+            let mut fresh = opts.clone();
+            fresh.resume.clear();
+            fresh.rollback.clear();
+            fresh.fork = false;
+            return start(&fresh, state, tx, rec);
+        }
+    }
+    let info = setup_result.inspect_err(|_| step(tx, NoticeState::Failed, label))?;
     let resumed = info.is_some();
     if let Some(notice) = lost_resume(resume, resumed) {
         let _ = tx.unbounded_send(Update::Notice(notice));
@@ -90,7 +125,7 @@ pub(super) fn start(
     {
         let _ = tx.unbounded_send(Update::Title(title.into()));
     }
-    if resumed {
+    if resumed && forked.is_none() {
         reattach(&c, state, tx, rec, started, opts.reattach);
     }
     if c.server.is_some() {
@@ -100,6 +135,53 @@ pub(super) fn start(
         }
     }
     Ok(Conn { resumed, ..c })
+}
+
+fn rollback_session(
+    session: &str,
+    message: &str,
+    mut call: impl FnMut(Method, &str, Option<Value>) -> Result<Value, String>,
+) -> Result<(), String> {
+    let path = format!("/api/session/{session}/revert");
+    let result = call(
+        Method::POST,
+        &format!("{path}/stage"),
+        Some(json!({"messageID": message, "files": false})),
+    )
+    .and_then(|_| call(Method::POST, &format!("{path}/commit"), None));
+    if result.is_err() {
+        let _ = call(Method::DELETE, &path, None);
+    }
+    result.map(drop)
+}
+
+fn fork_or_fresh(
+    source: &str,
+    tx: &UnboundedSender<Update>,
+    call: impl FnOnce(&str, Value) -> Result<Value, String>,
+) -> Option<Value> {
+    match fork_session(source, call) {
+        Ok(info) => Some(info),
+        Err(e) => {
+            let text = format!(
+                "Could not fork the source conversation natively ({e}). Started a fresh session with its history."
+            );
+            let _ =
+                tx.unbounded_send(Update::Notice(Notice::new("info-fork", NoticeKind::Info, text)));
+            None
+        }
+    }
+}
+
+fn fork_session(
+    source: &str,
+    call: impl FnOnce(&str, Value) -> Result<Value, String>,
+) -> Result<Value, String> {
+    let info = call(&format!("/api/session/{source}/fork"), json!({"before": null}))?;
+    if info["data"]["id"].as_str().is_none_or(str::is_empty) {
+        return Err("fork returned no session id".into());
+    }
+    Ok(info)
 }
 
 /// The model in use as `provider/id`; the seeded one (from the options) wins over the stale session info.
@@ -201,6 +283,29 @@ fn apply(
     if let Some(rec) = rec {
         rec.line(&json!({"type": ty, "data": data}).to_string());
     }
+    if ty == "session.step.started" {
+        let (root, active) = {
+            let s = state.guard();
+            (s.root.clone(), s.active && !s.native_turn_recorded)
+        };
+        if active
+            && data["sessionID"].as_str() == Some(root.as_str())
+            && let Some(id) = data["assistantMessageID"].as_str()
+        {
+            let messages = recent_messages(api, &root);
+            if let Some(parent) = messages["data"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|m| m["id"].as_str() == Some(id))
+                .and_then(|m| m["parentID"].as_str())
+                .filter(|id| !id.is_empty())
+            {
+                state.guard().native_turn_recorded = true;
+                send(Update::NativeTurn(parent.to_string()));
+            }
+        }
+    }
     let mut s = state.guard();
     if s.dead.is_some() {
         return false;
@@ -233,6 +338,7 @@ fn listen(
     let handle = |ty: &str, data: &Value| apply(&api, &state, &send, &rec, ty, data);
     loop {
         let mut buf = Vec::new();
+        let mut skipping = false;
         loop {
             let chunk = match api.rt.block_on(select(&mut stop, Box::pin(res.chunk()))) {
                 Either::Left(_) => return,
@@ -240,7 +346,11 @@ fn listen(
                 Either::Right(_) => break,
             };
             buf.extend_from_slice(&chunk);
-            for v in frames(&mut buf) {
+            let (events, dropped) = frames(&mut buf, &mut skipping, MAX_LINE);
+            if dropped {
+                send(oversized("opencode"));
+            }
+            for v in events {
                 let data = &v["data"];
                 let ty = v["type"].as_str().unwrap_or_default();
                 // form.created carries its session only inside the form
@@ -572,7 +682,7 @@ fn recent_messages(api: &Api, session: &str) -> Value {
     api.call(Method::GET, &path, None).unwrap_or_default()
 }
 
-pub(super) fn located(path: &str, dir: &str) -> String {
+pub fn located(path: &str, dir: &str) -> String {
     format!("{path}?location%5Bdirectory%5D={}", encode(dir))
 }
 
@@ -674,11 +784,28 @@ fn is_family(api: &Api, root: &str, sid: &str, cache: &mut HashMap<String, bool>
     found
 }
 
-/// Complete SSE frames drained from `buf`, as parsed `data:` payloads.
-fn frames(buf: &mut Vec<u8>) -> Vec<Value> {
-    let mut out = Vec::new();
-    while let Some(end) = buf.windows(2).position(|w| w == b"\n\n") {
+/// Complete SSE frames drained from `buf`, as parsed `data:` payloads, and whether a frame over
+/// `cap` bytes was dropped. `skipping` carries a dropped frame's unread rest into the next chunk.
+fn frames(buf: &mut Vec<u8>, skipping: &mut bool, cap: usize) -> (Vec<Value>, bool) {
+    let (mut out, mut dropped) = (Vec::new(), false);
+    loop {
+        let Some(end) = buf.windows(2).position(|w| w == b"\n\n") else {
+            if !*skipping && buf.len() > cap {
+                (*skipping, dropped) = (true, true);
+            }
+            if *skipping {
+                buf.drain(..buf.len().saturating_sub(1));
+            }
+            return (out, dropped);
+        };
         let frame: Vec<u8> = buf.drain(..end + 2).collect();
+        if std::mem::take(skipping) {
+            continue;
+        }
+        if frame.len() > cap {
+            dropped = true;
+            continue;
+        }
         let frame = String::from_utf8_lossy(&frame);
         let data: Vec<&str> =
             frame.lines().filter_map(|l| l.strip_prefix("data:")).map(str::trim_start).collect();
@@ -686,7 +813,6 @@ fn frames(buf: &mut Vec<u8>) -> Vec<Value> {
             out.push(v);
         }
     }
-    out
 }
 
 pub(super) fn reply(

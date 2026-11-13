@@ -9,7 +9,8 @@ use aether_core::{
 
 use crate::spawn::log_unknown;
 use crate::tool::{
-    apply_hunks, child_activity, finish, halted, now_ms, result_text, save_images, start,
+    append_output, apply_hunks, child_activity, finish, halted, now_ms, result_text, save_images,
+    start,
 };
 
 use super::approve::{DENIED, control_request};
@@ -165,20 +166,6 @@ pub(crate) fn set_activity(s: &mut State, parent: &str, text: &str) -> Vec<Updat
     })
 }
 
-pub(crate) fn append_output(detail: &mut ToolDetail, extra: &str) {
-    if let ToolDetail::Command { output, .. }
-    | ToolDetail::Search { output, .. }
-    | ToolDetail::Web { output, .. }
-    | ToolDetail::Task { output, .. }
-    | ToolDetail::Other { output, .. } = detail
-    {
-        output.push_str(extra);
-        if output.starts_with('\n') {
-            *output = output.trim_start().to_string();
-        }
-    }
-}
-
 pub(crate) fn task_line(s: &mut State, subtype: &str, v: &Value) -> Vec<Update> {
     let task = v["task_id"].as_str().unwrap_or_default().to_string();
     let text = |k: &str| v[k].as_str().filter(|t| !t.is_empty()).map(str::to_string);
@@ -248,6 +235,9 @@ pub(crate) fn task_line(s: &mut State, subtype: &str, v: &Value) -> Vec<Update> 
             let status = v["status"].as_str().unwrap_or_default();
             let summary = text("summary").unwrap_or_default();
             if !s.background.remove(&row) {
+                if !row.is_empty() {
+                    s.early.insert(row);
+                }
                 return vec![];
             }
             let described = s.tasks.remove(&task).map(|t| t.1).filter(|d| !d.is_empty());
@@ -503,7 +493,14 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                 return vec![];
             }
             buf.push_str(delta);
-            let text = buf.clone();
+            let text: String = buf
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or_default()
+                .chars()
+                .take(ACTIVITY_CHARS)
+                .collect();
             set_activity(s, parent, &text)
         }
         Some("stream_event") => {
@@ -540,6 +537,9 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
             }
             let message = &v["message"];
             if !sub && message["model"] != "<synthetic>" {
+                if let Some(id) = v["uuid"].as_str().filter(|id| !id.is_empty()) {
+                    updates.push(Update::NativeTurn(id.to_string()));
+                }
                 let streamed = message["id"].as_str().is_some_and(|id| s.texted.contains(id));
                 for b in blocks("text") {
                     let text = b["text"].as_str().filter(|t| !t.is_empty());
@@ -599,7 +599,12 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                 Some(i) => s.echoes.remove(i),
                 None => s.echoes.pop_front(),
             };
-            entry.flatten().map(Update::Steered).into_iter().collect()
+            let mut out: Vec<_> =
+                entry.clone().flatten().map(Update::Steered).into_iter().collect();
+            if entry.is_some() {
+                out.insert(0, Update::Accepted);
+            }
+            out
         }
         Some("user") => {
             let parent = v["parent_tool_use_id"].as_str();
@@ -634,9 +639,13 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                     });
                     call.parent = call.parent.take().or_else(|| parent.map(str::to_string));
                     let mut text = result_text(&b["content"]);
-                    if text.starts_with("Command running in background with ID:")
+                    if (text.starts_with("Command running in background with ID:")
+                        || text.starts_with("Command did not complete within")
+                        || text.starts_with("Command was manually backgrounded")
+                        || text.starts_with("Command was moved to the background")
                         || text.starts_with("Async agent launched")
-                        || text.contains("\"resumedAgentId\"")
+                        || text.contains("\"resumedAgentId\""))
+                        && !s.early.remove(id)
                     {
                         call.status = ToolStatus::Background;
                         s.background.insert(id.to_string());

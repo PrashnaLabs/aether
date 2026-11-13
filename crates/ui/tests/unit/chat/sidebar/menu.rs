@@ -7,6 +7,7 @@ fn removed_row_disables_reveal() {
         provider: Provider::Claude,
         project: None,
         model: SharedString::from(""),
+        effort: SharedString::default(),
         place: None,
         time: SharedString::from(""),
         path: SharedString::from("/repo"),

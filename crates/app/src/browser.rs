@@ -46,8 +46,9 @@ enum AddressTarget {
     Search(String),
 }
 
-/// Browser-style omnibox: explicit schemes pass through, host-like text gets a
-/// scheme guessed for it, anything else becomes a web search.
+/// Browser-style omnibox: `http(s)` and `about:blank` pass through, host-like text
+/// gets a scheme guessed for it, anything else (including `file:`, `data:`,
+/// `mailto:`, `javascript:`) becomes a web search so the webview never loads it.
 fn resolve_address(raw: &str) -> Option<AddressTarget> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -57,7 +58,10 @@ fn resolve_address(raw: &str) -> Option<AddressTarget> {
     let has_scheme = trimmed.split_once(':').is_some_and(|(scheme, rest)| {
         scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
             && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-            && (rest.starts_with("//") || matches!(scheme, "about" | "data" | "mailto" | "file"))
+            && (scheme.eq_ignore_ascii_case("http")
+                || scheme.eq_ignore_ascii_case("https")
+                || scheme.eq_ignore_ascii_case("about"))
+            && (rest.starts_with("//") || scheme.eq_ignore_ascii_case("about"))
     });
     if has_scheme {
         return Some(AddressTarget::Url(trimmed.to_owned()));
@@ -115,6 +119,11 @@ fn search_url(query: &str) -> String {
 /// The address bar hides `https://`; everything else, `http://` included, stays visible.
 fn display_url(url: &str) -> &str {
     url.strip_prefix("https://").unwrap_or(url)
+}
+
+/// Urls the webview may load: web pages and the blank document only.
+pub(crate) fn navigable(url: &str) -> bool {
+    open_in::web_url(url) || url.eq_ignore_ascii_case("about:blank")
 }
 
 /// What the page told us, queued by native callbacks.
@@ -319,6 +328,11 @@ mod host {
             });
         }
 
+        #[cfg(target_os = "linux")]
+        pub fn visible(&self) -> bool {
+            self.visible.get()
+        }
+
         pub fn set_visible(&self, visible: bool) {
             if self.visible.replace(visible) != visible {
                 if !visible {
@@ -440,6 +454,8 @@ pub(crate) struct Browser {
     pub(crate) watch_strip: bool,
     /// Toolbar sits under the macOS traffic lights.
     pub(crate) lights: bool,
+    /// Toolbar ends under the window controls.
+    pub(crate) controls: bool,
     browsers: Vec<OpenApp>,
     browsers_found: bool,
     selected_browser: Option<usize>,
@@ -521,6 +537,7 @@ impl Browser {
             shown: false,
             covered: false,
             lights: false,
+            controls: false,
             watch_strip: true,
             browsers: Vec::new(),
             browsers_found: false,
@@ -544,6 +561,11 @@ impl Browser {
     }
 
     fn open_url(&mut self, url: String, cx: &mut Context<Self>) {
+        if !navigable(&url) {
+            self.open_error = Some("Only http and https pages can open here".into());
+            cx.notify();
+            return;
+        }
         self.url = url.clone();
         self.loading = true;
         self.open_error = None;
@@ -662,15 +684,20 @@ impl Browser {
         }
     }
 
-    /// GTK has no loop of its own here; turn it by hand so pages render.
+    /// GTK has no loop of its own here; turn it by hand so pages render, slower while hidden.
     #[cfg(target_os = "linux")]
     fn pump_gtk(&self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
+            let mut shown = true;
             loop {
-                cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
-                if this.update(cx, |_, _| ()).is_err() {
+                let ms = if shown { 16 } else { 250 };
+                cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+                let Ok(visible) =
+                    this.update(cx, |b, _| b.host.as_ref().is_some_and(|h| h.visible()))
+                else {
                     break;
-                }
+                };
+                shown = visible;
                 while gtk::events_pending() {
                     gtk::main_iteration_do(false);
                 }
@@ -936,7 +963,8 @@ impl Render for Browser {
                             cx.notify();
                         }
                     })),
-            );
+            )
+            .when(self.controls, |t| t.child(aether_ui::window_controls_gap(window)));
         let host = self.host.clone();
         let open_error = self.open_error.clone().map(|e| {
             div()

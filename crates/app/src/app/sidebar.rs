@@ -20,6 +20,7 @@ use gpui_kit::{Context, Entity, PathPromptOptions, SharedString, Window, prelude
 
 use super::format::now_ms;
 use super::providers::initial_model;
+use super::worktree::notice;
 use super::{Bulk, CLIS, Chat, ChatApp, Page, SidebarView, chat_cwd, project_dir};
 
 pub(super) fn disambiguated_names(folders: &[PathBuf]) -> HashMap<PathBuf, String> {
@@ -143,10 +144,11 @@ fn agent_state(chat: &Chat, live: bool) -> Option<AgentState> {
 }
 
 /// Group order with each lead's live children (same group, `parent` is a lead) right after it, by id.
-pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, bool)> {
+/// Depth is 0 for top-level rows, 1 for children, 2 for grandchildren and deeper.
+pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, u8)> {
     let leads: std::collections::HashSet<i64> =
         group.iter().filter(|&&ix| chats[ix].lead).map(|&ix| chats[ix].id).collect();
-    let live = |ix: usize| !chats[ix].lead && chats[ix].parent.is_some_and(|p| leads.contains(&p));
+    let live = |ix: usize| chats[ix].parent.is_some_and(|p| leads.contains(&p));
     let mut kids: std::collections::HashMap<i64, Vec<usize>> = std::collections::HashMap::new();
     for &ix in group {
         if live(ix) {
@@ -156,52 +158,59 @@ pub(super) fn nest_children(chats: &[Chat], group: &[usize]) -> Vec<(usize, bool
     for list in kids.values_mut() {
         list.sort_by_key(|&k| chats[k].id);
     }
-    let mut out = Vec::with_capacity(group.len());
-    for &ix in group.iter().filter(|&&ix| !live(ix)) {
-        out.push((ix, false));
+    fn walk(
+        chats: &[Chat],
+        kids: &std::collections::HashMap<i64, Vec<usize>>,
+        ix: usize,
+        level: u8,
+        seen: &mut std::collections::HashSet<usize>,
+        out: &mut Vec<(usize, u8)>,
+    ) {
+        if !seen.insert(ix) {
+            return;
+        }
+        out.push((ix, level.min(2)));
         if chats[ix].lead
             && let Some(list) = kids.get(&chats[ix].id)
         {
-            out.extend(list.iter().map(|&k| (k, true)));
+            for &k in list {
+                walk(chats, kids, k, (level + 1).min(2), seen, out);
+            }
         }
+    }
+    let mut out = Vec::with_capacity(group.len());
+    let mut seen = std::collections::HashSet::new();
+    for &ix in group.iter().filter(|&&ix| !live(ix)) {
+        walk(chats, &kids, ix, 0, &mut seen, &mut out);
+    }
+    for &ix in group {
+        walk(chats, &kids, ix, 0, &mut seen, &mut out);
     }
     out
 }
 
 /// Keep a crew in its lead's section, even across date or project boundaries.
-/// An explicitly pinned child stays independent; an absent lead never hides a chat.
+/// An absent lead never hides a chat.
 pub(super) fn nest_section_children(
     chats: &[Chat],
     sections: Vec<(String, Vec<usize>)>,
-) -> Vec<(String, Vec<(usize, bool)>)> {
-    let group: Vec<usize> = sections
-        .iter()
-        .flat_map(|(_, ixs)| ixs.iter().copied())
-        .filter(|&ix| !chats[ix].pinned || chats[ix].lead)
-        .collect();
-    let mut families: HashMap<usize, Vec<(usize, bool)>> = HashMap::new();
+) -> Vec<(String, Vec<(usize, u8)>)> {
+    let group: Vec<usize> = sections.iter().flat_map(|(_, ixs)| ixs.iter().copied()).collect();
+    let mut families: HashMap<usize, Vec<(usize, u8)>> = HashMap::new();
     let mut lead = None;
-    for (ix, child) in nest_children(chats, &group) {
-        if !child {
+    for (ix, depth) in nest_children(chats, &group) {
+        if depth == 0 {
             lead = Some(ix);
         }
         if let Some(lead) = lead {
-            families.entry(lead).or_default().push((ix, child));
+            families.entry(lead).or_default().push((ix, depth));
         }
     }
     sections
         .into_iter()
         .filter_map(|(label, ixs)| {
-            let rows: Vec<_> = ixs
-                .into_iter()
-                .flat_map(|ix| {
-                    if chats[ix].pinned && !chats[ix].lead {
-                        vec![(ix, false)]
-                    } else {
-                        families.remove(&ix).unwrap_or_default()
-                    }
-                })
-                .collect();
+            let rows: Vec<_> =
+                ixs.into_iter().flat_map(|ix| families.remove(&ix).unwrap_or_default()).collect();
             (!rows.is_empty()).then_some((label, rows))
         })
         .collect()
@@ -214,7 +223,7 @@ impl ChatApp {
             self.chats
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| !c.archived && !c.pinned && c.provider != Provider::OpenRouter)
+                .filter(|(_, c)| !c.archived && c.provider != Provider::OpenRouter)
                 .map(|(ix, c)| (ix, project_dir(c, root), c.activity()))
                 .collect(),
         );
@@ -224,8 +233,16 @@ impl ChatApp {
             (name, g.folder.clone())
         });
         for group in &mut groups {
-            group.chats.sort_by_cached_key(|&ix| (self.chats[ix].title.to_lowercase(), ix));
+            group.chats.sort_by_cached_key(|&ix| {
+                let c = &self.chats[ix];
+                let pin = c.pinned.then(|| std::cmp::Reverse(c.activity()));
+                (pin.is_none(), pin, c.title.to_lowercase(), ix)
+            });
         }
+        let pins = &self.settings.pinned_projects;
+        groups.sort_by_key(|g| {
+            pins.iter().position(|p| Path::new(p) == g.folder).unwrap_or(usize::MAX)
+        });
         split_hidden(groups, &self.settings.hidden_projects, self.active)
     }
 
@@ -348,6 +365,9 @@ impl ChatApp {
     }
 
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
+        if self.sidebar_view == SidebarView::Org {
+            return self.render_org_sidebar(cx);
+        }
         if self.sidebar_view == SidebarView::DirectChats {
             return self.render_direct_chats_sidebar(cx);
         }
@@ -357,15 +377,20 @@ impl ChatApp {
         if self.sidebar_view == SidebarView::Archived {
             return self.render_archive_sidebar(cx);
         }
+        if !self.sidebar_search.read(cx).value().trim().is_empty() {
+            return self.render_search_sidebar(cx);
+        }
         if self.settings.sidebar_style != SidebarStyle::Default {
             return self.render_flat_sidebar(self.settings.sidebar_style, cx);
         }
+        let chrome = self.sidebar_chrome("Aether", cx);
         let mut sidebar = self
-            .sidebar_chrome("Aether", cx)
+            .with_search(chrome, cx)
             .on_new_chat(
                 cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
             )
             .new_chat_action(NewChat)
+            .keep_pinned_when_collapsed(self.settings.sidebar_pins_when_collapsed)
             .pinned_collapsible(
                 self.settings.pinned_section_collapsed,
                 cx.listener(|this, collapsed: &bool, _, cx| {
@@ -409,33 +434,31 @@ impl ChatApp {
             );
         }
         let now = now_ms();
-        let (groups, hidden) = self.project_groups();
+        let (mut groups, hidden) = self.project_groups();
+        let org = self.org_listed();
+        for g in &mut groups {
+            g.chats.retain(|&ix| !org.contains(&self.chats[ix].id));
+        }
         // Keep each lead's children together for the sidebar's crew preview.
-        let nested: Vec<Vec<(usize, bool)>> =
+        let nested: Vec<Vec<(usize, u8)>> =
             groups.iter().map(|g| nest_children(&self.chats, &g.chats)).collect();
         sidebar = sidebar.child_agents(
-            nested.iter().flatten().filter(|(_, c)| *c).map(|&(ix, _)| self.chats[ix].id).collect(),
+            nested
+                .iter()
+                .flatten()
+                .filter(|(_, d)| *d > 0)
+                .map(|&(ix, d)| (self.chats[ix].id, d))
+                .collect(),
         );
-        for (ix, chat) in self.chats.iter().enumerate().rev() {
-            if chat.pinned && !chat.archived && chat.is_agent() {
-                sidebar =
-                    self.chat_row(sidebar, ix, None, None, self.chat_line(ix, false, now), cx);
-            }
-        }
         let folders: Vec<PathBuf> = groups.iter().map(|g| g.folder.clone()).collect();
         let mut names = disambiguated_names(&folders);
         for (k, group) in groups.iter().enumerate() {
             let name = names.remove(&group.folder).unwrap_or_default();
-            let path = group.folder.display().to_string();
-            let header = ProjectHeader {
-                name: name.into(),
-                count: group.chats.len(),
-                collapsed: projects::listed(&self.settings.collapsed_projects, &group.folder),
-                status: projects::rollup(group.chats.iter().map(|&ix| self.chats[ix].status(now))),
-                missing: self.missing_folders.contains(&group.folder),
-                path: path.into(),
-            };
-            let (fold, new, files, hide, page) = (
+            let collapsed = projects::listed(&self.settings.collapsed_projects, &group.folder);
+            let header =
+                self.sidebar_project_header(&group.folder, name, &group.chats, collapsed, now);
+            let (fold, new, files, hide, page, pin) = (
+                group.folder.clone(),
                 group.folder.clone(),
                 group.folder.clone(),
                 group.folder.clone(),
@@ -455,11 +478,24 @@ impl ChatApp {
                 }),
                 cx.listener(move |this, _, _, cx| {
                     this.update_settings(cx, |s| {
-                        projects::set_listed(&mut s.hidden_projects, &hide, true)
+                        projects::set_listed(&mut s.hidden_projects, &hide, true);
+                        projects::set_listed(&mut s.pinned_projects, &hide, false);
                     })
                 }),
                 cx.listener(move |this, _, _, cx| this.open_project_page(page.clone(), cx)),
             );
+            sidebar = sidebar.project_pin(
+                projects::listed(&self.settings.pinned_projects, &group.folder),
+                cx.listener(move |this, _, window, cx| this.toggle_project_pin(&pin, window, cx)),
+            );
+            if self.settings.org_enabled {
+                let has_org = self.org_for_project(&group.folder.display().to_string()).is_some();
+                let folder = group.folder.clone();
+                sidebar = sidebar.project_org(
+                    has_org,
+                    cx.listener(move |this, _, _, cx| this.open_org_for(&folder, !has_org, cx)),
+                );
+            }
             for &(ix, _) in &nested[k] {
                 sidebar =
                     self.chat_row(sidebar, ix, Some(k), None, self.chat_line(ix, true, now), cx);
@@ -480,6 +516,253 @@ impl ChatApp {
         sidebar
     }
 
+    /// Open chats whose titles fuzzy-match the sidebar search, best first.
+    pub(crate) fn chat_search_results(&self, cx: &gpui_kit::App) -> Vec<usize> {
+        let query = self.sidebar_search.read(cx).value().trim().to_lowercase();
+        let mut hits: Vec<(i64, usize)> = (0..self.chats.len())
+            .filter(|&ix| !self.chats[ix].archived)
+            .filter_map(|ix| {
+                let title = &self.chats[ix].title;
+                let score =
+                    aether_explorer::fuzzy_match_path(&query, &title.to_lowercase(), title.len())?;
+                Some((score, ix))
+            })
+            .collect();
+        hits.sort_by_key(|&(score, ix)| {
+            (std::cmp::Reverse(score), std::cmp::Reverse(self.chats[ix].activity()))
+        });
+        hits.into_iter().map(|(_, ix)| ix).collect()
+    }
+
+    /// The search field while open or holding a query, else a Search row that opens it.
+    fn with_search(&self, sidebar: ChatSidebar, cx: &mut Context<Self>) -> ChatSidebar {
+        if self.sidebar_search_open || !self.sidebar_search.read(cx).value().is_empty() {
+            return sidebar.search(&self.sidebar_search);
+        }
+        sidebar.top_action(
+            gpui_kit::assets::IconName::Search,
+            "Search",
+            cx.listener(|this, _, window, cx| {
+                this.sidebar_search_open = true;
+                this.sidebar_search.update(cx, |s, cx| s.focus(window, cx));
+                cx.notify();
+            }),
+        )
+    }
+
+    /// A project row's header: name, branch line and status chips over `chats`.
+    fn sidebar_project_header(
+        &self,
+        folder: &Path,
+        name: String,
+        chats: &[usize],
+        collapsed: bool,
+        now: i64,
+    ) -> ProjectHeader {
+        let statuses: Vec<ChatStatus> =
+            chats.iter().map(|&ix| self.chats[ix].status(now)).collect();
+        let (_, added, deleted, ahead_behind) =
+            self.sidebar_git_summary(folder).unwrap_or((0, 0, 0, None));
+        ProjectHeader {
+            name: name.into(),
+            count: chats.len(),
+            collapsed,
+            status: projects::rollup(statuses.iter().copied()),
+            missing: self.missing_folders.contains(folder),
+            path: folder.display().to_string().into(),
+            branch: self.branches.get(folder).cloned().flatten().map(|b| b.branch.into()),
+            no_git: matches!(self.branches.get(folder), Some(None)),
+            added,
+            deleted,
+            ahead: ahead_behind.map_or(0, |(ahead, _)| ahead),
+            needs_you: statuses.iter().filter(|s| s.is_waiting()).count(),
+            failed: statuses.iter().filter(|s| **s == ChatStatus::Failed).count(),
+        }
+    }
+
+    /// The Org view's sidebar: every org as a project row, holding its heads (role
+    /// chip) and their workers.
+    fn render_org_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
+        let mut sidebar = self
+            .sidebar_chrome("Organizations", cx)
+            .on_new_chat(cx.listener(|this, _, _, cx| this.org_add(cx)))
+            .new_chat_label("Hire")
+            .on_back(cx.listener(|this, _, window, cx| this.org_exit(window, cx)))
+            .empty("No organizations yet");
+        if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
+            sidebar = sidebar.renaming(ix, &self.rename_input);
+        }
+        let live = |id: i64| self.chat_ix(id).filter(|&ix| !self.chats[ix].archived);
+        let heads: Vec<i64> =
+            self.org.orgs.iter().flat_map(|o| o.heads.iter().filter_map(|h| h.chat)).collect();
+        sidebar = sidebar.child_agents(
+            self.chats
+                .iter()
+                .filter(|c| !c.archived && c.parent.is_some_and(|p| heads.contains(&p)))
+                .map(|c| (c.id, 1))
+                .collect(),
+        );
+        let now = now_ms();
+        let shown = (self.page == Page::Org).then(|| self.org_project()).flatten();
+        let mut k = 0;
+        for org in &self.org.orgs {
+            let rows: Vec<(usize, Option<&crate::org::model::Head>)> = org
+                .heads
+                .iter()
+                .filter_map(|h| Some((live(h.chat?)?, h)))
+                .flat_map(|(ix, head)| {
+                    let id = self.chats[ix].id;
+                    let workers = (0..self.chats.len())
+                        .rev()
+                        .filter(move |&w| {
+                            self.chats[w].parent == Some(id) && !self.chats[w].archived
+                        })
+                        .map(|w| (w, None));
+                    std::iter::once((ix, Some(head))).chain(workers)
+                })
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            let folder = PathBuf::from(&org.project);
+            let ixs: Vec<usize> = rows.iter().map(|(ix, _)| *ix).collect();
+            let collapsed = projects::listed(&self.settings.collapsed_orgs, &folder);
+            let name = self.project_name(&folder).to_string();
+            let header = self.sidebar_project_header(&folder, name, &ixs, collapsed, now);
+            let (fold, open, hire) = (folder.clone(), org.project.clone(), org.project.clone());
+            sidebar = sidebar.org_project(
+                header,
+                shown.as_ref() == Some(&org.project),
+                cx.listener(move |this, collapsed: &bool, _, cx| {
+                    this.update_settings(cx, |s| {
+                        projects::set_listed(&mut s.collapsed_orgs, &fold, *collapsed)
+                    })
+                }),
+                cx.listener(move |this, _, _, cx| this.open_org_page(Some(open.clone()), cx)),
+                cx.listener(move |this, _, _, cx| {
+                    this.open_org_page(Some(hire.clone()), cx);
+                    this.org_add(cx);
+                }),
+            );
+            for (ix, head) in rows {
+                let chat = &self.chats[ix];
+                sidebar = sidebar.chat(
+                    ix,
+                    chat.id,
+                    head.map_or_else(|| chat.title.clone(), |h| h.title.clone().into()),
+                    ix == self.active && self.page == Page::Chat,
+                    chat.status(now),
+                    false,
+                    Some(k),
+                    None,
+                    self.chat_line(ix, false, now),
+                    cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| {
+                        this.confirm_archive_chat(ix, window, cx)
+                    }),
+                    cx.listener(move |this, _, window, cx| {
+                        this.confirm_delete_chat(ix, window, cx)
+                    }),
+                    None,
+                    None,
+                );
+                if let Some(head) = head {
+                    sidebar = sidebar.chat_badge(
+                        k,
+                        crate::org::model::role_badge(&head.role),
+                        gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
+                    );
+                }
+            }
+            k += 1;
+        }
+        sidebar
+    }
+
+    /// Why chat `ix` can't be pinned: its project already has the most pins.
+    /// Org chats neither count nor are capped.
+    pub(crate) fn chat_pin_refusal(&self, ix: usize) -> Option<&'static str> {
+        let chat = self.chats.get(ix)?;
+        let org = self.org_listed();
+        if chat.pinned || !chat.is_agent() || org.contains(&chat.id) {
+            return None;
+        }
+        let root = &self.settings.workspace_root;
+        let project = project_dir(chat, root);
+        let pinned = self
+            .chats
+            .iter()
+            .filter(|c| c.pinned && !c.archived && c.is_agent() && !org.contains(&c.id))
+            .filter(|c| project_dir(c, root) == project)
+            .count();
+        (pinned >= projects::MAX_PINNED_CHATS)
+            .then_some("Up to 3 pinned chats per project; unpin one first.")
+    }
+
+    /// Pins `folder` to the top of Projects, or unpins it; refuses past the cap.
+    pub(crate) fn toggle_project_pin(
+        &mut self,
+        folder: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let shown: Vec<PathBuf> = self.project_groups().0.into_iter().map(|g| g.folder).collect();
+        let mut pins = self.settings.pinned_projects.clone();
+        if !projects::toggle_pin(&mut pins, &shown, folder) {
+            let text = "Up to 4 pinned projects; unpin one first.";
+            return notice("Can't pin project", text, window, cx);
+        }
+        self.update_settings(cx, |s| s.pinned_projects = pins);
+    }
+
+    /// Org heads and their workers: listed only in the Organization view.
+    fn org_listed(&self) -> std::collections::HashSet<i64> {
+        if !self.settings.org_enabled {
+            return Default::default();
+        }
+        let heads: std::collections::HashSet<i64> =
+            self.org.orgs.iter().flat_map(|o| o.heads.iter().filter_map(|h| h.chat)).collect();
+        self.chats
+            .iter()
+            .filter(|c| heads.contains(&c.id) || c.parent.is_some_and(|p| heads.contains(&p)))
+            .map(|c| c.id)
+            .collect()
+    }
+
+    /// Leaving an empty search field folds it back into its Search row.
+    pub(crate) fn close_empty_search(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_search.read(cx).value().is_empty() {
+            self.sidebar_search_open = false;
+            cx.notify();
+        }
+    }
+
+    /// Search results as one flat section, in every sidebar style.
+    fn render_search_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
+        let style = match self.settings.sidebar_style {
+            SidebarStyle::Default => SidebarStyle::Minimal,
+            style => style,
+        };
+        let results = self.chat_search_results(cx);
+        let mut sidebar = self
+            .sidebar_chrome("Aether", cx)
+            .style(style)
+            .search(&self.sidebar_search)
+            .on_new_chat(
+                cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
+            )
+            .new_chat_action(NewChat)
+            .empty("No matching chats");
+        let now = now_ms();
+        for ix in results {
+            sidebar = self.section_chat_row(sidebar, "Results".to_string(), ix, now, cx);
+        }
+        sidebar
+    }
+
     /// Minimal and Focus: agent chats in flat sections instead of project folders.
     fn render_flat_sidebar(&self, style: SidebarStyle, cx: &mut Context<Self>) -> ChatSidebar {
         let mut sidebar = self
@@ -496,13 +779,9 @@ impl ChatApp {
                     "New chat",
                     cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
                 )
-                .top_action(
-                    gpui_kit::assets::IconName::Search,
-                    "Search",
-                    cx.listener(|this, _, window, cx| this.toggle_palette(window, cx)),
-                )
                 .section_tools(self.sidebar_tools(cx));
         }
+        sidebar = self.with_search(sidebar, cx);
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }
@@ -510,14 +789,11 @@ impl ChatApp {
         let row = |sidebar: ChatSidebar, section: &str, ix: usize, cx: &mut Context<Self>| {
             self.section_chat_row(sidebar, section.to_string(), ix, now, cx)
         };
-        let pinned: Vec<usize> = (0..self.chats.len())
-            .rev()
-            .filter(|&ix| {
-                let chat = &self.chats[ix];
-                chat.pinned && !chat.archived && chat.is_agent()
-            })
-            .collect();
-        let (groups, _) = self.project_groups();
+        let org = self.org_listed();
+        let (mut groups, _) = self.project_groups();
+        for g in &mut groups {
+            g.chats.retain(|&ix| !org.contains(&self.chats[ix].id));
+        }
         let names = self.project_names();
         let listed: Vec<(usize, String)> = groups
             .iter()
@@ -526,11 +802,20 @@ impl ChatApp {
                 g.chats.iter().map(move |&ix| (ix, name.clone()))
             })
             .collect();
-        let sections: Vec<(String, Vec<usize>)> = match style {
+        let mut sections: Vec<(String, Vec<usize>)> = match style {
             SidebarStyle::Focus => {
+                let leads: HashMap<i64, usize> = listed
+                    .iter()
+                    .filter(|(ix, _)| self.chats[*ix].lead)
+                    .map(|(ix, _)| (self.chats[*ix].id, *ix))
+                    .collect();
                 let chats: Vec<_> = listed
                     .iter()
-                    .map(|(ix, _)| (*ix, self.chats[*ix].status(now), self.chats[*ix].activity()))
+                    .map(|(ix, _)| {
+                        let chat = &self.chats[*ix];
+                        let parent = chat.parent.and_then(|p| leads.get(&p).copied());
+                        (*ix, chat.status(now), chat.activity(), parent)
+                    })
                     .collect();
                 projects::focus_sections(&chats)
                     .into_iter()
@@ -556,21 +841,16 @@ impl ChatApp {
                 )
             }
         };
-        let sections = std::iter::once(("Pinned".to_string(), pinned)).chain(sections).collect();
-        let sections = if style == SidebarStyle::Minimal {
-            nest_section_children(&self.chats, sections)
-        } else {
-            sections
-                .into_iter()
-                .map(|(label, ixs)| (label, ixs.into_iter().map(|ix| (ix, false)).collect()))
-                .collect()
-        };
+        for (_, ixs) in &mut sections {
+            ixs.sort_by_key(|&ix| !self.chats[ix].pinned);
+        }
+        let sections = nest_section_children(&self.chats, sections);
         sidebar = sidebar.child_agents(
             sections
                 .iter()
                 .flat_map(|(_, rows)| rows)
-                .filter(|(_, child)| *child)
-                .map(|&(ix, _)| self.chats[ix].id)
+                .filter(|(_, d)| *d > 0)
+                .map(|&(ix, d)| (self.chats[ix].id, d))
                 .collect(),
         );
         for (label, rows) in sections {
@@ -634,7 +914,7 @@ impl ChatApp {
                 cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
                 cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
                 cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-                cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
                 cx.listener(move |this, _, _, cx| this.unarchive_chat(ix, cx)),
                 cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
                 None,
@@ -734,19 +1014,42 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-            cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-            cx.listener(move |this, _, window, cx| this.archive_chat(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             None,
             None,
         )
     }
 
+    /// A lead's agents that sit in the sidebar and aren't running.
+    pub(crate) fn finished_crew(&self, lead: i64) -> Vec<i64> {
+        let now = now_ms();
+        self.crew_ids(lead)
+            .into_iter()
+            .filter(|&id| {
+                self.chat_ix(id).is_some_and(|ix| {
+                    let chat = &self.chats[ix];
+                    !chat.archived
+                        && matches!(
+                            chat.status(now),
+                            ChatStatus::Idle | ChatStatus::Done | ChatStatus::Failed
+                        )
+                })
+            })
+            .collect()
+    }
+
     /// Header and resizable edge shared by every sidebar view.
-    fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
+    fn sidebar_chrome(
+        &self,
+        title: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> ChatSidebar {
         let (resize, resize_end, watch, handoff) =
             (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)
+            .width(self.settings.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
             .now(now_ms())
             .handoff(
                 self.handoff_targets(None),
@@ -911,8 +1214,8 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-            cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-            cx.listener(move |this, _, window, cx| this.archive_chat(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             None,
             None,
@@ -948,8 +1251,8 @@ impl ChatApp {
             cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-            cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-            cx.listener(move |this, _, window, cx| this.archive_chat(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.toggle_pin(ix, window, cx)),
+            cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
             cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
             remove,
             None,
@@ -983,6 +1286,7 @@ impl ChatApp {
             project: (project != home_dir())
                 .then(|| folder_label(&project.display().to_string()).into()),
             model: model_label(models, &chat.model(&self.settings)).into(),
+            effort: chat.effort_level().to_string().into(),
             place,
             time: time.into(),
             path: path.into(),
@@ -1031,14 +1335,22 @@ impl ChatApp {
                     title: chat.title.to_string(),
                     provider: chat.provider,
                     model: model_label(models, &chat.model(&self.settings)),
+                    effort: chat.effort_level().to_string(),
                     status,
                     since_ms: chat.turn_at,
                     place,
                     added,
                     removed,
+                    ahead: self
+                        .sidebar_git_summary(&cwd)
+                        .and_then(|(.., ahead_behind)| ahead_behind)
+                        .map_or(0, |(ahead, _)| ahead),
                     activity_ms: chat.activity(),
                     text: last_text(last, status),
                     cwd,
+                    worktree: !chat.worktree_branch.is_empty(),
+                    gone: !chat.worktree_branch.is_empty()
+                        && (chat.worktree_removed() || self.worktree_missing(ix)),
                 }
             })
             .collect()

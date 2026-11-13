@@ -147,7 +147,7 @@ pub(crate) fn preview(hit: &Hit) -> Result<Preview, String> {
     use std::io::Read;
     let mut bytes = Vec::new();
     let file = fs::File::open(&hit.path).map_err(|e| e.to_string())?;
-    let limit = if hit.line.is_some() { 4 * 1024 * 1024 } else { 512 * 1024 };
+    let limit = if hit.line.is_some() { 4 * 1024 * 1024 } else { 256 * 1024 };
     let mut limited = file.take(limit + 1);
     limited.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let truncated = bytes.len() > limit as usize;

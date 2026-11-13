@@ -35,6 +35,75 @@ fn test_directory() -> std::path::PathBuf {
     path
 }
 
+#[gpui_kit::test]
+fn settings_attachment_click_opens_preview(cx: &mut gpui_kit::TestAppContext) {
+    use crate::app::{ChatApp, Page};
+    use crate::attachments_view::StoredFile;
+    use crate::settings_view::SettingsTab;
+    use gpui_kit::{VisualTestContext, point, px};
+
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    cx.update(crate::actions::bind_keys);
+    let dir = test_directory();
+    let path = dir.join("1-preview.png");
+    image::RgbaImage::new(80, 40).save(&path).unwrap();
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        app.open_page(Page::Settings, cx);
+        app.settings_tab = SettingsTab::Attachments;
+        let other_path = dir.join("2-other.png");
+        image::RgbaImage::new(20, 10).save(&other_path).unwrap();
+        app.stored_files = vec![
+            StoredFile {
+                chat: app.chats[app.active].id,
+                path: other_path,
+                size: 100,
+                modified: std::time::SystemTime::now(),
+            },
+            StoredFile {
+                chat: i64::MIN,
+                path: path.clone(),
+                size: 100,
+                modified: std::time::SystemTime::now(),
+            },
+        ];
+        app
+    });
+    let app = window.root(cx).unwrap();
+    let mut visual = VisualTestContext::from_window(*window, cx);
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+    });
+    let group = visual.debug_bounds("stored-file-1-preview.png").unwrap();
+    visual.simulate_click(
+        point(group.left() + px(48.), group.bottom() - px(48.)),
+        Default::default(),
+    );
+    visual.run_until_parked();
+    visual.update(|window, cx| {
+        let app = app.read(cx);
+        let viewer = app
+            .image_viewers
+            .get(&window.window_handle().window_id())
+            .expect("clicking a settings thumbnail opens the image viewer")
+            .0
+            .read(cx);
+        assert!(viewer.visible);
+        assert_eq!(viewer.path, path);
+        assert_eq!(viewer.loaded.as_ref().unwrap().dimensions, [80, 40]);
+    });
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn decoder_preserves_dimensions_alpha_and_bgra_colors() {
     let dir = test_directory();
@@ -150,7 +219,12 @@ fn image_viewer_routes_local_images_and_escape_restores_focus_without_stopping(
     });
     let pane = visual.update(|window, cx| {
         app.update(cx, |app, cx| {
-            let pane = app.workspace.model.pane_for(app.chats[app.active].id).unwrap();
+            let id = app.chats[app.active].id;
+            let pane = app.workspace.model.pane_for(id).unwrap();
+            let mut other = crate::app::chat_with("other", &[]);
+            other.id = id + 1;
+            app.chats.push(other);
+            app.workspace.model.open(id + 1, 0);
             app.detach_session(pane, window, cx);
             pane
         })

@@ -68,6 +68,8 @@ fn live_opencode_smoke() {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: resume.into(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
@@ -123,4 +125,14 @@ fn side_reply_errors_on_malformed_or_http_failure() {
     assert!(matches!(side_reply(Ok(json!({"data": {}}))), Update::Error(_)));
     assert!(matches!(side_reply(Ok(Value::Null)), Update::Error(_)));
     assert!(matches!(side_reply(Err("boom".into())), Update::Error(e) if e == "boom"));
+}
+
+#[test]
+fn successful_prompt_submission_confirms_acceptance() {
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut state = State::default();
+    prompt_submitted(&mut state, "inbox".into(), &tx);
+    assert_eq!(state.prompt, "inbox");
+    assert_eq!(rx.try_recv().unwrap(), Update::Accepted);
+    assert!(rx.try_recv().is_err());
 }

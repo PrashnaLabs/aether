@@ -294,3 +294,168 @@ fn session_transfer_keeps_partially_typed_request(cx: &mut gpui_kit::TestAppCont
         })
         .unwrap();
 }
+
+#[test]
+fn secret_answers_are_masked_before_they_are_kept() {
+    let question = |secret| Question { question: "q".into(), secret, ..Question::default() };
+    let ask = Ask::Questions(vec![question(false), question(true)]);
+    let answer = Answer::Answers(vec![vec!["plain".into()], vec!["hunter2".into()]]);
+    let Answer::Answers(kept) = redact_secrets(&ask, &answer) else { panic!("kept") };
+    assert_eq!(kept[0], ["plain"]);
+    assert_eq!(kept[1], [MASK]);
+
+    let field = |key: &str, secret| Field { key: key.into(), secret, ..Field::default() };
+    let form = Ask::Form(Form {
+        fields: vec![field("user", false), field("token", true)],
+        ..Form::default()
+    });
+    let answer = Answer::Form(vec![
+        ("user".into(), vec!["me".into()]),
+        ("token".into(), vec!["sk-live".into()]),
+    ]);
+    let Answer::Form(kept) = redact_secrets(&form, &answer) else { panic!("kept") };
+    assert_eq!(kept[0].1, ["me"]);
+    assert_eq!(kept[1].1, [MASK]);
+}
+
+#[gpui_kit::test]
+fn ensure_session_ui_binds_pending_requests(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let ask = Ask::Approval(Approval {
+                tool: "Bash".into(),
+                input: "ls".into(),
+                ..Approval::default()
+            });
+            let mut second = crate::app::chat_with("second", &[]);
+            second.id = 222;
+            let mut m1 = aether_core::Message::assistant();
+            m1.apply(aether_core::Update::Ask { id: 802, ask });
+            second.messages.push(m1);
+            app.chats.push(second);
+            assert!(!app.request_inputs.contains_key(&802));
+            app.ensure_session_ui(222, window, cx);
+            assert!(app.request_inputs.contains_key(&802));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn rewind_clear_restart_and_delete_drop_pending_requests(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            // branch refresh finishes on a tokio thread, which the test scheduler rejects
+            app.refreshing_branches = true;
+            let ask = Ask::Approval(Approval::default());
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 820, ask: ask.clone() });
+            app.chats[0].messages = vec![aether_core::Message::user("hi"), m];
+            app.add_request_input(820, &ask, false, true, window, cx);
+            assert!(app.request_inputs.contains_key(&820));
+            app.retry(window, cx);
+            assert!(!app.request_inputs.contains_key(&820));
+
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 821, ask: ask.clone() });
+            app.chats[0].messages = vec![m];
+            app.add_request_input(821, &ask, false, true, window, cx);
+            assert!(app.request_inputs.contains_key(&821));
+            app.clear_chat(cx);
+            assert!(!app.request_inputs.contains_key(&821));
+
+            app.chats[0].provider = aether_core::Provider::Claude;
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 822, ask: ask.clone() });
+            app.chats[0].messages = vec![m];
+            app.add_request_input(822, &ask, true, true, window, cx);
+            assert!(app.request_inputs.contains_key(&822));
+            app.restart_agent(0, cx);
+            assert!(!app.request_inputs.contains_key(&822));
+            assert_eq!(app.chats[0].messages[0].requests[0].status, RequestStatus::Expired);
+
+            let mut extra = crate::app::chat_with("extra", &[]);
+            extra.id = 333;
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 823, ask: ask.clone() });
+            extra.messages = vec![m];
+            app.chats.push(extra);
+            app.add_request_input(823, &ask, false, false, window, cx);
+            assert!(app.request_inputs.contains_key(&823));
+            app.delete_chat(1, window, cx);
+            assert!(!app.request_inputs.contains_key(&823));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn enter_on_a_lit_option_picks_it_before_moving_on(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            let question = |options: Vec<Choice>| Question {
+                question: "Pick one".into(),
+                other: true,
+                options,
+                ..Question::default()
+            };
+            let ask = Ask::Questions(vec![
+                question(vec![choice("Alpha", ""), choice("Beta", "")]),
+                question(vec![choice("Gamma", "")]),
+                question(vec![choice("Delta", "")]),
+            ]);
+            let mut m = aether_core::Message::assistant();
+            m.apply(aether_core::Update::Ask { id: 840, ask: ask.clone() });
+            app.chats[0].messages = vec![m];
+            app.add_request_input(840, &ask, false, true, window, cx);
+            app.sync_rows(None, cx);
+            let card = app.request_inputs[&840].focus.clone();
+            window.focus(&card, cx);
+
+            app.request_inputs.get_mut(&840).unwrap().cursor = 1;
+            app.ask_key(840, AskKey::Primary, window, cx);
+            assert_eq!(app.request_picks[&840][0], BTreeSet::from([1]));
+            assert_eq!(app.request_inputs[&840].step, 1);
+
+            // "Something else…" needs typed text, so Enter doesn't pick it
+            app.request_inputs.get_mut(&840).unwrap().cursor = 1;
+            app.ask_key(840, AskKey::Primary, window, cx);
+            assert!(app.request_picks[&840].get(1).is_none_or(BTreeSet::is_empty));
+            assert_eq!(app.request_inputs[&840].step, 2);
+        })
+        .unwrap();
+}

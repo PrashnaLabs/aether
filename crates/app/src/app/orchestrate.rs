@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use aether_agent::orchestrator::{OrchCall, history_specs, tool_specs};
+use aether_agent::orchestrator::{OrchCall, check_args, history_specs, tool_specs};
 use aether_agent::usage::best_provider;
 use aether_core::{AccessMode, Message, Provider, Role, ToolDetail};
 use aether_driver::ProviderProbe;
@@ -10,12 +10,13 @@ use aether_ui::ChatStatus;
 use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
+use super::format::chat_spend;
 use super::providers::{USAGE_STALE_MS, initial_model};
 use super::{
     Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir,
 };
 use crate::board::model::{Col, card_lines, lead_move, lead_update};
-use crate::session_workspace::SplitAxis;
+use crate::session_workspace::DockSide;
 
 pub(crate) fn lead_capable(provider: Provider) -> bool {
     provider == Provider::OpenRouter || CLIS.contains(&provider)
@@ -199,7 +200,44 @@ fn delivery_head(child: &Chat, outcome: &str) -> String {
     )
 }
 
+const MAX_QUEUED_SPAWNS: usize = 32;
+
 const SEP: &str = "\n\n---\n\n";
+
+const FROM_TAG: &str = "[from ";
+const MAX_AGENT_STREAK: usize = 6;
+
+pub(super) fn agent_streak(chat: &Chat, sender: i64) -> usize {
+    let users = chat.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text.as_str());
+    users
+        .chain(chat.queue.iter().map(|q| q.text.as_str()))
+        .rev()
+        .take_while(|t| tag_sender(t) == Some(sender))
+        .count()
+}
+
+/// Bidi controls, zero-width and line/paragraph separators can reorder or hide tag text.
+fn invisible(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+        )
+}
+
+pub(super) fn sender_tag(title: &str, id: i64) -> String {
+    let title: String = title
+        .chars()
+        .filter(|c| !matches!(c, '[' | ']' | '#') && !invisible(*c))
+        .take(40)
+        .collect();
+    format!("{FROM_TAG}{} #{id}]", title.trim())
+}
+
+pub(super) fn tag_sender(text: &str) -> Option<i64> {
+    let rest = text.strip_prefix(FROM_TAG)?;
+    rest[..rest.find(']')?].rsplit_once(" #")?.1.parse().ok()
+}
 
 pub(super) fn unread(deliveries: Vec<Delivery>, chats: &[Chat]) -> Vec<Delivery> {
     deliveries
@@ -256,8 +294,12 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if std::time::Instant::now() >= call.deadline {
+            return;
+        }
         let result = match self.chats.iter().position(|c| c.id.to_string() == call.lead) {
             None => Err("lead chat not found".to_string()),
+            Some(_) if let Err(e) = check_args(&call.tool, &call.args) => Err(e),
             Some(ix) => match call.tool.as_str() {
                 "list_tools" if self.chats[ix].lead => Ok(tool_specs()),
                 "list_tools" => {
@@ -272,17 +314,19 @@ impl ChatApp {
                 _ if !self.chats[ix].lead
                     && !matches!(
                         call.tool.as_str(),
-                        "list_cards" | "add_card" | "move_card" | "update_card"
+                        "list_cards" | "read_card" | "add_card" | "move_card" | "update_card"
                     ) =>
                 {
                     Err("lead chat not found".to_string())
                 }
                 "list_agents" => Ok(self.list_agents(ix)),
                 "spawn_agent" => self.spawn_agent(ix, &call.args, window, cx),
+                "request_worker" => self.org_request_worker(ix, &call.args, window, cx),
                 "read_agent" => self.read_agent(ix, &call.args),
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
                 "list_cards" => self.list_cards(ix, &call.args),
+                "read_card" => self.read_card(ix, &call.args),
                 "add_card" => self.add_card(ix, &call.args),
                 "move_card" => self.move_card(ix, &call.args),
                 "update_card" => self.update_card(ix, &call.args),
@@ -290,7 +334,7 @@ impl ChatApp {
                 "archive_chats" => self.ask_bulk(ix, Bulk::Archive, &call.args, window, cx),
                 "delete_chats" => self.ask_bulk(ix, Bulk::Delete, &call.args, window, cx),
                 "unarchive_chats" => self.unarchive_chats(ix, &call.args, window, cx),
-                "update_chat" => self.update_chat(&call.args, cx),
+                "update_chat" => self.update_chat(ix, &call.args, cx),
                 "stop_chat" => self.stop_any_chat(ix, &call.args, cx),
                 "open_chat" => self.open_chat_tool(&call.args, window, cx),
                 "delete_cards" => self.delete_cards(ix, &call.args, window, cx),
@@ -298,6 +342,7 @@ impl ChatApp {
             },
         };
         let _ = call.reply.send(result);
+        self.org_flush_wake(window, cx);
     }
 
     pub(super) fn list_agents(&self, lead_ix: usize) -> Value {
@@ -325,6 +370,7 @@ impl ChatApp {
                     "provider": c.provider.key(),
                     "model": c.provider_model,
                     "status": child_status(c),
+                    "cost": chat_spend(c, &self.model_prices),
                 })
             })
             .collect();
@@ -343,6 +389,10 @@ impl ChatApp {
                 format!(r#"unknown column "{s}"; use backlog, todo, doing or review"#)
             })?,
         };
+        let labels = crate::board::model::parse_labels(&args["labels"])?.unwrap_or_default();
+        let blocked_by =
+            crate::board::model::parse_ids(&args["blocked_by"], "blocked_by")?.unwrap_or_default();
+        self.check_blockers(&blocked_by)?;
         let id = self.board_add(
             title.clone(),
             text("body"),
@@ -351,6 +401,13 @@ impl ChatApp {
             None,
             true,
         );
+        let author = self.card_author(lead_ix);
+        if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
+            card.labels = labels;
+            card.blocked_by = blocked_by;
+            card.author = author;
+            self.board_save(id);
+        }
         Ok(Value::String(format!("Created #{id} in {}: {title}", col.key())))
     }
 
@@ -371,9 +428,13 @@ impl ChatApp {
             .iter_mut()
             .find(|c| c.id == id && c.project == project)
             .ok_or_else(|| format!("card #{id} not found"))?;
+        let from = card.col;
         let msg = lead_move(card, to)?;
         let col = card.col;
         self.board_move(id, col, None);
+        if from != Col::Review && col == Col::Review {
+            self.org_card_review(id);
+        }
         Ok(Value::String(msg))
     }
 
@@ -389,6 +450,64 @@ impl ChatApp {
         Ok(Value::String(card_lines(&cards, bodies, &self.lead_project(ix))))
     }
 
+    fn read_card(&self, ix: usize, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_i64()
+            .or_else(|| {
+                args["id"].as_str().and_then(|s| s.trim().trim_start_matches('#').parse().ok())
+            })
+            .ok_or_else(|| r#"missing "id""#.to_string())?;
+        let card = self
+            .cards
+            .iter()
+            .find(|c| c.id == id && (self.chats[ix].lead || c.project == self.lead_project(ix)))
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        let now = now_ms();
+        let chats: Vec<Value> = card
+            .chats
+            .iter()
+            .map(|id| match self.chat_ix(*id) {
+                Some(ix) => {
+                    let c = &self.chats[ix];
+                    json!({"id": id, "title": c.title.as_ref(), "provider": c.provider.key(), "state": super::control::state_of(c, c.busy())})
+                }
+                None => json!({"id": id, "state": "deleted"}),
+            })
+            .collect();
+        let blockers: Vec<Value> = card
+            .blocked_by
+            .iter()
+            .map(|b| {
+                let c = self.cards.iter().find(|c| c.id == *b);
+                json!({"id": b, "title": c.map(|c| c.title.as_str()), "col": c.map(|c| c.col.key())})
+            })
+            .collect();
+        let notes: Vec<Value> = card
+            .notes
+            .iter()
+            .map(|n| json!({"by": n.by, "age": super::control::age_label(now - n.at), "text": n.text}))
+            .collect();
+        let mut reply = json!({
+            "id": card.id,
+            "title": card.title,
+            "col": card.col.key(),
+            "project": card.project,
+            "labels": card.labels,
+            "blocked_by": blockers,
+            "chats": chats,
+            "notes": notes,
+            "added_by": match (card.by_agent, card.author.as_str()) {
+                (false, _) => "user",
+                (true, "") => "agent",
+                (true, author) => author,
+            },
+        });
+        if args["brief"] != true {
+            reply["body"] = card.body.clone().into();
+        }
+        Ok(reply)
+    }
+
     fn update_card(&mut self, lead_ix: usize, args: &Value) -> Result<Value, String> {
         let id = args["id"]
             .as_i64()
@@ -399,7 +518,11 @@ impl ChatApp {
         {
             return Err(format!("chat {chat} not found"));
         }
+        if let Some(ids) = crate::board::model::parse_ids(&args["blocked_by"], "blocked_by")? {
+            self.check_blockers(&ids)?;
+        }
         let before = args["before"].as_i64();
+        let by = self.card_author(lead_ix);
         let project = self.lead_project(lead_ix);
         let card = self
             .cards
@@ -407,7 +530,7 @@ impl ChatApp {
             .find(|c| c.id == id && c.project == project)
             .ok_or_else(|| format!("card #{id} not found"))?;
         let from = card.col;
-        let msg = lead_update(card, args)?;
+        let msg = lead_update(card, args, &by, now_ms())?;
         card.updated_at = now_ms();
         let col = card.col;
         if col == from && before.is_none() {
@@ -415,7 +538,32 @@ impl ChatApp {
         } else {
             self.board_move(id, col, before);
         }
+        if from != Col::Review && col == Col::Review {
+            self.org_card_review(id);
+        }
+        if let Some(note) = args["note"].as_str().filter(|n| !n.trim().is_empty()) {
+            self.org_card_note(id, self.chats[lead_ix].id, note);
+        }
         Ok(Value::String(msg))
+    }
+
+    /// Note author for a board tool call: "lead <id>" or "agent <id>".
+    fn card_author(&self, ix: usize) -> String {
+        let chat = &self.chats[ix];
+        format!("{} {}", if chat.lead { "lead" } else { "agent" }, chat.id)
+    }
+
+    fn check_blockers(&self, ids: &[i64]) -> Result<(), String> {
+        for id in ids {
+            match self.cards.iter().find(|c| c.id == *id) {
+                None => return Err(format!("blocker card #{id} not found")),
+                Some(c) if c.col == Col::Done => {
+                    return Err(format!("blocker card #{id} is already done"));
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn own_child(&self, lead_ix: usize, args: &Value) -> Result<usize, String> {
@@ -483,6 +631,12 @@ impl ChatApp {
             return Err(format!("chat {} is archived; unarchive it first", self.chats[ix].id));
         }
         let child = self.chats[ix].parent == Some(self.chats[lead_ix].id);
+        if !child && rank(self.chats[ix].access) > rank(self.chats[lead_ix].access) {
+            return Err(format!(
+                "chat {} runs with more access than this lead; only the user can message it",
+                self.chats[ix].id
+            ));
+        }
         let tag = move |mut reply: Value| {
             if !child {
                 reply["reply"] = "not your child: its answer won't be sent to you; read it later with read_history and this chat's id".into();
@@ -494,6 +648,19 @@ impl ChatApp {
             return Err(r#"missing "text""#.into());
         }
         let id = self.chats[ix].id;
+        let text = if child {
+            text
+        } else {
+            let lead = &self.chats[lead_ix];
+            let from = sender_tag(&lead.title, lead.id);
+            let n = agent_streak(&self.chats[ix], lead.id);
+            if n >= MAX_AGENT_STREAK {
+                return Err(format!(
+                    "agent-to-agent loop guard: you sent chat {id} {n} messages in a row with no reply from another sender or the user; ask the user before sending more"
+                ));
+            }
+            format!("{from} {text}")
+        };
         if self.chats[ix].messages.is_empty() && self.chats[ix].worktree_error.is_some() {
             return Err(format!("agent {id} has no worktree; spawn a new one"));
         }
@@ -727,6 +894,18 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
+        self.spawn_capped(lead_ix, args, true, window, cx)
+    }
+
+    /// `capped: false` skips the slot caps, for a hire the user approved over them.
+    pub(crate) fn spawn_capped(
+        &mut self,
+        lead_ix: usize,
+        args: &Value,
+        capped: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Value, String> {
         let (args, quota_left) = self.resolve_auto(lead_ix, args, cx)?;
         let a = SpawnArgs::parse(&args, &self.probes)?;
         let lead_id = self.chats[lead_ix].id;
@@ -744,11 +923,34 @@ impl ChatApp {
                 self.spawn_nonces.remove(&key);
             }
         }
-        let max_children = self.settings.max_children;
-        if self.running_children(lead_ix) >= max_children {
-            return Err(format!(
-                "this lead already has {max_children} running agents; wait for one to finish or stop one with the stop_agent tool"
-            ));
+        let project = self.lead_project(lead_ix);
+        if let Some(id) = a.card {
+            self.check_spawn_card(id, &project)?;
+        }
+        if capped && self.spawn_full(lead_ix) {
+            let same = |(lead, queued): &(i64, Value)| {
+                *lead == lead_id && !a.nonce.is_empty() && queued["nonce"] == a.nonce.as_str()
+            };
+            let at = match self.spawn_queue.iter().position(same) {
+                Some(at) => at,
+                None => {
+                    let queued = self.spawn_queue.iter().filter(|(lead, _)| *lead == lead_id);
+                    if queued.count() >= MAX_QUEUED_SPAWNS {
+                        return Err(format!(
+                            "{MAX_QUEUED_SPAWNS} spawns are already queued; wait for some to start"
+                        ));
+                    }
+                    self.spawn_queue.push((lead_id, args.clone()));
+                    self.spawn_queue.len() - 1
+                }
+            };
+            let position =
+                self.spawn_queue[..=at].iter().filter(|(lead, _)| *lead == lead_id).count();
+            return Ok(json!({
+                "status": "queued",
+                "position": position,
+                "note": "all your agent slots are busy; this starts when one finishes, and its id arrives as your next turn. Don't poll.",
+            }));
         }
         let lead = &self.chats[lead_ix];
         if lead.cwd.is_empty() && self.settings.workspace_root.is_empty() {
@@ -759,12 +961,6 @@ impl ChatApp {
         } else {
             None
         };
-        let project = self.lead_project(lead_ix);
-        if let Some(id) = a.card
-            && !self.cards.iter().any(|c| c.id == id && c.project == project)
-        {
-            return Err(format!("card #{id} not found"));
-        }
         let ix = self.create_child(lead_ix, &a)?;
         if let Some(reason) = self.worktree_blocks_send(ix) {
             self.chats.remove(ix);
@@ -777,14 +973,22 @@ impl ChatApp {
                 self.board_link(id, child_id);
                 id
             }
-            None => self.board_add(
-                a.title.clone(),
-                a.task.clone(),
-                Col::Doing,
-                project,
-                Some(child_id),
-                true,
-            ),
+            None => {
+                let id = self.board_add(
+                    a.title.clone(),
+                    a.task.clone(),
+                    Col::Doing,
+                    project,
+                    Some(child_id),
+                    true,
+                );
+                let author = self.card_author(lead_ix);
+                if let Some(card) = self.cards.iter_mut().find(|c| c.id == id) {
+                    card.author = author;
+                    self.board_save(id);
+                }
+                id
+            }
         };
         let mut reply = json!({
             "id": child_id,
@@ -810,6 +1014,46 @@ impl ChatApp {
         Ok(reply)
     }
 
+    fn check_spawn_card(&self, id: i64, project: &str) -> Result<(), String> {
+        let card = self
+            .cards
+            .iter()
+            .find(|c| c.id == id && c.project == project)
+            .ok_or_else(|| format!("card #{id} not found"))?;
+        if card.blocked_by.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<String> = card.blocked_by.iter().map(|b| format!("#{b}")).collect();
+        Err(format!(
+            "card #{id} is blocked by {}; finish those first or clear blocked_by with update_card",
+            ids.join(", ")
+        ))
+    }
+
+    /// Starts queued spawns while their leads have free slots; each lead hears the outcome.
+    pub(crate) fn drain_spawn_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut i = 0;
+        while i < self.spawn_queue.len() {
+            let (lead_id, args) = self.spawn_queue[i].clone();
+            let Some(lead_ix) = self.chat_ix(lead_id).filter(|ix| self.chats[*ix].lead) else {
+                self.spawn_queue.remove(i);
+                continue;
+            };
+            if self.spawn_full(lead_ix) {
+                i += 1;
+                continue;
+            }
+            self.spawn_queue.remove(i);
+            self.org_request_started(&args);
+            let title = args["title"].as_str().unwrap_or_default().to_string();
+            let text = match self.spawn_agent(lead_ix, &args, window, cx) {
+                Ok(reply) => format!("[Aether] Queued spawn \"{title}\" started: {reply}"),
+                Err(e) => format!("[Aether] Queued spawn \"{title}\" failed: {e}"),
+            };
+            self.tell_lead(lead_id, text, window, cx);
+        }
+    }
+
     pub(super) fn crew(&self, lead_ix: usize) -> Vec<usize> {
         let lead = self.chats[lead_ix].id;
         let mut kids: Vec<usize> = (0..self.chats.len())
@@ -829,11 +1073,10 @@ impl ChatApp {
         if let Some(layout) = layout.filter(|_| model.pane_for(chat_id).is_none()) {
             let focused = layout.focused;
             let other = layout.panes().into_iter().find(|p| Some(*p) != focused);
-            let viewport = window.viewport_size();
-            let size = focused
-                .and_then(|p| self.workspace.bounds.get(&p).copied())
-                .unwrap_or([f32::from(viewport.width), f32::from(viewport.height) - 120.]);
-            if focused.is_some_and(|p| model.can_split(p, SplitAxis::Horizontal, size).is_ok()) {
+            let surface = self.workspace.surface_sizes.get(&0).copied();
+            let gap = self.settings.tile_gap.clamp(0., 24.);
+            if focused.is_some_and(|p| model.can_split_in(p, DockSide::Right, surface, gap).is_ok())
+            {
                 model.open(chat_id, 0);
             } else if let Some(pane) = other {
                 model.panes.insert(pane, chat_id);
@@ -844,7 +1087,16 @@ impl ChatApp {
         self.select(ix, window, cx);
     }
 
-    pub(super) fn running_children(&self, lead_ix: usize) -> usize {
+    /// No free slot for `lead_ix`: its own cap, or an org head's worker cap or the org pool.
+    pub(crate) fn spawn_full(&self, lead_ix: usize) -> bool {
+        let running = self.running_children(lead_ix);
+        running >= self.settings.max_children
+            || self.org_head_by_chat(self.chats[lead_ix].id).is_some_and(|h| {
+                running >= h.max_workers || self.org_pool_busy() >= self.org_pool_cap()
+            })
+    }
+
+    pub(crate) fn running_children(&self, lead_ix: usize) -> usize {
         let lead = self.chats[lead_ix].id;
         self.chats.iter().filter(|c| c.parent == Some(lead) && (c.busy() || starting(c))).count()
     }
@@ -878,6 +1130,10 @@ impl ChatApp {
             access,
             effort: a.effort.clone(),
             cli_session: String::new(),
+            fork_from: String::new(),
+            rollback_to: String::new(),
+            agent_sessions: vec![],
+            handoff_seen: None,
             queue: Vec::new(),
             stopped: false,
             external_pid: None,

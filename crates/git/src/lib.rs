@@ -487,7 +487,11 @@ pub(crate) fn parse_numstat(out: &str) -> HashMap<String, Stat> {
 
 /// The remote to publish a new branch to: `origin`, else the only one.
 fn pick_remote(remotes: &str) -> Option<String> {
-    let names: Vec<&str> = remotes.lines().map(str::trim).filter(|name| !name.is_empty()).collect();
+    let names: Vec<&str> = remotes
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !name.starts_with('-'))
+        .collect();
     match names[..] {
         [only] => Some(only.to_string()),
         _ => names.iter().find(|name| **name == "origin").map(|name| name.to_string()),
@@ -1052,10 +1056,13 @@ fn push(top: &Path) -> Result<String, String> {
     let target = match upstream {
         Some(upstream) => upstream,
         None => {
+            if branch.starts_with('-') {
+                return Err(format!("“{branch}” isn't a valid branch name."));
+            }
             remote = pick_remote(&run_args(top, &["remote"], QUICK)?.stdout).ok_or(
                 "This repository has no remote to push to. Add one in the terminal, then push.",
             )?;
-            args.extend(["--set-upstream", &remote, &branch]);
+            args.extend(["--set-upstream", &remote, "--", &branch]);
             format!("{remote}/{branch}")
         }
     };

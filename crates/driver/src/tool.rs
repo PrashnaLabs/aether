@@ -18,6 +18,9 @@ use aether_core::{
 use crate::spawn::log_unknown;
 
 const OUTPUT_HALF: usize = 8_000;
+pub(crate) const OUTPUT_CAP: usize = 64 * 1024;
+const LINE_SLACK: usize = 1024;
+const HIDDEN: &str = " bytes earlier output hidden\n";
 const DIFF_LINES: usize = 400;
 pub const INPUT_CHARS: usize = 4_000;
 const DIFF_LINE_CHARS: usize = 1_500;
@@ -260,6 +263,45 @@ pub(crate) fn set_output(detail: &mut ToolDetail, text: &str) {
         }
         _ => {}
     }
+}
+
+/// Adds to a detail's output, keeping only the last `OUTPUT_CAP` bytes.
+pub(crate) fn append_output(detail: &mut ToolDetail, extra: &str) {
+    if let ToolDetail::Command { output, .. }
+    | ToolDetail::Search { output, .. }
+    | ToolDetail::Web { output, .. }
+    | ToolDetail::Task { output, .. }
+    | ToolDetail::Other { output, .. } = detail
+    {
+        output.push_str(extra);
+        if output.starts_with('\n') {
+            *output = output.trim_start().to_string();
+        }
+        cap_output(output);
+    }
+}
+
+/// Cuts `text` to its last `OUTPUT_CAP` bytes behind one `… N bytes earlier output hidden` line.
+/// The count of an earlier cut is read back from that line, so recapping keeps one accurate marker.
+pub(crate) fn cap_output(text: &mut String) {
+    let (hidden, body) = text
+        .strip_prefix("… ")
+        .and_then(|rest| rest.split_once(HIDDEN))
+        .and_then(|(n, rest)| Some((n.parse::<usize>().ok()?, text.len() - rest.len())))
+        .unwrap_or((0, 0));
+    if text.len() - body <= OUTPUT_CAP {
+        return;
+    }
+    let mut cut = text.len() - OUTPUT_CAP;
+    while !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    let near = &text.as_bytes()[cut..text.len().min(cut + LINE_SLACK)];
+    if let Some(nl) = near.iter().position(|&b| b == b'\n').filter(|nl| cut + nl + 1 < text.len()) {
+        cut += nl + 1;
+    }
+    let hidden = hidden + cut - body;
+    text.replace_range(..cut, &format!("… {hidden}{HIDDEN}"));
 }
 
 /// Settles a call from its result text: output, exit code, status and error line.

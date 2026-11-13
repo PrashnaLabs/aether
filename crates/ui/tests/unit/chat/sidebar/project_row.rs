@@ -27,3 +27,12 @@ fn project_chevron_and_folder_icons() {
     assert!(matches!(project_folder_icon(true), IconName::FolderClosed));
     assert!(matches!(project_folder_icon(false), IconName::FolderOpen));
 }
+
+#[test]
+fn tilde_path_shortens_only_the_home_prefix() {
+    let home = aether_core::home_dir();
+    let inside = home.join("Code/datafuse");
+    assert_eq!(tilde_path(&inside.display().to_string()), "~/Code/datafuse");
+    assert_eq!(tilde_path(&home.display().to_string()), "~");
+    assert_eq!(tilde_path("/opt/project"), "/opt/project");
+}

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use aether_agent::SavedCard;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Col {
@@ -47,24 +48,66 @@ pub(crate) struct BoardCard {
     pub body: String,
     pub col: Col,
     pub position: f64,
-    pub chat: Option<i64>,
+    /// Linked chats, oldest first.
+    pub chats: Vec<i64>,
     pub project: String,
     pub updated_at: i64,
     pub by_agent: bool,
+    pub labels: Vec<String>,
+    /// Open cards this one waits on; ids leave when their card is done or deleted.
+    pub blocked_by: Vec<i64>,
+    pub notes: Vec<Note>,
+    /// "lead <chat id>" or "agent <chat id>" for agent-made cards; empty for the user's and older cards.
+    pub author: String,
+}
+
+/// A dated remark on a card; `by` is "user", "lead <chat id>" or "agent <chat id>".
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Note {
+    pub at: i64,
+    pub by: String,
+    pub text: String,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Meta {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    chats: Vec<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    blocked_by: Vec<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<Note>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    author: String,
+}
+
+impl BoardCard {
+    pub(crate) fn linked(&self, chat: i64) -> bool {
+        self.chats.contains(&chat)
+    }
 }
 
 impl From<SavedCard> for BoardCard {
     fn from(c: SavedCard) -> Self {
+        let meta: Meta = serde_json::from_str(&c.meta).unwrap_or_default();
+        let chats = if meta.chats.is_empty() { c.chat.into_iter().collect() } else { meta.chats };
         BoardCard {
             id: c.id,
             title: c.title,
             body: c.body,
             col: Col::parse(&c.col).unwrap_or(Col::Todo),
             position: c.position,
-            chat: c.chat,
+            chats,
             project: c.project,
             updated_at: c.updated_at,
             by_agent: c.by_agent,
+            labels: meta.labels,
+            blocked_by: meta.blocked_by,
+            notes: meta.notes,
+            author: meta.author,
         }
     }
 }
@@ -77,10 +120,27 @@ impl From<&BoardCard> for SavedCard {
             body: c.body.clone(),
             col: c.col.key().to_string(),
             position: c.position,
-            chat: c.chat,
+            chat: c.chats.first().copied(),
             project: c.project.clone(),
             updated_at: c.updated_at,
             by_agent: c.by_agent,
+            meta: if c.chats.len() < 2
+                && c.labels.is_empty()
+                && c.blocked_by.is_empty()
+                && c.notes.is_empty()
+                && c.author.is_empty()
+            {
+                String::new()
+            } else {
+                serde_json::to_string(&Meta {
+                    chats: c.chats.clone(),
+                    labels: c.labels.clone(),
+                    blocked_by: c.blocked_by.clone(),
+                    notes: c.notes.clone(),
+                    author: c.author.clone(),
+                })
+                .unwrap_or_default()
+            },
         }
     }
 }
@@ -102,13 +162,18 @@ pub(crate) fn auto_move(col: Col, turn: Turn) -> Option<Col> {
 /// Legacy cards used millisecond timestamps as ids; new ones count up past the short ones.
 const LEGACY_ID: i64 = 1_000_000_000;
 
-pub(crate) fn next_id(cards: &[BoardCard]) -> i64 {
-    cards.iter().map(|c| c.id).filter(|&id| id < LEGACY_ID).max().unwrap_or(0) + 1
+/// `floor`: the highest id ever handed out, so a deleted card's id isn't reused.
+pub(crate) fn next_id(cards: &[BoardCard], floor: i64) -> i64 {
+    cards.iter().map(|c| c.id).filter(|&id| id < LEGACY_ID).fold(floor, i64::max) + 1
 }
 
 /// Files worktree-folder cards under their project (`homes`: worktree -> project) and gives
 /// timestamp ids short ones, oldest first. `Some(retired ids)` when anything changed.
-pub(crate) fn tidy(cards: &mut [BoardCard], homes: &HashMap<String, String>) -> Option<Vec<i64>> {
+pub(crate) fn tidy(
+    cards: &mut [BoardCard],
+    homes: &HashMap<String, String>,
+    floor: i64,
+) -> Option<Vec<i64>> {
     let mut changed = false;
     for card in cards.iter_mut() {
         if let Some(home) = homes.get(&card.project) {
@@ -121,7 +186,7 @@ pub(crate) fn tidy(cards: &mut [BoardCard], homes: &HashMap<String, String>) -> 
     let mut retired = Vec::new();
     for i in legacy {
         retired.push(cards[i].id);
-        cards[i].id = next_id(cards);
+        cards[i].id = next_id(cards, floor);
     }
     (changed || !retired.is_empty()).then_some(retired)
 }
@@ -137,8 +202,22 @@ pub(crate) fn position_between(prev: Option<f64>, next: Option<f64>) -> f64 {
 
 pub(crate) fn list_line(card: &BoardCard) -> String {
     let mut s = format!("#{} [{}] {}", card.id, card.col.key(), card.title);
-    if let Some(chat) = card.chat {
-        s.push_str(&format!(" (agent {chat})"));
+    let ids = |v: &[i64], hash: &str| {
+        v.iter().map(|id| format!("{hash}{id}")).collect::<Vec<_>>().join(", ")
+    };
+    match card.chats.as_slice() {
+        [] => {}
+        [chat] => s.push_str(&format!(" (agent {chat})")),
+        chats => s.push_str(&format!(" (agents {})", ids(chats, ""))),
+    }
+    if !card.labels.is_empty() {
+        s.push_str(&format!(" {{{}}}", card.labels.join(", ")));
+    }
+    if !card.blocked_by.is_empty() {
+        s.push_str(&format!(" blocked by {}", ids(&card.blocked_by, "#")));
+    }
+    if !card.notes.is_empty() {
+        s.push_str(&format!(" · {} note(s)", card.notes.len()));
     }
     s
 }
@@ -155,10 +234,55 @@ pub(crate) fn lead_move(card: &mut BoardCard, to: &str) -> Result<String, String
     Ok(format!("Moved #{} {} -> {}: {}", card.id, from.key(), col.key(), card.title))
 }
 
+/// `labels`: trimmed, lowercase, deduplicated; `None` when absent.
+pub(crate) fn parse_labels(v: &serde_json::Value) -> Result<Option<Vec<String>>, String> {
+    let Some(items) = v.as_array() else {
+        return if v.is_null() {
+            Ok(None)
+        } else {
+            Err(r#""labels" must be a list of strings"#.into())
+        };
+    };
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let label = item.as_str().ok_or(r#""labels" must be a list of strings"#)?;
+        let label = label.trim().to_lowercase();
+        if !label.is_empty() && !out.contains(&label) {
+            out.push(label);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// `blocked_by`: card ids; `None` when absent.
+pub(crate) fn parse_ids(v: &serde_json::Value, key: &str) -> Result<Option<Vec<i64>>, String> {
+    let Some(items) = v.as_array() else {
+        return if v.is_null() {
+            Ok(None)
+        } else {
+            Err(format!(r#""{key}" must be a list of card ids"#))
+        };
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let id = item
+            .as_i64()
+            .or_else(|| item.as_str()?.trim().trim_start_matches('#').parse().ok())
+            .ok_or_else(|| format!(r#""{key}" must be a list of card ids"#))?;
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    Ok(Some(out))
+}
+
 /// Applies an update_card call; checks every field before changing any.
+/// `by` and `now` stamp a `note`; callers check that `chat` and `blocked_by` ids exist.
 pub(crate) fn lead_update(
     card: &mut BoardCard,
     args: &serde_json::Value,
+    by: &str,
+    now: i64,
 ) -> Result<String, String> {
     let text = |k: &str| args[k].as_str().map(str::trim);
     let title = text("title");
@@ -176,24 +300,36 @@ pub(crate) fn lead_update(
         },
     };
     let (body, append) = (text("body"), text("append").filter(|s| !s.is_empty()));
+    let note = text("note").filter(|s| !s.is_empty());
     let chat = args["chat"].as_i64();
+    let labels = parse_labels(&args["labels"])?;
+    let blocked_by = parse_ids(&args["blocked_by"], "blocked_by")?;
+    if blocked_by.as_ref().is_some_and(|ids| ids.contains(&card.id)) {
+        return Err("a card can't block itself".into());
+    }
     if title.is_none()
         && col.is_none()
         && body.is_none()
         && append.is_none()
+        && note.is_none()
         && chat.is_none()
+        && labels.is_none()
+        && blocked_by.is_none()
         && args["before"].is_null()
     {
-        return Err("nothing to change; pass title, body, append, col, before or chat".into());
+        return Err(
+            "nothing to change; pass title, body, append, note, col, before, chat, labels or blocked_by"
+                .into(),
+        );
     }
-    let mut changed = Vec::new();
+    let mut changed: Vec<String> = Vec::new();
     if let Some(t) = title {
         card.title = t.to_string();
-        changed.push("title");
+        changed.push("title".into());
     }
     if let Some(b) = body {
         card.body = b.to_string();
-        changed.push("description");
+        changed.push("description".into());
     }
     if let Some(a) = append {
         card.body = if card.body.trim().is_empty() {
@@ -201,20 +337,35 @@ pub(crate) fn lead_update(
         } else {
             format!("{}\n\n{a}", card.body.trim_end())
         };
-        if !changed.contains(&"description") {
-            changed.push("description");
+        if !changed.iter().any(|c| c == "description") {
+            changed.push("description".into());
         }
     }
     if let Some(c) = col {
         card.col = c;
-        changed.push("column");
+        changed.push("column".into());
     }
     if !args["before"].is_null() {
-        changed.push("position");
+        changed.push("position".into());
     }
     if let Some(id) = chat {
-        card.chat = Some(id);
-        changed.push("chat");
+        if !card.linked(id) {
+            card.chats.push(id);
+        }
+        changed.push("chat".into());
+    }
+    if let Some(l) = labels {
+        card.labels = l;
+        let shown = if card.labels.is_empty() { "none".into() } else { card.labels.join(", ") };
+        changed.push(format!("labels: {shown}"));
+    }
+    if let Some(b) = blocked_by {
+        card.blocked_by = b;
+        changed.push("blockers".into());
+    }
+    if let Some(n) = note {
+        card.notes.push(Note { at: now, by: by.to_string(), text: n.to_string() });
+        changed.push("note".into());
     }
     Ok(format!("Updated #{} {} ({}): {}", card.id, card.col.key(), changed.join(", "), card.title))
 }
@@ -297,10 +448,14 @@ mod tests {
             body: String::new(),
             col,
             position: 1.0,
-            chat,
+            chats: chat.into_iter().collect(),
             project: "p".into(),
             updated_at: 0,
             by_agent: false,
+            labels: vec![],
+            blocked_by: vec![],
+            notes: vec![],
+            author: String::new(),
         }
     }
 
@@ -326,13 +481,14 @@ mod tests {
 
     #[test]
     fn next_id_skips_legacy_timestamps() {
-        assert_eq!(next_id(&[]), 1);
+        assert_eq!(next_id(&[], 0), 1);
         let mut a = card(Col::Todo, None);
         a.id = 1_794_014_642_857;
-        assert_eq!(next_id(std::slice::from_ref(&a)), 1);
+        assert_eq!(next_id(std::slice::from_ref(&a), 0), 1);
         let mut b = a.clone();
         b.id = 4;
-        assert_eq!(next_id(&[a, b]), 5);
+        assert_eq!(next_id(&[a, b.clone()], 0), 5);
+        assert_eq!(next_id(std::slice::from_ref(&b), 9), 10, "deleted ids above 4 stay used");
     }
 
     #[test]
@@ -342,8 +498,8 @@ mod tests {
         cards[1].id = 1_794_000_000_001;
         cards[2].id = 1;
         let homes = HashMap::from([("/wt/feat".to_string(), "/proj".to_string())]);
-        assert_eq!(tidy(&mut cards, &homes), Some(vec![1_794_000_000_001, 1_794_000_000_002]));
-        assert_eq!(tidy(&mut cards.clone(), &homes), None);
+        assert_eq!(tidy(&mut cards, &homes, 0), Some(vec![1_794_000_000_001, 1_794_000_000_002]));
+        assert_eq!(tidy(&mut cards.clone(), &homes, 0), None);
         assert_eq!(
             cards.map(|c| (c.id, c.project)),
             [(3, "/proj".into()), (2, "p".into()), (1, "p".into())]
@@ -442,35 +598,93 @@ mod tests {
         use serde_json::json;
         let mut c = card(Col::Todo, None);
         assert_eq!(
-            lead_update(&mut c, &json!({"body": "Use a Pratt parser"})),
+            lead_update(&mut c, &json!({"body": "Use a Pratt parser"}), "lead 1", 5),
             Ok("Updated #7 todo (description): Fix parser".into())
         );
         assert_eq!(c.body, "Use a Pratt parser");
-        lead_update(&mut c, &json!({"append": "Blocked on lexer"})).unwrap();
+        lead_update(&mut c, &json!({"append": "Blocked on lexer"}), "lead 1", 5).unwrap();
         assert_eq!(c.body, "Use a Pratt parser\n\nBlocked on lexer");
         assert_eq!(
-            lead_update(&mut c, &json!({"title": "Rewrite parser", "col": "doing", "body": ""})),
+            lead_update(
+                &mut c,
+                &json!({"title": "Rewrite parser", "col": "doing", "body": ""}),
+                "lead 1",
+                5
+            ),
             Ok("Updated #7 doing (title, description, column): Rewrite parser".into())
         );
         assert_eq!(c.body, "");
         let before = c.clone();
         assert_eq!(
-            lead_update(&mut c, &json!({"title": "X", "col": "done"})),
+            lead_update(&mut c, &json!({"title": "X", "col": "done"}), "lead 1", 5),
             Err("only a human can move a card to done".into())
         );
-        assert_eq!(lead_update(&mut c, &json!({"title": " "})), Err("title can't be empty".into()));
         assert_eq!(
-            lead_update(&mut c, &json!({})),
-            Err("nothing to change; pass title, body, append, col, before or chat".into())
+            lead_update(&mut c, &json!({"title": " "}), "lead 1", 5),
+            Err("title can't be empty".into())
+        );
+        assert_eq!(
+            lead_update(&mut c, &json!({}), "lead 1", 5),
+            Err(
+                "nothing to change; pass title, body, append, note, col, before, chat, labels or blocked_by"
+                    .into()
+            )
         );
         assert_eq!(
             (c.title.as_str(), c.col, c.body.as_str()),
             (before.title.as_str(), before.col, "")
         );
         assert_eq!(
-            lead_update(&mut c, &json!({"chat": 42, "before": 3})),
+            lead_update(&mut c, &json!({"chat": 42, "before": 3}), "lead 1", 5),
             Ok("Updated #7 doing (position, chat): Rewrite parser".into())
         );
-        assert_eq!(c.chat, Some(42));
+        assert_eq!(c.chats, [42]);
+        lead_update(&mut c, &json!({"chat": 43}), "lead 1", 5).unwrap();
+        lead_update(&mut c, &json!({"chat": 42}), "lead 1", 5).unwrap();
+        assert_eq!(c.chats, [42, 43], "linking keeps every chat once");
+        assert_eq!(
+            lead_update(
+                &mut c,
+                &json!({"labels": [" UI", "ui", "bug"], "blocked_by": ["#3", 4], "note": "found it"}),
+                "agent 9",
+                77
+            ),
+            Ok("Updated #7 doing (labels: ui, bug, blockers, note): Rewrite parser".into())
+        );
+        assert_eq!(c.labels, ["ui", "bug"]);
+        assert_eq!(
+            lead_update(&mut c.clone(), &json!({"labels": []}), "lead 1", 5),
+            Ok("Updated #7 doing (labels: none): Rewrite parser".into())
+        );
+        assert_eq!(c.blocked_by, [3, 4]);
+        assert_eq!(c.notes, [Note { at: 77, by: "agent 9".into(), text: "found it".into() }]);
+        assert_eq!(
+            lead_update(&mut c, &json!({"blocked_by": [7]}), "lead 1", 5),
+            Err("a card can't block itself".into())
+        );
+        assert_eq!(
+            lead_update(&mut c, &json!({"labels": "ui"}), "lead 1", 5),
+            Err(r#""labels" must be a list of strings"#.into())
+        );
+        assert_eq!(c.labels, ["ui", "bug"]);
+    }
+
+    #[test]
+    fn saved_cards_keep_links_labels_blockers_and_notes() {
+        let mut c = card(Col::Doing, Some(5));
+        assert_eq!(SavedCard::from(&c).meta, "", "plain cards store no meta");
+        assert_eq!(BoardCard::from(SavedCard::from(&c)), c);
+        c.chats.push(6);
+        c.labels = vec!["ui".into()];
+        c.blocked_by = vec![3];
+        c.notes = vec![Note { at: 1, by: "user".into(), text: "hi".into() }];
+        c.author = "lead 10".into();
+        let saved = SavedCard::from(&c);
+        assert_eq!(saved.chat, Some(5));
+        assert_eq!(BoardCard::from(saved), c);
+        assert_eq!(
+            list_line(&c),
+            "#7 [doing] Fix parser (agents 5, 6) {ui} blocked by #3 · 1 note(s)"
+        );
     }
 }

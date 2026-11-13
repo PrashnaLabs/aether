@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -693,6 +693,59 @@ impl ChatLayout {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrgLayout {
+    #[default]
+    Roster,
+    Chart,
+    Table,
+}
+
+impl OrgLayout {
+    pub const ALL: [Self; 3] = [Self::Roster, Self::Chart, Self::Table];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Roster => "Roster console",
+            Self::Chart => "Org chart",
+            Self::Table => "Round table",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Roster => "A row per head with its workers, needs-you and messages on the right.",
+            Self::Chart => "CEO above the heads, an inspector for the selected one.",
+            Self::Table => "Heads seated around the goal, needs-you and messages beside.",
+        }
+    }
+}
+
+/// Who approves a head's request for a worker.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrgHire {
+    /// The rules decide: approve when they pass, deny when not.
+    #[default]
+    Rules,
+    /// Approve when the rules pass, else ask the user.
+    Auto,
+    Ask,
+}
+
+impl OrgHire {
+    pub const ALL: [Self; 3] = [Self::Rules, Self::Auto, Self::Ask];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rules => "CEO decides by rules",
+            Self::Auto => "Auto-approve within rules",
+            Self::Ask => "Always ask me",
+        }
+    }
+}
+
 /// Which window corner the watch-list button sits in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WatchCorner {
@@ -849,6 +902,8 @@ pub struct Settings {
     #[serde(default = "default_font_size")]
     pub font_size: f32,
     pub model: String,
+    #[serde(default)]
+    pub model_windows: HashMap<String, u64>,
     pub reasoning: Reasoning,
     pub web_search: bool,
     pub instructions: String,
@@ -886,6 +941,9 @@ pub struct Settings {
     /// Project folders folded in the sidebar, by path.
     #[serde(default)]
     pub collapsed_projects: Vec<String>,
+    /// Organizations folded in the Organization sidebar, by project path.
+    #[serde(default)]
+    pub collapsed_orgs: Vec<String>,
     /// Whether the entire Projects section is folded in the sidebar.
     #[serde(default)]
     pub projects_section_collapsed: bool,
@@ -901,6 +959,9 @@ pub struct Settings {
     /// Project folders the user added, listed even without chats.
     #[serde(default)]
     pub projects: Vec<String>,
+    /// Project folders pinned to the top of the sidebar, in pin order.
+    #[serde(default)]
+    pub pinned_projects: Vec<String>,
     #[serde(default)]
     pub project_open_in: BTreeMap<String, String>,
     #[serde(default)]
@@ -1014,6 +1075,19 @@ pub struct Settings {
     pub watch_corner: WatchCorner,
     /// Peek card x, y, width, height in window px; `None` opens it beside the FAB.
     pub watch_peek_bounds: Option<[f32; 4]>,
+    /// Pinned chats stay listed under a collapsed project.
+    pub sidebar_pins_when_collapsed: bool,
+    /// Organization page, its shortcut, sidebar section and status item.
+    pub org_enabled: bool,
+    pub org_layout: OrgLayout,
+    /// Org-wide worker cap; `None` sizes it from the machine.
+    pub org_pool: Option<usize>,
+    pub org_builds: usize,
+    pub org_workers_per_head: usize,
+    pub org_hire: OrgHire,
+    /// Context percent at which a head's session should be rotated.
+    pub org_rotate_at: u8,
+    pub org_template: String,
 }
 
 impl Settings {
@@ -1115,6 +1189,7 @@ impl Default for Settings {
             max_children: default_max_children(),
             font_size: default_font_size(),
             model: "openrouter/auto".into(),
+            model_windows: HashMap::new(),
             reasoning: Reasoning::default(),
             web_search: true,
             instructions: String::new(),
@@ -1133,11 +1208,13 @@ impl Default for Settings {
             favorite_models: Vec::new(),
             open_in_app: String::new(),
             collapsed_projects: Vec::new(),
+            collapsed_orgs: Vec::new(),
             projects_section_collapsed: false,
             pinned_section_collapsed: false,
             agents_section_collapsed: false,
             hidden_projects: Vec::new(),
             projects: Vec::new(),
+            pinned_projects: Vec::new(),
             project_open_in: BTreeMap::new(),
             project_scripts: BTreeMap::new(),
             terminal_height: 260.,
@@ -1183,6 +1260,15 @@ impl Default for Settings {
             watchlist: Vec::new(),
             watch_corner: WatchCorner::BottomRight,
             watch_peek_bounds: None,
+            sidebar_pins_when_collapsed: true,
+            org_enabled: false,
+            org_layout: OrgLayout::Roster,
+            org_pool: None,
+            org_builds: 1,
+            org_workers_per_head: 2,
+            org_hire: OrgHire::Rules,
+            org_rotate_at: 75,
+            org_template: "startup".into(),
         }
     }
 }

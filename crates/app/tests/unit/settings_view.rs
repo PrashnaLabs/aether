@@ -215,7 +215,7 @@ fn font_row_matches_the_font_size_row(cx: &mut gpui_kit::TestAppContext) {
 #[cfg(unix)]
 #[gpui_kit::test]
 fn terminal_settings_live_in_their_own_developer_tab(cx: &mut gpui_kit::TestAppContext) {
-    assert_eq!(SettingsTab::ALL[8], SettingsTab::Terminal);
+    assert_eq!(SettingsTab::ALL[10], SettingsTab::Terminal);
     let window = settings_test_window(cx);
     let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
     settle(&mut visual);
@@ -927,4 +927,11 @@ fn model_reasoning_cards_change_effort_and_preserve_search(cx: &mut gpui_kit::Te
     });
     assert!(visual.debug_bounds("instructions").is_some());
     assert!(visual.debug_bounds("reasoning").is_none());
+}
+
+#[test]
+fn every_settings_tab_is_in_the_sidebar() {
+    let listed: Vec<_> =
+        SETTINGS_GROUPS.iter().flat_map(|(_, tabs)| tabs.iter().copied()).collect();
+    assert_eq!(listed, SettingsTab::ALL);
 }

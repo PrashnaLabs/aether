@@ -815,7 +815,7 @@ pub fn fold_bar(
         .items_center()
         .cursor_text()
         .on_click(on_expand)
-        .child(icon.small().text_color(theme.muted_foreground))
+        .child(div().flex().text_color(theme.muted_foreground).child(icon.small()))
         .child(
             div()
                 .flex_1()

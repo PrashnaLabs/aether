@@ -148,6 +148,23 @@ fn project_notes_follow_a_project_switch(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn chat_saves_notes_to_its_own_project(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let window = f.window(cx);
+    window
+        .update(cx, |app, window, cx| {
+            app.save_chat_note("direct".into(), window, cx);
+            assert_eq!(app.notes.project, None, "a direct chat saves to Global");
+            app.open_page(Page::Chat, cx);
+            app.chats[app.active].provider = Provider::Codex;
+            app.save_chat_note("agent".into(), window, cx);
+            assert_eq!(app.notes.project.as_deref(), Some("project"));
+            assert!(matches!(app.notes.form, Some(Form::Capture)));
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn toggled_project_notes_follow_a_project_switch(cx: &mut TestAppContext) {
     let f = Fixture::new();
     let other = f.dir.join("other");

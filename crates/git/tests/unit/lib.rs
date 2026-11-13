@@ -101,6 +101,7 @@ fn remotes_prefer_origin_then_a_lone_one() {
     assert_eq!(pick_remote("origin\nupstream\n").as_deref(), Some("origin"));
     assert_eq!(pick_remote("fork\n").as_deref(), Some("fork"));
     assert_eq!(pick_remote("fork\nupstream\n"), None);
+    assert_eq!(pick_remote("--upload-pack=evil\n"), None);
     assert_eq!(pick_remote(""), None);
 }
 
@@ -460,6 +461,25 @@ fn failing_hooks_and_pushes_report_what_git_said() {
     assert_eq!((conflict.path.as_str(), conflict.staged), ("b.txt", false));
     let text = diff(&repo, conflict).unwrap();
     assert!(text.contains("<<<<<<<") && text.contains("@@ -"), "{text}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn push_refuses_dash_prefixed_branch_name() {
+    let base = std::env::temp_dir().join(format!("aether-git-push-dash-{}", std::process::id()));
+    let Some(repo) = repo(&base) else {
+        return;
+    };
+    std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+    assert!(sh(&repo, &["add", "a.txt"]) && sh(&repo, &["commit", "-qm", "init"]));
+    let remote = base.join("remote.git");
+    assert!(sh(&base, &["init", "-q", "--bare", remote.to_str().unwrap()]));
+    assert!(sh(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]));
+    assert!(sh(&repo, &["update-ref", "refs/heads/-delete-me", "HEAD"]));
+    assert!(sh(&repo, &["symbolic-ref", "HEAD", "refs/heads/-delete-me"]));
+    let err = apply(&repo, &GitOp::Push).unwrap_err();
+    assert!(err.contains("isn't a valid branch name"), "{err}");
     let _ = std::fs::remove_dir_all(&base);
 }
 

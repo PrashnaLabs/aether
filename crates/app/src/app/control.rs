@@ -8,6 +8,7 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::{Context, SharedString, Window};
 use serde_json::{Value, json};
 
+use super::format::chat_spend;
 use super::{Bulk, CLIS, Chat, ChatApp, Delivery, now_ms, project_dir};
 use crate::board::model::{BoardCard, Col, shown};
 
@@ -206,7 +207,10 @@ impl ChatApp {
                     "title": c.title.as_ref(),
                     "project": folder(&project_dir(c, root)),
                     "provider": c.provider.key(),
+                    "model": c.provider_model,
                     "state": state_of(c, self.chat_running(ix)),
+                    "queued": c.queue.len(),
+                    "cost": chat_spend(c, &self.model_prices),
                     "last_active": age_label(now - last_active(c)),
                     "pinned": c.pinned,
                     "archived": c.archived,
@@ -390,14 +394,30 @@ impl ChatApp {
 
     pub(super) fn update_chat(
         &mut self,
+        caller_ix: usize,
         args: &Value,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
         let ix = self.target(args)?;
+        let caller = self.chats[caller_ix].id;
+        if ix != caller_ix
+            && self.chats[ix].parent != Some(caller)
+            && !self.org_ceo_of(caller, self.chats[ix].id)
+        {
+            return Err(
+                "a lead can only update its own chat, a direct child, or (as an org CEO) its org's heads"
+                    .into(),
+            );
+        }
         let title = args["title"].as_str().map(str::trim).filter(|t| !t.is_empty());
         let pinned = args["pinned"].as_bool();
         if title.is_none() && pinned.is_none() {
             return Err(r#"nothing to change; pass "title" or "pinned""#.into());
+        }
+        if pinned == Some(true)
+            && let Some(why) = self.chat_pin_refusal(ix)
+        {
+            return Err(why.into());
         }
         let chat = &mut self.chats[ix];
         if let Some(t) = title {
@@ -461,23 +481,67 @@ impl ChatApp {
             }
         };
         let messages = &self.chats[ix].messages;
+        let max = int("max_chars", 4_000, 500, 20_000);
+        let text_offset = int("text_offset", 0, 0, i64::MAX);
+        let view = args["view"].as_str().unwrap_or("messages");
+        if view != "messages" && view != "items" {
+            return Err(format!("unknown view {view}"));
+        }
+        if view == "items" || args["item"].as_str().is_some() {
+            let history = super::chat::handoff_history(messages, self.chats[ix].id);
+            let render = |position: usize, item: &aether_agent::handoff::HistoricalMessage| {
+                let mut chars = item.text.chars().skip(text_offset);
+                let text: String = chars.by_ref().take(max).collect();
+                let mut value = json!({
+                    "position": position, "item": item.item, "message": item.message,
+                    "role": if item.role == Role::User { "user" } else { "assistant" },
+                    "kind": item.kind, "status": item.status, "model": item.model, "text": text
+                });
+                if chars.next().is_some() {
+                    value["next_text_offset"] = (text_offset + max).into();
+                }
+                value
+            };
+            if let Some(id) = args["item"].as_str() {
+                let (position, item) = history
+                    .iter()
+                    .enumerate()
+                    .find(|(_, item)| item.item == id)
+                    .ok_or_else(|| format!("no item {id}"))?;
+                return Ok(render(position, item));
+            }
+            let after = args["after_position"].as_i64().unwrap_or(-1);
+            let start = if after < 0 { 0 } else { (after as usize).saturating_add(1) };
+            let limit = int("limit", 20, 1, 20);
+            let items: Vec<Value> = history
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(limit)
+                .map(|(position, item)| render(position, item))
+                .collect();
+            let mut reply = json!({"total": history.len(), "items": items});
+            if let Some(last) = items.last().and_then(|item| item["position"].as_u64())
+                && (last as usize) + 1 < history.len()
+            {
+                reply["next_position"] = last.into();
+            }
+            return Ok(reply);
+        }
         let offset = match args["offset"].as_i64().unwrap_or(0) {
             n if n < 0 => messages.len().saturating_sub(n.unsigned_abs() as usize),
             n => n as usize,
         };
         let limit = int("limit", 5, 1, 20);
-        let max = int("max_chars", 4_000, 500, 20_000);
         let items: Vec<Value> = messages
             .iter()
             .enumerate()
             .skip(offset)
             .take(limit)
             .map(|(i, m)| {
-                let mut text: String = m.text.chars().take(max).collect();
-                let more = m.text.chars().count().saturating_sub(max);
-                if more > 0 {
-                    text.push_str(&format!("… ({more} more chars)"));
-                }
+                let mut chars = m.text.chars().skip(text_offset);
+                let text: String = chars.by_ref().take(max).collect();
+                let has_more = chars.next().is_some();
                 let tools: Vec<String> = m
                     .steps
                     .iter()
@@ -488,11 +552,16 @@ impl ChatApp {
                     .collect();
                 let role = if m.role == Role::User { "user" } else { "assistant" };
                 let mut item = json!({"n": i, "role": role, "text": text});
-                if !tools.is_empty() {
+                if text_offset == 0 && !tools.is_empty() {
                     item["tools"] = tools.into();
                 }
-                if let Some(e) = &m.error {
+                if text_offset == 0
+                    && let Some(e) = &m.error
+                {
                     item["error"] = e.lines().next().unwrap_or_default().into();
+                }
+                if has_more {
+                    item["next_text_offset"] = (text_offset + max).into();
                 }
                 item
             })
@@ -514,6 +583,7 @@ pub(crate) struct CardFilter {
     pub project: Option<String>,
     pub by_agent: Option<bool>,
     pub search: String,
+    pub label: Option<String>,
 }
 
 pub(crate) fn parse_card_filter(args: &Value) -> Result<CardFilter, String> {
@@ -547,6 +617,7 @@ pub(crate) fn parse_card_filter(args: &Value) -> Result<CardFilter, String> {
         project: text("project").map(str::to_string),
         by_agent,
         search: text("search").unwrap_or_default().to_string(),
+        label: text("label").map(str::to_lowercase),
     })
 }
 
@@ -558,9 +629,11 @@ impl ChatApp {
     /// Cards matching `f` for the lead at `lead_ix`.
     pub(super) fn matching_cards(&self, lead_ix: usize, f: &CardFilter) -> Vec<&BoardCard> {
         let home = self.lead_project(lead_ix);
+        let scoped = !self.chats[lead_ix].lead;
         self.cards
             .iter()
             .filter(|c| match f.project.as_deref() {
+                _ if scoped => c.project == home,
                 Some("all") => true,
                 Some(p) => c.project == p || folder(Path::new(&c.project)).eq_ignore_ascii_case(p),
                 None => f.ids.is_some() || c.project == home,
@@ -568,6 +641,7 @@ impl ChatApp {
             .filter(|c| f.ids.as_ref().is_none_or(|ids| ids.contains(&c.id)))
             .filter(|c| f.col.is_none_or(|col| c.col == col))
             .filter(|c| shown(c, &f.search, f.by_agent))
+            .filter(|c| f.label.as_ref().is_none_or(|l| c.labels.contains(l)))
             .collect()
     }
 

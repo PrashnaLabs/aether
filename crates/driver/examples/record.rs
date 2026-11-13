@@ -15,6 +15,9 @@ const USAGE: &str = "usage: record --provider claude|codex|opencode|pi|agy --pro
   --then TEXT             a second prompt, sent after the first Final (repeatable)
   --access M              ask|read-only|auto-edit|auto|full (default ask)
   --model ID, --effort E, --resume ID
+  --fork                  fork the --resume session instead of continuing it
+  --rollback ID           roll the --resume session back natively to ID first
+  --seed TEXT             inject TEXT as native history before the first prompt (repeatable)
   --answer A              allow|deny|always|first|note:TEXT (default allow)
   --steer-after MS --steer TEXT   steer once, MS ms after the first prompt
   --cancel-after MS       cancel once, MS ms after the first prompt
@@ -35,6 +38,7 @@ struct Args {
     provider: String,
     opts: DriverStartOptions,
     prompts: Vec<String>,
+    seed: Vec<String>,
     policy: Policy,
     steer: Option<(u64, String)>,
     cancel_after: Option<u64>,
@@ -52,12 +56,15 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         effort: String::new(),
         access: AccessMode::Ask,
         resume: String::new(),
+        rollback: String::new(),
+        fork: false,
         reattach: false,
         attachments: None,
         background: Vec::new(),
         lead: None,
     };
     let (mut provider, mut prompts, mut policy) = (String::new(), vec![], Policy::Allow);
+    let mut seed = vec![];
     let (mut steer_after, mut steer, mut cancel_after) = (None, None, None);
     let (mut linger, mut timeout) = (0, 240);
     let mut it = argv.into_iter();
@@ -72,6 +79,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--model" => opts.model = val()?,
             "--effort" => opts.effort = val()?,
             "--resume" => opts.resume = val()?,
+            "--fork" => opts.fork = true,
+            "--rollback" => opts.rollback = val()?,
+            "--seed" => seed.push(val()?),
             "--access" => {
                 opts.access = match val()?.as_str() {
                     "ask" => AccessMode::Ask,
@@ -108,7 +118,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         (None, None) => None,
         _ => return Err("--steer-after and --steer go together".into()),
     };
-    Ok(Args { provider, opts, prompts, policy, steer, cancel_after, linger, timeout })
+    Ok(Args { provider, opts, prompts, seed, policy, steer, cancel_after, linger, timeout })
 }
 
 fn answer(policy: &Policy, ask: &Ask) -> Answer {
@@ -177,6 +187,10 @@ fn main() {
     let start = Instant::now();
     let deadline = start + Duration::from_secs(args.timeout);
     let mut prompts = args.prompts.into_iter();
+    if let Some((context, rest)) = args.seed.split_first() {
+        let pairs: Vec<_> = rest.iter().map(|t| (aether_core::Role::User, t.clone())).collect();
+        eprintln!("seeded natively: {}", driver.seed_history(context, &pairs));
+    }
     driver.prompt(prompts.next().unwrap_or_default(), vec![]);
     let mut steer = args.steer;
     let mut cancel_after = args.cancel_after;

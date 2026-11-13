@@ -27,9 +27,20 @@ impl Render for DetachedWorkspace {
                 None => body,
             };
             let viewer = app.image_viewer_overlay(window, cx);
-            gpui_kit::div().relative().size_full().child(body).children(viewer).into_any_element()
+            gpui_kit::div()
+                .relative()
+                .size_full()
+                .on_mouse_down(gpui_kit::MouseButton::Left, crate::app::claim_title_bar_press)
+                .child(body)
+                .children(viewer)
+                .into_any_element()
         })
     }
+}
+/// Why `pane` may not be closed, if it may not: main always keeps one pane.
+fn close_refusal(model: &WorkspaceModel, pane: PaneId) -> Option<&'static str> {
+    let layout = model.windows.get(&0).filter(|_| model.window_of(pane) == Some(0))?;
+    (layout.panes().len() <= 1).then_some("Can't close the last pane in the main window")
 }
 impl ChatApp {
     pub(crate) fn restore_session_windows(&mut self, cx: &mut Context<Self>) {
@@ -178,6 +189,35 @@ impl ChatApp {
             }
         });
     }
+    pub(crate) fn close_session_pane(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        if let Some(error) = close_refusal(&self.workspace.model, pane) {
+            self.workspace.error = Some(error.into());
+            return;
+        }
+        let Some(host) = self.workspace.model.window_of(pane) else { return };
+        self.workspace.views.remove(&pane);
+        if let Err(error) = self.workspace.model.close(pane) {
+            self.workspace.error = Some(error.into());
+        } else if host != 0
+            && self.workspace.model.windows.get(&host).is_none_or(|w| w.panes().is_empty())
+        {
+            self.side_tabs.remove(&host);
+            if let Some(handle) = self.workspace.windows.get(&host).copied() {
+                cx.defer(move |cx| {
+                    let _ = handle.update(cx, |_, window, _| retain_closed_window(window));
+                });
+            }
+        }
+        cx.notify();
+    }
+    pub(crate) fn close_session_window(&mut self, host: WindowId, cx: &mut Context<Self>) {
+        for pane in self.workspace.model.windows.get(&host).map(|w| w.panes()).unwrap_or_default() {
+            self.workspace.views.remove(&pane);
+            let _ = self.workspace.model.close(pane);
+        }
+        self.side_tabs.remove(&host);
+        cx.notify();
+    }
     pub(crate) fn return_session_window(&mut self, host: WindowId, cx: &mut Context<Self>) {
         let panes = self.workspace.model.windows.get(&host).map(|w| w.panes()).unwrap_or_default();
         let app = cx.entity();
@@ -245,7 +285,7 @@ fn open_secondary(
                 settings.window_blur,
             ));
             window.on_window_should_close(cx, move |window, cx| {
-                app.update(cx, |app, cx| app.return_session_window(host, cx));
+                app.update(cx, |app, cx| app.close_session_window(host, cx));
                 retain_closed_window(window);
                 false
             });
@@ -337,3 +377,7 @@ fn hide_macos_window(window: &Window) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/session_workspace/windows.rs"]
+mod tests;

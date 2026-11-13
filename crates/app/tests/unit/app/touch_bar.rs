@@ -147,3 +147,43 @@ fn touch_bar_files_targets_detached_session_while_main_shows_settings(cx: &mut T
         cx.read(|cx| assert_eq!(app.read(cx).page, Page::Settings));
     }
 }
+
+#[gpui_kit::test]
+fn detached_sessions_keep_their_tabs_when_main_leaves_chat(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (window, app) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            cx.new(|cx| {
+                ChatApp::with_state(
+                    Agent::new().unwrap(),
+                    Settings::default(),
+                    None,
+                    None,
+                    false,
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            let main = app.chats[app.active].id;
+            app.new_chat(window, cx);
+            let detached = app.chats[app.active].id;
+            app.chats[app.active].provider = aether_core::Provider::Codex;
+            let pane = app.workspace.model.pane_for(detached).unwrap();
+            app.workspace.model.transfer(pane, 7).unwrap();
+            app.workspace.model.open(main, 0);
+            app.active = app.chats.iter().position(|c| c.id == main).unwrap();
+            app.page = Page::Project;
+            let open = app.in_session(detached, cx, |app, _| app.side_open());
+            assert_eq!(open, Some(true), "a detached agent session keeps its tabs");
+            assert_eq!(app.page, Page::Project, "the main window stays on its page");
+            app.in_session(detached, cx, |app, _| app.page = Page::Settings);
+            assert_eq!(app.page, Page::Settings, "pages opened from a detached window stick");
+        });
+    })
+    .unwrap();
+}

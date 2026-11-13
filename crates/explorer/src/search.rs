@@ -14,7 +14,7 @@ pub struct QuickOpenItem {
 /// Fuzzy matches a pre-lowercased query against a pre-lowercased path.
 /// `candidate_len` is the original path's byte length, for the distance penalty.
 /// Returns `Some(score)` if all query chars match in order.
-pub(crate) fn fuzzy_match_path(
+pub fn fuzzy_match_path(
     query_lower: &str,
     candidate_lower: &str,
     candidate_len: usize,
@@ -58,6 +58,7 @@ pub(crate) fn fuzzy_match_path(
                 || c_chars[c_idx - 1] == '_'
                 || c_chars[c_idx - 1] == '.'
                 || c_chars[c_idx - 1] == '-'
+                || c_chars[c_idx - 1] == ' '
             {
                 score += 15;
             }
@@ -166,6 +167,12 @@ pub(crate) fn grep_files(
     let mut results = Vec::new();
     for rel in files {
         let path = root.join(rel);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() || meta.len() > 10 * 1024 * 1024 {
+            continue;
+        }
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };

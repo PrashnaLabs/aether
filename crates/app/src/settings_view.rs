@@ -1,8 +1,9 @@
 use crate::settings_search::{SettingItem, search_settings, tab_match_count};
 use aether_core::{
     AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor,
-    NotifyDelivery, NotifySound, Reasoning, Settings, THEME_FAMILIES, TerminalCursor,
-    TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, WatchCorner, family_index,
+    NotifyDelivery, NotifySound, OrgHire, OrgLayout, Reasoning, Settings, THEME_FAMILIES,
+    TerminalCursor, TerminalTheme, ThemeFamily, TileLayout, TimeFormat, ToolPolicy, WatchCorner,
+    family_index,
 };
 use aether_driver::{DriverStartOptions, ProviderProbe};
 use aether_git::Listed;
@@ -42,12 +43,14 @@ pub(crate) enum SettingsTab {
     Model,
     Providers,
     Worktrees,
+    Attachments,
     Tools,
+    Organization,
     Terminal,
 }
 
 impl SettingsTab {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::Appearance,
         Self::BottomBar,
         Self::Tiling,
@@ -55,7 +58,9 @@ impl SettingsTab {
         Self::Model,
         Self::Providers,
         Self::Worktrees,
+        Self::Attachments,
         Self::Tools,
+        Self::Organization,
         Self::Terminal,
     ];
 
@@ -68,11 +73,37 @@ impl SettingsTab {
             Self::Model => "Direct Chat",
             Self::Providers => "Providers",
             Self::Worktrees => "Worktrees",
+            Self::Attachments => "Attachments",
             Self::Tools => "Tools",
+            Self::Organization => "Organization",
             Self::Terminal => "Terminal",
         }
     }
 }
+
+pub(crate) const SETTINGS_GROUPS: [(&str, &[SettingsTab]); 2] = [
+    (
+        "General",
+        &[
+            SettingsTab::Appearance,
+            SettingsTab::BottomBar,
+            SettingsTab::Tiling,
+            SettingsTab::Composer,
+            SettingsTab::Model,
+        ],
+    ),
+    (
+        "Developer",
+        &[
+            SettingsTab::Providers,
+            SettingsTab::Worktrees,
+            SettingsTab::Attachments,
+            SettingsTab::Tools,
+            SettingsTab::Organization,
+            SettingsTab::Terminal,
+        ],
+    ),
+];
 
 fn next_settings_tab(current: SettingsTab, next: bool) -> SettingsTab {
     let index = SettingsTab::ALL.iter().position(|&tab| tab == current).unwrap_or(0);
@@ -570,8 +601,8 @@ impl ChatApp {
                     .iter()
                     .position(|s| *s == settings.sidebar_style)
                     .unwrap_or(0);
-                page = page.when(show("sidebar-style"), |page| {
-                    page.child(SettingsSection::new("Sidebar").icon(Icon::new(gpui_kit::assets::IconName::PanelLeft)).child(
+                page = page.when(show("sidebar-style") || show("sidebar-pins"), |page| {
+                    page.child(SettingsSection::new("Sidebar").icon(Icon::new(gpui_kit::assets::IconName::PanelLeft)).when(show("sidebar-style"), |section| section.child(
                         div().id("sidebar-style").debug_selector(|| "sidebar-style".into()).child(
                             SettingsRow::new("Style")
                                 .description(
@@ -590,7 +621,17 @@ impl ChatApp {
                                     cx,
                                 )),
                         ),
-                    ))
+                    )).when(show("sidebar-pins"), |section| section.child(div().id("sidebar-pins").debug_selector(|| "sidebar-pins".into()).child(SettingsRow::new("Pinned chats in collapsed projects")
+                        .description("Keep a project's pinned chats listed when the project is collapsed.")
+                        .control(
+                            Switch::new("sidebar-pins-setting")
+                                .checked(settings.sidebar_pins_when_collapsed)
+                                .accessibility_label("Pinned chats in collapsed projects")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    let checked = *checked;
+                                    this.update_settings(cx, |s| s.sidebar_pins_when_collapsed = checked);
+                                })),
+                        )))))
                 });
                 let chat_layout =
                     ChatLayout::ALL.iter().position(|l| *l == settings.chat_layout).unwrap_or(0);
@@ -598,7 +639,7 @@ impl ChatApp {
                     .iter()
                     .position(|w| *w == settings.right_panel_share)
                     .unwrap_or(3);
-                page = page.when(show("chat-layout") || show("right-panel-width"), |page| {
+                page = page.when(show("chat-layout") || show("org-layout") || show("right-panel-width"), |page| {
                     page.child(
                         SettingsSection::new("Chat layout")
                             .icon(Icon::new(gpui_kit::assets::IconName::PanelLeft))
@@ -623,6 +664,7 @@ impl ChatApp {
                                         ),
                                 )
                             })
+                            .when(show("org-layout") && (settings.org_enabled || matches.is_some()), |section| section.child(self.org_layout_row(cx)))
                             .when(show("right-panel-width") && settings.chat_layout != ChatLayout::Tabbed, |section| {
                                 section.child(
                                     div()
@@ -1302,6 +1344,9 @@ impl ChatApp {
             SettingsTab::Worktrees => {
                 page = page.child(self.worktrees_section(cx));
             }
+            SettingsTab::Attachments => {
+                page = page.child(self.render_stored_files(None, cx));
+            }
             SettingsTab::Tools => {
                 let notes_ids = [
                     "notes-directory",
@@ -1556,8 +1601,181 @@ impl ChatApp {
                                             })),
                                     ))) })) });
             }
+            SettingsTab::Organization => {
+                page = page.child(self.org_settings(&show, matches.is_some(), cx));
+            }
         }
         page
+    }
+
+    fn org_layout_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let layout = self.settings.org_layout;
+        div().id("org-layout").debug_selector(|| "org-layout".into()).child(
+            SettingsRow::new("Organization layout").description(layout.hint()).control(
+                settings_dropdown(
+                    "org-layout",
+                    "Organization layout",
+                    OrgLayout::ALL.iter().position(|l| *l == layout).unwrap_or(0),
+                    OrgLayout::ALL.map(|l| l.label()),
+                    cx.listener(|this, ix: &usize, _, cx| {
+                        this.update_settings(cx, |s| s.org_layout = OrgLayout::ALL[*ix]);
+                    }),
+                    cx,
+                ),
+            ),
+        )
+    }
+
+    /// Enable toggle, then layout, template and the default rules once on (or while searching).
+    fn org_settings(
+        &self,
+        show: &dyn Fn(&str) -> bool,
+        searching: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        use crate::org::model::TEMPLATES;
+        let s = &self.settings;
+        let on = s.org_enabled || searching;
+        let row = |id: &'static str, title: &'static str, description: String, control| {
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .child(SettingsRow::new(title).description(description).control(control))
+        };
+        let pool = match s.org_pool {
+            None => format!("Auto ({})", self.org_pool_cap()),
+            Some(_) => "Auto from machine".into(),
+        };
+        let general = SettingsSection::new("Organization")
+            .icon(Icon::new(gpui_kit::assets::IconName::Users))
+            .when(show("org-enabled"), |section| {
+                section.child(row(
+                    "org-enabled",
+                    "Enable organizations",
+                    "Shows the Organization view, sidebar section and status bar item. Turning it off pauses every org; nothing is deleted.".into(),
+                    Switch::new("org-enabled-setting")
+                        .checked(s.org_enabled)
+                        .accessibility_label("Enable organizations")
+                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            let checked = *checked;
+                            this.update_settings(cx, |s| s.org_enabled = checked);
+                        }))
+                        .into_any_element(),
+                ))
+            })
+            .when(on && !searching, |section| section.child(self.org_layout_row(cx)))
+            .when(on && show("org-template"), |section| {
+                section.child(row(
+                    "org-template",
+                    "Default template",
+                    "Used by Set up organization.".into(),
+                    settings_dropdown(
+                        "org-template",
+                        "Default template",
+                        TEMPLATES.iter().position(|t| t.id == s.org_template).unwrap_or(1),
+                        TEMPLATES.map(|t| t.name),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_template = TEMPLATES[*ix].id.into());
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            });
+        let rules = SettingsSection::new("Default rules")
+            .icon(Icon::new(gpui_kit::assets::IconName::Wrench))
+            .when(show("org-pool"), |section| {
+                section.child(row(
+                    "org-pool",
+                    "Worker pool",
+                    "Most workers running at once across every head.".into(),
+                    settings_dropdown(
+                        "org-pool",
+                        "Worker pool",
+                        s.org_pool.map_or(0, |n| n.clamp(1, 8)),
+                        std::iter::once(pool).chain((1..=8).map(|n| n.to_string())),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            let pool = (*ix > 0).then_some(*ix);
+                            this.update_settings(cx, |s| s.org_pool = pool);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-builds"), |section| {
+                section.child(row(
+                    "org-builds",
+                    "Builds at a time",
+                    "Builds are serialized; shared target dirs clobber when parallel.".into(),
+                    settings_dropdown(
+                        "org-builds",
+                        "Builds at a time",
+                        s.org_builds.clamp(1, 4) - 1,
+                        (1..=4).map(|n| n.to_string()),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_builds = ix + 1);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-workers-per-head"), |section| {
+                section.child(row(
+                    "org-workers-per-head",
+                    "Workers per head",
+                    "Worker cap a new head starts with.".into(),
+                    settings_dropdown(
+                        "org-workers-per-head",
+                        "Workers per head",
+                        s.org_workers_per_head.clamp(1, 6) - 1,
+                        (1..=6).map(|n| n.to_string()),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_workers_per_head = ix + 1);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-hire"), |section| {
+                section.child(row(
+                    "org-hire",
+                    "Hiring policy",
+                    "Rules: the request has a card, the head is under its cap, the pool has a slot.".into(),
+                    settings_dropdown(
+                        "org-hire",
+                        "Hiring policy",
+                        OrgHire::ALL.iter().position(|h| *h == s.org_hire).unwrap_or(0),
+                        OrgHire::ALL.map(|h| h.label()),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_hire = OrgHire::ALL[*ix]);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-rotate"), |section| {
+                section.child(row(
+                    "org-rotate",
+                    "Rotate a head's session at",
+                    "Context bars turn amber here. Rotate session starts the head fresh with the same role.".into(),
+                    settings_dropdown(
+                        "org-rotate",
+                        "Rotate session at",
+                        usize::from(s.org_rotate_at.clamp(50, 95) - 50) / 5,
+                        (50..=95).step_by(5).map(|p| format!("{p}% context")),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_rotate_at = 50 + *ix as u8 * 5);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            });
+        v_flex().gap_8().child(general).when(on, |page| page.child(rules))
     }
 }
 
@@ -1830,7 +2048,9 @@ impl SettingsTab {
             Self::Model => "Set your default model, response behavior and custom instructions.",
             Self::Providers => "Configure coding agents and their workspace.",
             Self::Worktrees => "Manage isolated checkouts used by your chats.",
+            Self::Attachments => "Files saved from chats across every project.",
             Self::Tools => "Control tool permissions and planning.",
+            Self::Organization => "Run a project as a lead, persistent heads and their workers.",
             Self::Terminal => "Set the terminal's colors, font, cursor and keys.",
         }
     }
@@ -1845,7 +2065,9 @@ impl SettingsTab {
             Self::Model => Lucide::MessageCircle,
             Self::Providers => Lucide::Bot,
             Self::Worktrees => Lucide::GitFork,
+            Self::Attachments => Lucide::Paperclip,
             Self::Tools => Lucide::Wrench,
+            Self::Organization => Lucide::Users,
             Self::Terminal => Lucide::SquareTerminal,
         }
     }
@@ -1860,6 +2082,9 @@ impl ChatApp {
         self.settings_tab = tab;
         if tab == SettingsTab::Worktrees {
             self.load_worktrees(cx);
+        }
+        if tab == SettingsTab::Attachments {
+            self.load_stored_files(cx);
         }
         cx.notify();
     }
@@ -1909,27 +2134,7 @@ impl ChatApp {
             .on_action(
                 cx.listener(|this, _: &SettingsPrevious, _, cx| this.cycle_settings_tab(false, cx)),
             );
-        for (label, tabs) in [
-            (
-                "General",
-                &[
-                    SettingsTab::Appearance,
-                    SettingsTab::BottomBar,
-                    SettingsTab::Tiling,
-                    SettingsTab::Composer,
-                    SettingsTab::Model,
-                ][..],
-            ),
-            (
-                "Developer",
-                &[
-                    SettingsTab::Providers,
-                    SettingsTab::Worktrees,
-                    SettingsTab::Tools,
-                    SettingsTab::Terminal,
-                ][..],
-            ),
-        ] {
+        for (label, tabs) in SETTINGS_GROUPS {
             let mut group = v_flex()
                 .gap_1()
                 .child(div().px_2().pb_1().text_xs().font_medium().text_color(muted).child(label));

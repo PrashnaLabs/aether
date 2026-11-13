@@ -188,8 +188,9 @@ pub fn scan(
     let mut scanned_files = 0;
     let mut skipped_files = 0;
     let errors = Vec::new();
-    let opencode_dirs = load_opencode_session_dirs();
+    let (opencode_dirs, no_dirs) = (std::cell::OnceCell::new(), HashMap::new());
     let mut native_sessions: HashSet<String> = HashSet::new();
+    let mut listed: HashSet<PathBuf> = HashSet::new();
 
     for provider in UsageProvider::ALL {
         let roots = provider_roots(provider);
@@ -209,6 +210,7 @@ pub fn scan(
             };
             for (path, size, mtime_ms) in files {
                 scanned_files += 1;
+                listed.insert(path.clone());
                 let records = match cache.get(&path) {
                     Some(entry)
                         if entry.size == size
@@ -217,7 +219,15 @@ pub fn scan(
                     {
                         &entry.records
                     }
-                    _ => match read_transcript_records(&path, provider, &opencode_dirs) {
+                    _ => match read_transcript_records(
+                        &path,
+                        provider,
+                        if provider == UsageProvider::OpenCode {
+                            opencode_dirs.get_or_init(load_opencode_session_dirs)
+                        } else {
+                            &no_dirs
+                        },
+                    ) {
                         Some(records) => {
                             &cache
                                 .entry(path)
@@ -237,6 +247,8 @@ pub fn scan(
             }
         }
     }
+
+    cache.retain(|path, _| listed.contains(path) || path.exists());
 
     // OpenCode live daemon sessions not already covered by file storage.
     for record in collect_opencode_service_records(&native_sessions) {
