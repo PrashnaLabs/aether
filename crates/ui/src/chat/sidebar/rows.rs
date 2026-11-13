@@ -1002,7 +1002,12 @@ impl ChatSidebar {
             let active = project.active
                 || collapsed
                     && (holds(&project.chats) || project.worktrees.iter().any(|w| holds(&w.chats)));
-            let chats: Vec<ChatItem> = project.chats.into_iter().filter(|_| !collapsed).collect();
+            let keep = self.keep_pins;
+            let chats: Vec<ChatItem> = project
+                .chats
+                .into_iter()
+                .filter(|chat| !collapsed || keep && chat.pinned && chat.depth == 0)
+                .collect();
             let mut held: Vec<(WorktreeItem, Vec<ChatItem>, bool)> = Vec::new();
             for mut worktree in project.worktrees.into_iter().filter(|_| !collapsed) {
                 let all = std::mem::take(&mut worktree.chats);

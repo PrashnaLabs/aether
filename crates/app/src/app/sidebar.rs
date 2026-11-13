@@ -390,6 +390,7 @@ impl ChatApp {
                 cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
             )
             .new_chat_action(NewChat)
+            .keep_pinned_when_collapsed(self.settings.sidebar_pins_when_collapsed)
             .pinned_collapsible(
                 self.settings.pinned_section_collapsed,
                 cx.listener(|this, collapsed: &bool, _, cx| {

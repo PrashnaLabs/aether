@@ -512,6 +512,7 @@ pub struct ChatSidebar {
     mark: Option<SharedString>,
     pinned: Vec<ChatItem>,
     pinned_collapse: Option<(bool, CollapseHandler)>,
+    keep_pins: bool,
     projects: Vec<ProjectItem>,
     projects_collapse: Option<(bool, CollapseHandler)>,
     chats: Vec<ChatItem>,
@@ -559,6 +560,7 @@ impl ChatSidebar {
             mark: None,
             pinned: Vec::new(),
             pinned_collapse: None,
+            keep_pins: false,
             projects: Vec::new(),
             projects_collapse: None,
             chats: Vec::new(),
@@ -936,6 +938,12 @@ impl ChatSidebar {
         handler: impl Fn(&bool, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.projects_collapse = Some((collapsed, Rc::new(handler)));
+        self
+    }
+
+    /// Keeps pinned chats listed under collapsed projects.
+    pub fn keep_pinned_when_collapsed(mut self, keep: bool) -> Self {
+        self.keep_pins = keep;
         self
     }
 

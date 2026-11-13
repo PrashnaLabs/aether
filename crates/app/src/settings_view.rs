@@ -571,8 +571,8 @@ impl ChatApp {
                     .iter()
                     .position(|s| *s == settings.sidebar_style)
                     .unwrap_or(0);
-                page = page.when(show("sidebar-style"), |page| {
-                    page.child(SettingsSection::new("Sidebar").icon(Icon::new(gpui_kit::assets::IconName::PanelLeft)).child(
+                page = page.when(show("sidebar-style") || show("sidebar-pins"), |page| {
+                    page.child(SettingsSection::new("Sidebar").icon(Icon::new(gpui_kit::assets::IconName::PanelLeft)).when(show("sidebar-style"), |section| section.child(
                         div().id("sidebar-style").debug_selector(|| "sidebar-style".into()).child(
                             SettingsRow::new("Style")
                                 .description(
@@ -591,7 +591,17 @@ impl ChatApp {
                                     cx,
                                 )),
                         ),
-                    ))
+                    )).when(show("sidebar-pins"), |section| section.child(div().id("sidebar-pins").debug_selector(|| "sidebar-pins".into()).child(SettingsRow::new("Pinned chats in collapsed projects")
+                        .description("Keep a project's pinned chats listed when the project is collapsed.")
+                        .control(
+                            Switch::new("sidebar-pins-setting")
+                                .checked(settings.sidebar_pins_when_collapsed)
+                                .accessibility_label("Pinned chats in collapsed projects")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    let checked = *checked;
+                                    this.update_settings(cx, |s| s.sidebar_pins_when_collapsed = checked);
+                                })),
+                        )))))
                 });
                 let chat_layout =
                     ChatLayout::ALL.iter().position(|l| *l == settings.chat_layout).unwrap_or(0);

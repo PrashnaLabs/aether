@@ -1034,6 +1034,8 @@ pub struct Settings {
     pub watch_corner: WatchCorner,
     /// Peek card x, y, width, height in window px; `None` opens it beside the FAB.
     pub watch_peek_bounds: Option<[f32; 4]>,
+    /// Pinned chats stay listed under a collapsed project.
+    pub sidebar_pins_when_collapsed: bool,
     /// Organization page, its shortcut, sidebar section and status item.
     pub org_enabled: bool,
     pub org_layout: OrgLayout,
@@ -1188,6 +1190,7 @@ impl Default for Settings {
             watchlist: Vec::new(),
             watch_corner: WatchCorner::BottomRight,
             watch_peek_bounds: None,
+            sidebar_pins_when_collapsed: true,
             org_enabled: false,
             org_layout: OrgLayout::Roster,
             org_pool: None,

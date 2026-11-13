@@ -170,6 +170,13 @@ static SETTING_CATALOG: &[SettingItem] = &[
         keywords: &["sidebar", "layout", "minimal", "focus", "default", "list"],
     },
     SettingItem {
+        id: "sidebar-pins",
+        tab: SettingsTab::Appearance,
+        title: "Pinned chats in collapsed projects",
+        description: "Keep a project's pinned chats listed when the project is collapsed.",
+        keywords: &["sidebar", "pin", "pinned", "collapsed", "project", "chats"],
+    },
+    SettingItem {
         id: "chat-layout",
         tab: SettingsTab::Appearance,
         title: "Chat layout",
