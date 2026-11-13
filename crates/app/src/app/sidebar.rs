@@ -586,6 +586,14 @@ impl ChatApp {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }
         let Some(org) = self.org_current() else { return sidebar };
+        let heads: Vec<i64> = org.heads.iter().filter_map(|h| h.chat).collect();
+        sidebar = sidebar.child_agents(
+            self.chats
+                .iter()
+                .filter(|c| !c.archived && c.parent.is_some_and(|p| heads.contains(&p)))
+                .map(|c| (c.id, 1))
+                .collect(),
+        );
         let section = "Heads".to_string();
         let now = now_ms();
         for head in &org.heads {
