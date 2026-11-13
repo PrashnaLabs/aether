@@ -666,7 +666,7 @@ fn mid_width_clips_resources_before_the_clock(cx: &mut TestAppContext) {
 }
 
 #[test]
-fn org_spend_counts_replies_to_turns_since_midnight() {
+fn org_spend_counts_replies_finished_since_midnight() {
     use aether_core::Message;
     let user = |at| {
         let mut m = Message::user("go");
@@ -682,4 +682,11 @@ fn org_spend_counts_replies_to_turns_since_midnight() {
     let prices = std::collections::HashMap::new();
     assert_eq!(spend_since(&messages, &prices, 100), 23);
     assert_eq!(spend_since(&messages, &prices, 0), 123);
+    let ran = |micros, ms| {
+        let mut m = reply(micros);
+        m.elapsed_ms = Some(ms);
+        m
+    };
+    let crossing = [user(90), ran(5, 20), user(95), ran(11, 2)];
+    assert_eq!(spend_since(&crossing, &prices, 100), 5);
 }

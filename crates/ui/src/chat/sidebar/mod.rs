@@ -422,6 +422,8 @@ struct ChatItem {
     pinned: bool,
     /// The Pinned section's copy; the in-place copy keeps the crew.
     pin: bool,
+    /// Coloured chip before the title, e.g. an org head's role.
+    badge: Option<(SharedString, Hsla)>,
     tally: Option<CrewSummary>,
     /// Providers across its crew, for the Minimal lead's avatar stack.
     providers: Vec<Provider>,
@@ -788,6 +790,7 @@ impl ChatSidebar {
             status,
             pinned,
             pin: false,
+            badge: None,
             tally: None,
             providers: Vec::new(),
             watched: self.watched.contains(&id),
@@ -1054,6 +1057,7 @@ impl ChatSidebar {
             status,
             pinned,
             pin: false,
+            badge: None,
             tally: None,
             providers: Vec::new(),
             watched: self.watched.contains(&id),
@@ -1081,6 +1085,19 @@ impl ChatSidebar {
             list.push(item);
         } else {
             self.custom_sections.push((section, vec![item]));
+        }
+        self
+    }
+
+    /// Puts a coloured chip before the title of the last chat added to `section`.
+    pub fn chat_badge(mut self, section: &str, text: impl Into<SharedString>, color: Hsla) -> Self {
+        if let Some(chat) = self
+            .custom_sections
+            .iter_mut()
+            .find(|(s, _)| s == section)
+            .and_then(|(_, l)| l.last_mut())
+        {
+            chat.badge = Some((text.into(), color));
         }
         self
     }

@@ -57,7 +57,7 @@ fn resource_item(
 
 pub(crate) use usage::UsagePop;
 
-/// Micros spent on replies to turns sent at or after `since_ms`; a reply takes its turn's time.
+/// Micros spent on replies finished at or after `since_ms` (end time, else turn time plus run time).
 pub(super) fn spend_since(
     messages: &[aether_core::Message],
     prices: &std::collections::HashMap<String, (f64, f64)>,
@@ -71,7 +71,8 @@ pub(super) fn spend_since(
                 turn = m.sent_at_ms;
                 return None;
             }
-            turn.is_some_and(|t| t >= since_ms).then(|| super::format::reply_spend(m, prices).0)
+            let at = m.ended_at_ms.or_else(|| turn.map(|t| t + m.elapsed_ms.unwrap_or(0) as i64));
+            at.is_some_and(|t| t >= since_ms).then(|| super::format::reply_spend(m, prices).0)
         })
         .sum()
 }

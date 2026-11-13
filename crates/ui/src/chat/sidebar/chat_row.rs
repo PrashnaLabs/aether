@@ -598,6 +598,7 @@ pub(super) fn render_chat(
         ));
     let line = chat.line.clone();
     let users = chat.lead && crew.is_none() && !child && line.is_none();
+    let badge = chat.badge.clone();
     let tip = match line {
         Some(_) => None,
         None => (title.chars().count() > LONG_TITLE).then(|| title.clone()),
@@ -624,7 +625,7 @@ pub(super) fn render_chat(
                     })
                     .when_some(tip, |el, tip| el.tooltip(tooltip(tip)))
                     .child(title);
-                if !users {
+                if !users && badge.is_none() {
                     return title.into_any_element();
                 }
                 h_flex()
@@ -632,14 +633,27 @@ pub(super) fn render_chat(
                     .min_w_0()
                     .gap_1()
                     .items_center()
-                    .child(
+                    .when(users, |el| {
+                        el.child(
+                            div()
+                                .id(("chat-lead", ix))
+                                .debug_selector(|| format!("chat-lead-{ix}"))
+                                .flex_none()
+                                .tooltip(tooltip("Lead".into()))
+                                .child(Icon::new(Lucide::Users).size(rems(0.75)).text_color(muted)),
+                        )
+                    })
+                    .children(badge.clone().map(|(text, color)| {
                         div()
-                            .id(("chat-lead", ix))
-                            .debug_selector(|| format!("chat-lead-{ix}"))
                             .flex_none()
-                            .tooltip(tooltip("Lead".into()))
-                            .child(Icon::new(Lucide::Users).size(rems(0.75)).text_color(muted)),
-                    )
+                            .px_1()
+                            .corner(px(3.))
+                            .bg(color.opacity(0.18))
+                            .text_color(color)
+                            .text_size(px(10.))
+                            .font_bold()
+                            .child(text)
+                    }))
                     .child(title)
                     .into_any_element()
             }

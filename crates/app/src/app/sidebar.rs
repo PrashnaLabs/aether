@@ -493,9 +493,10 @@ impl ChatApp {
             }
         }
         sidebar = sidebar.pins_only();
+        let heads = self.org_section_heads();
         for ix in (0..self.chats.len()).rev() {
             let chat = &self.chats[ix];
-            if chat.pinned && !chat.archived && chat.is_agent() {
+            if chat.pinned && !chat.archived && chat.is_agent() && !heads.contains(&chat.id) {
                 sidebar =
                     self.chat_row(sidebar, ix, None, None, self.chat_line(ix, false, now), cx);
             }
@@ -579,7 +580,7 @@ impl ChatApp {
                 section.clone(),
                 ix,
                 chat.id,
-                format!("[{}] {}", crate::org::model::role_badge(&head.role), head.title),
+                head.title.clone(),
                 false,
                 chat.status(now),
                 false,
@@ -596,8 +597,20 @@ impl ChatApp {
                 None,
                 None,
             );
+            sidebar = sidebar.chat_badge(
+                &section,
+                crate::org::model::role_badge(&head.role),
+                gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
+            );
         }
         sidebar
+    }
+
+    /// Head chats listed in the org section, left out of Pinned so they show once.
+    fn org_section_heads(&self) -> Vec<i64> {
+        self.org_current()
+            .filter(|_| self.settings.org_enabled)
+            .map_or_else(Vec::new, |org| org.heads.iter().filter_map(|h| h.chat).collect())
     }
 
     /// Leaving an empty search field folds it back into its Search row.
@@ -657,11 +670,12 @@ impl ChatApp {
         let row = |sidebar: ChatSidebar, section: &str, ix: usize, cx: &mut Context<Self>| {
             self.section_chat_row(sidebar, section.to_string(), ix, now, cx)
         };
+        let heads = self.org_section_heads();
         let pinned: Vec<usize> = (0..self.chats.len())
             .rev()
             .filter(|&ix| {
                 let chat = &self.chats[ix];
-                chat.pinned && !chat.archived && chat.is_agent()
+                chat.pinned && !chat.archived && chat.is_agent() && !heads.contains(&chat.id)
             })
             .collect();
         let (groups, _) = self.project_groups();
