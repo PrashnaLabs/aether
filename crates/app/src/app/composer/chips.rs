@@ -294,10 +294,6 @@ impl ChatApp {
                         .children(kids.into_iter().map(|ix| {
                             let child = &self.chats[ix];
                             let id = child.id;
-                            let title = match child.title.char_indices().nth(24) {
-                                Some((i, _)) => format!("{}…", &child.title[..i]),
-                                None => child.title.to_string(),
-                            };
                             composer_chip(("crew-chip", id as u64), false, cx)
                                 .w_full()
                                 .justify_start()
@@ -309,15 +305,22 @@ impl ChatApp {
                                 .child(
                                     h_flex()
                                         .w_full()
-                                        .justify_start()
-                                        .gap_1()
+                                        .min_w_0()
+                                        .gap_1p5()
+                                        .items_center()
                                         .child(provider_icon(child.provider).size_3p5().flex_none())
-                                        .child(div().min_w_0().text_ellipsis().child(title))
-                                        .child(child.status(now).badge(
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .truncate()
+                                                .child(child.title.clone()),
+                                        )
+                                        .child(div().flex_none().child(child.status(now).badge(
                                             ("crew-status", ix),
                                             Some(now),
                                             cx,
-                                        )),
+                                        ))),
                                 )
                                 .debug_selector(move || format!("crew-chip-{id}"))
                                 .on_click(self.session_listener(cx, move |this, _, window, cx| {
