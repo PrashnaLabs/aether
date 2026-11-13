@@ -387,6 +387,8 @@ impl ChatApp {
         // a draft bound to or still making a worktree is about to send there, so it isn't reused
         if let Some(ix) = self.chats.iter().position(|c| {
             c.workspace_draft_ready()
+                && !c.lead
+                && !c.pinned
                 && c.draft.trim().is_empty()
                 && c.pending.is_empty()
                 && self.workspace.model.pane_for(c.id).is_none()

@@ -286,8 +286,18 @@ impl ChatApp {
         }
         let mut heads = spec.heads;
         heads.sort_by_key(|h| h.role != "CEO");
-        for head in &mut heads {
-            head.chat = Some(self.org_head_chat(&project, head, window, cx)?);
+        for i in 0..heads.len() {
+            match self.org_head_chat(&project, &heads[i], window, cx) {
+                Ok(chat) => heads[i].chat = Some(chat),
+                Err(e) => {
+                    for chat in heads.iter().filter_map(|h| h.chat) {
+                        if let Some(ix) = self.chat_ix(chat) {
+                            self.archive_chat(ix, window, cx);
+                        }
+                    }
+                    return Err(e);
+                }
+            }
         }
         let roles: Vec<String> = heads.iter().map(|h| h.role.clone()).collect();
         self.org.orgs.push(Org {

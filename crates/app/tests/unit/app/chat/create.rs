@@ -702,3 +702,46 @@ fn duplicate_dispatch_consumes_and_persists_native_fork(cx: &mut gpui_kit::TestA
         .unwrap();
     let _ = std::fs::remove_file(path);
 }
+
+#[gpui_kit::test]
+fn new_chat_does_not_reuse_an_empty_lead_or_pinned_chat(cx: &mut gpui_kit::TestAppContext) {
+    use aether_agent::Agent;
+    use aether_core::Settings;
+    use gpui_kit::AppContext;
+
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let (window, app) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            cx.new(|cx| {
+                ChatApp::with_state(
+                    Agent::new().unwrap(),
+                    Settings::default(),
+                    None,
+                    None,
+                    false,
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            for (id, lead, pinned) in [(-1, true, false), (-2, false, true)] {
+                let mut head = chat_with("Head", &[]);
+                head.id = id;
+                head.lead = lead;
+                head.pinned = pinned;
+                app.chats.push(head);
+            }
+            app.new_chat(window, cx);
+            let made = app.chats[app.active].id;
+            assert!(made != -1 && made != -2, "reused a head chat");
+            assert_eq!(app.chats.iter().find(|c| c.id == -1).unwrap().title.as_ref(), "Head");
+            assert_eq!(app.chats.iter().find(|c| c.id == -2).unwrap().title.as_ref(), "Head");
+        });
+    })
+    .unwrap();
+}
