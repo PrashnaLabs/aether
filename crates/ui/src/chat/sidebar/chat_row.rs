@@ -616,7 +616,7 @@ pub(super) fn render_chat(
             None => {
                 let title = div()
                     .id(("chat-title", ix))
-                    .flex_1()
+                    .when(!pinned, |el| el.flex_1())
                     .min_w_0()
                     .truncate()
                     .when(removed, |el| el.text_color(muted))
@@ -662,8 +662,9 @@ pub(super) fn render_chat(
                                 .id(("chat-pinned", ix))
                                 .flex_none()
                                 .tooltip(tooltip("Pinned".into()))
-                                .child(Icon::new(Lucide::Pin).size(rems(0.75)).text_color(muted)),
+                                .child(Icon::new(Lucide::Pin).size(rems(0.6875)).text_color(muted)),
                         )
+                        .child(div().flex_1())
                     })
                     .into_any_element()
             }

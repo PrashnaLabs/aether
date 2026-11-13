@@ -360,7 +360,7 @@ impl ProjectRow {
                 .child(
                     h_flex()
                         .h(rems(1.25))
-                        .gap_2()
+                        .gap_1p5()
                         .items_center()
                         .child(
                             div()
@@ -370,7 +370,7 @@ impl ProjectRow {
                                 } else {
                                     cx.theme().sidebar_foreground
                                 })
-                                .flex_1()
+                                .flex_shrink(1.)
                                 .min_w_0()
                                 .truncate()
                                 .font_semibold()
@@ -384,10 +384,11 @@ impl ProjectRow {
                                     .flex_none()
                                     .tooltip(tooltip("Pinned".into()))
                                     .child(
-                                        Icon::new(Lucide::Pin).size(rems(0.75)).text_color(muted),
+                                        Icon::new(Lucide::Pin).size(rems(0.6875)).text_color(muted),
                                     ),
                             )
-                        }),
+                        })
+                        .child(div().flex_1()),
                 )
                 .children(git)
                 .children(no_git),
