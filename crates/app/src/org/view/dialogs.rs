@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use aether_core::{OrgHire, Provider};
-use aether_ui::{field, field_area};
+use aether_ui::{AgentSelector, AgentSelectorEvent, AgentSelectorState, field, field_area};
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputState, TextareaState};
@@ -13,7 +13,7 @@ use gpui_kit::{
     div, prelude::*, px, rgb,
 };
 
-use crate::app::{CLIS, ChatApp};
+use crate::app::{CLIS, ChatApp, Page, stored_model};
 use crate::board::model::Col;
 use crate::org::model::{
     Head, HireSpec, OrgSpec, ROLES, TEMPLATES, hire_checks, memory_path, models, role_file_text,
@@ -22,6 +22,7 @@ use crate::org::model::{
 use crate::org::view::shared::{avatar, report};
 use crate::org::{OrgOverlay, org_dir};
 use crate::project_page::view::pill;
+use crate::settings_view::SettingsTab;
 
 const STEPS: [&str; 4] = ["Template", "Staff", "Rules", "Review"];
 const GREEN: u32 = 0x3fb950;
@@ -29,12 +30,9 @@ const RED: u32 = 0xf85149;
 const BLUE: u32 = 0x58a6ff;
 
 type Pick<T> = Rc<dyn Fn(&mut ChatApp, T, &mut Window, &mut Context<ChatApp>)>;
-type StaffInputs = Vec<(String, Entity<InputState>, Entity<InputState>)>;
-
-/// Dollar amount typed as `12`, `12.5` or `$12`.
-pub(crate) fn parse_usd(text: &str) -> Option<f64> {
-    text.trim().trim_start_matches('$').trim().parse().ok().filter(|v: &f64| *v >= 0.)
-}
+type StaffInputs = Vec<(String, Entity<InputState>)>;
+/// Edits a provider, model and effort held somewhere in the app.
+type Agent<'a> = &'a mut dyn FnMut(&mut Provider, &mut String, &mut String);
 
 pub(crate) fn parse_count(text: &str) -> Option<usize> {
     text.trim().parse().ok()
@@ -57,7 +55,6 @@ struct RulesForm {
     pool: Entity<InputState>,
     builds: Entity<InputState>,
     per_head: Entity<InputState>,
-    budget: Entity<InputState>,
     rotate: Entity<InputState>,
     goal: Entity<InputState>,
 }
@@ -66,7 +63,6 @@ struct HeadForm {
     head: Head,
     title: Entity<InputState>,
     owns: Entity<InputState>,
-    budget: Entity<InputState>,
     workers: Entity<InputState>,
     role_text: Entity<TextareaState>,
     memory: String,
@@ -94,10 +90,6 @@ fn value(input: &Entity<InputState>, cx: &App) -> String {
 
 fn set(input: &Entity<InputState>, text: String, window: &mut Window, cx: &mut App) {
     input.update(cx, |s, cx| s.set_value(text, window, cx));
-}
-
-fn usd(v: f64) -> String {
-    format!("${v}")
 }
 
 /// Dropdown of `options`; picking one runs `pick`.
@@ -156,8 +148,8 @@ fn row2(a: impl IntoElement, b: impl IntoElement) -> Div {
     h_flex().gap(px(12.)).items_start().child(a).child(b)
 }
 
-fn staff_row(cells: [AnyElement; 7], border: Hsla) -> Div {
-    let widths = [Some(22.), None, Some(130.), Some(190.), Some(120.), Some(80.), Some(28.)];
+fn staff_row(cells: [AnyElement; 5], border: Hsla) -> Div {
+    let widths = [Some(22.), None, Some(260.), Some(120.), Some(28.)];
     h_flex().gap(px(8.)).py(px(7.)).items_center().border_b_1().border_color(border).children(
         cells.into_iter().zip(widths).map(|(cell, w)| match w {
             Some(w) => div().w(px(w)).flex_none().child(cell),
@@ -211,54 +203,60 @@ impl ChatApp {
             .into_any_element()
     }
 
-    /// Installed CLI providers, `current` always included.
-    fn org_providers(&self, current: Provider) -> Vec<Provider> {
-        let mut out: Vec<Provider> = CLIS
-            .into_iter()
-            .filter(|p| self.probes.get(p).is_none_or(|probe| probe.installed))
-            .collect();
-        if !out.contains(&current) {
-            out.insert(0, current);
-        }
-        out
-    }
-
-    /// Probed models of `provider`, else the built-in list; `current` always included.
-    fn org_models(&self, provider: Provider, current: &str) -> Vec<String> {
-        let mut out: Vec<String> = match self.probes.get(&provider) {
-            Some(p) if !p.models.is_empty() => p.models.iter().map(|m| m.id.clone()).collect(),
-            _ => models(provider).iter().map(|m| m.to_string()).collect(),
-        };
-        if !current.is_empty() && !out.iter().any(|m| m == current) {
-            out.insert(0, current.into());
-        }
-        out
-    }
-
-    fn provider_select(
+    /// The composer's agent picker over the lead CLIs; its Reasoning row offers the model's efforts.
+    #[allow(clippy::too_many_arguments)]
+    fn agent_picker(
         &self,
-        id: ElementId,
-        current: Provider,
-        cx: &mut Context<Self>,
-        pick: impl Fn(&mut ChatApp, Provider, String, &mut Window, &mut Context<ChatApp>) + 'static,
-    ) -> AnyElement {
-        let options = self.org_providers(current).into_iter().map(|p| (p, p.label().into()));
-        select(id, current, options.collect(), cx, move |this, p, window, cx| {
-            let model = this.org_models(p, "").into_iter().next().unwrap_or_default();
-            pick(this, p, model, window, cx)
-        })
-    }
-
-    fn model_select(
-        &self,
-        id: ElementId,
+        key: String,
         provider: Provider,
-        current: &str,
+        model: &str,
+        effort: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
-        pick: impl Fn(&mut ChatApp, String, &mut Window, &mut Context<ChatApp>) + 'static,
+        edit: impl Fn(&mut ChatApp, Agent<'_>, &mut Context<ChatApp>) + 'static,
     ) -> AnyElement {
-        let options = self.org_models(provider, current).into_iter().map(|m| (m.clone(), m));
-        select(id, current.to_string(), options.collect(), cx, pick)
+        let app = cx.entity().downgrade();
+        let state = window.use_keyed_state(ElementId::Name(key.into()), cx, |window, cx| {
+            cx.subscribe_self(move |_, ev: &AgentSelectorEvent, cx| {
+                app.update(cx, |this, cx| {
+                    match ev {
+                        AgentSelectorEvent::Pick { provider, model } => {
+                            let model = stored_model(*provider, model);
+                            let efforts = this.model_efforts(*provider, &model);
+                            let pick = &mut |p: &mut Provider, m: &mut String, e: &mut String| {
+                                (*p, *m) = (*provider, model.clone());
+                                if !efforts.contains(e) {
+                                    e.clear();
+                                }
+                            };
+                            edit(this, pick, cx)
+                        }
+                        AgentSelectorEvent::Effort(level) => {
+                            edit(this, &mut |_, _, e| *e = level.clone(), cx)
+                        }
+                        AgentSelectorEvent::ToggleFavorite { provider, model } => {
+                            this.toggle_favorite(*provider, model, cx)
+                        }
+                        AgentSelectorEvent::OpenSettings => {
+                            this.org.overlay = OrgOverlay::None;
+                            this.settings_tab = SettingsTab::Providers;
+                            this.open_page(Page::Settings, cx);
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+            AgentSelectorState::new(window, cx)
+        });
+        let (providers, picked) = self.selector_rows(&CLIS, provider, model);
+        let efforts = self.model_efforts(provider, model);
+        let (favorites, effort) = (self.settings.favorite_models.clone(), effort.to_string());
+        state.update(cx, |s, cx| {
+            s.sync(providers, favorites, provider, picked, efforts, effort, cx)
+        });
+        AgentSelector::new(&state).into_any_element()
     }
 
     fn org_wizard_draft(&mut self) -> Option<&mut OrgSpec> {
@@ -279,14 +277,11 @@ impl ChatApp {
     /// Writes the Staff inputs into the draft, then moves to `step`.
     fn org_wizard_go(&mut self, step: usize, staff: &StaffInputs, cx: &mut Context<Self>) {
         if let OrgOverlay::Wizard { step: at, draft } = &mut self.org.overlay {
-            for (role, title, budget) in staff {
+            for (role, title) in staff {
                 let Some(h) = draft.heads.iter_mut().find(|h| &h.role == role) else { continue };
                 let title = value(title, cx);
                 if !title.is_empty() {
                     h.title = title;
-                }
-                if let Some(v) = parse_usd(&value(budget, cx)) {
-                    h.budget_usd = v;
                 }
             }
             *at = step;
@@ -305,7 +300,6 @@ impl ChatApp {
         let pool = if f.manual { parse_count(&value(&f.pool, cx)).map(|n| n.max(1)) } else { None };
         let builds = parse_count(&value(&f.builds, cx));
         let per_head = parse_count(&value(&f.per_head, cx));
-        let budget = parse_usd(&value(&f.budget, cx));
         let rotate = parse_count(&value(&f.rotate, cx)).map(|n| n.clamp(10, 100) as u8);
         let hire = f.hire;
         spec.goal = value(&f.goal, cx);
@@ -314,7 +308,6 @@ impl ChatApp {
             s.org_hire = hire;
             s.org_builds = builds.unwrap_or(s.org_builds).max(1);
             s.org_workers_per_head = per_head.unwrap_or(s.org_workers_per_head);
-            s.org_budget_usd = budget.unwrap_or(s.org_budget_usd);
             s.org_rotate_at = rotate.unwrap_or(s.org_rotate_at);
         });
         for h in &mut spec.heads {
@@ -335,23 +328,15 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let s = &self.settings;
-        let init = (
-            s.org_pool,
-            s.org_builds,
-            s.org_workers_per_head,
-            s.org_hire,
-            s.org_budget_usd,
-            s.org_rotate_at,
-        );
+        let init = (s.org_pool, s.org_builds, s.org_workers_per_head, s.org_hire, s.org_rotate_at);
         let rules = window.use_keyed_state("org-wizard-rules", cx, move |window, cx| {
-            let (pool, builds, per_head, hire, budget, rotate) = init;
+            let (pool, builds, per_head, hire, rotate) = init;
             RulesForm {
                 manual: pool.is_some(),
                 hire,
                 pool: new_input(pool.unwrap_or(3).to_string(), window, cx),
                 builds: new_input(builds.to_string(), window, cx),
                 per_head: new_input(per_head.to_string(), window, cx),
-                budget: new_input(usd(budget), window, cx),
                 rotate: new_input(rotate.to_string(), window, cx),
                 goal: cx.new(|cx| {
                     InputState::new(window, cx)
@@ -370,13 +355,7 @@ impl ChatApp {
                         window,
                         cx,
                     );
-                    let budget = keyed_input(
-                        format!("org-wiz-budget-{}", h.role),
-                        usd(h.budget_usd),
-                        window,
-                        cx,
-                    );
-                    (h.role.clone(), title, budget)
+                    (h.role.clone(), title)
                 })
                 .collect()
         } else {
@@ -385,7 +364,7 @@ impl ChatApp {
         let muted = cx.theme().muted_foreground;
         let body = match step {
             0 => self.wizard_templates(draft, cx).into_any_element(),
-            1 => self.wizard_staff(draft, &staff, cx).into_any_element(),
+            1 => self.wizard_staff(draft, &staff, window, cx).into_any_element(),
             2 => self.wizard_rules(&rules, cx).into_any_element(),
             _ => self.wizard_review(draft, &rules, cx).into_any_element(),
         };
@@ -525,13 +504,13 @@ impl ChatApp {
         &self,
         draft: &OrgSpec,
         staff: &StaffInputs,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme();
         let (muted, border) = (theme.muted_foreground, theme.border);
         let header = staff_row(
-            ["", "Role", "Provider", "Model", "Reviewed by", "Budget/day", ""]
-                .map(|t| t.into_any_element()),
+            ["", "Role", "Model", "Reviewed by", ""].map(|t| t.into_any_element()),
             border,
         )
         .text_size(px(11.))
@@ -541,27 +520,21 @@ impl ChatApp {
             .heads
             .iter()
             .zip(staff)
-            .map(|(h, (_, title, budget))| {
+            .map(|(h, (_, title))| {
                 let role = h.role.clone();
                 let r = role.clone();
-                let provider = self.provider_select(
-                    ElementId::Name(format!("org-wiz-prov-{role}").into()),
-                    h.provider,
-                    cx,
-                    move |this, p, m, _, _| {
-                        this.org_wizard_head(&r, |h| {
-                            h.provider = p;
-                            h.model = m;
-                        })
-                    },
-                );
-                let r = role.clone();
-                let model = self.model_select(
-                    ElementId::Name(format!("org-wiz-model-{role}").into()),
+                let agent = self.agent_picker(
+                    format!("org-wiz-agent-{role}"),
                     h.provider,
                     &h.model,
+                    &h.effort,
+                    window,
                     cx,
-                    move |this, m, _, _| this.org_wizard_head(&r, |h| h.model = m),
+                    move |this, f, _| {
+                        this.org_wizard_head(&r, |h| {
+                            f(&mut h.provider, &mut h.model, &mut h.effort)
+                        })
+                    },
                 );
                 let options = std::iter::once((None, "You".to_string())).chain(
                     roles.iter().filter(|x| **x != role).map(|x| (Some(x.clone()), x.clone())),
@@ -597,10 +570,8 @@ impl ChatApp {
                     [
                         avatar(&role, 22.).into_any_element(),
                         field(title).small().into_any_element(),
-                        provider.into_any_element(),
-                        model.into_any_element(),
+                        agent,
                         reviewer.into_any_element(),
-                        field(budget).small().into_any_element(),
                         remove.into_any_element(),
                     ],
                     border,
@@ -652,13 +623,8 @@ impl ChatApp {
         self.settings.org_pool = saved;
         let f = rules.read(cx);
         let (manual, hire) = (f.manual, f.hire);
-        let (pool, builds, per_head, budget, rotate) = (
-            f.pool.clone(),
-            f.builds.clone(),
-            f.per_head.clone(),
-            f.budget.clone(),
-            f.rotate.clone(),
-        );
+        let (pool, builds, per_head, rotate) =
+            (f.pool.clone(), f.builds.clone(), f.per_head.clone(), f.rotate.clone());
         let form = rules.clone();
         let pool_pick = select(
             "org-wiz-pool",
@@ -696,11 +662,9 @@ impl ChatApp {
             .child(row2(
                 labeled("Workers per head", small(&per_head, 80.), muted),
                 labeled("Hiring beyond the per-head cap", hire_pick, muted)
-                    .child(help("Rules: has a card, pool has a slot, head under budget.", muted)),
+                    .child(help("Rules: has a card, head under its cap, pool has a slot.", muted)),
             ))
             .child(row2(
-                labeled("Org budget per day", small(&budget, 90.), muted)
-                    .child(help("Heads pause and ask you at 100%.", muted)),
                 labeled(
                     "Rotate a head's session at",
                     h_flex()
@@ -713,6 +677,7 @@ impl ChatApp {
                     "Head writes its memory file, then starts fresh with the same role.",
                     muted,
                 )),
+                div().flex_1(),
             ))
     }
 
@@ -815,7 +780,6 @@ impl ChatApp {
             HeadForm {
                 title: new_input(head.title.clone(), window, cx),
                 owns: new_input(head.owns.clone(), window, cx),
-                budget: new_input(usd(head.budget_usd), window, cx),
                 workers: new_input(head.max_workers.to_string(), window, cx),
                 role_text: cx.new(|cx| {
                     let mut s = TextareaState::new(window, cx).auto_grow(10, 18);
@@ -828,10 +792,9 @@ impl ChatApp {
         });
         let f = form.read(cx);
         let head = f.head.clone();
-        let (title, owns, budget, workers, role_text, memory) = (
+        let (title, owns, workers, role_text, memory) = (
             f.title.clone(),
             f.owns.clone(),
-            f.budget.clone(),
             f.workers.clone(),
             f.role_text.clone(),
             f.memory.clone(),
@@ -860,24 +823,19 @@ impl ChatApp {
             move |_, v, _, cx| fm.update(cx, |f, _| f.head.reviewer = v),
         );
         let fm = form.clone();
-        let provider = self.provider_select(
-            "org-head-prov".into(),
-            head.provider,
-            cx,
-            move |_, p, m, _, cx| {
-                fm.update(cx, |f, _| {
-                    f.head.provider = p;
-                    f.head.model = m;
-                })
-            },
-        );
-        let fm = form.clone();
-        let model = self.model_select(
-            "org-head-model".into(),
+        let agent = self.agent_picker(
+            "org-head-agent".into(),
             head.provider,
             &head.model,
+            &head.effort,
+            window,
             cx,
-            move |_, m, _, cx| fm.update(cx, |f, _| f.head.model = m),
+            move |_, f, cx| {
+                fm.update(cx, |form, _| {
+                    let h = &mut form.head;
+                    f(&mut h.provider, &mut h.model, &mut h.effort)
+                })
+            },
         );
         let role_pick = adding.then(|| {
             let free: Vec<(String, String)> = ROLES
@@ -892,16 +850,10 @@ impl ChatApp {
                 select("org-head-role", head.role.clone(), free, cx, move |_, r, window, cx| {
                     let h = Head::new(&r, per_head);
                     let f = fm.read(cx);
-                    let (t, o, b, w, rt) = (
-                        f.title.clone(),
-                        f.owns.clone(),
-                        f.budget.clone(),
-                        f.workers.clone(),
-                        f.role_text.clone(),
-                    );
+                    let (t, o, w, rt) =
+                        (f.title.clone(), f.owns.clone(), f.workers.clone(), f.role_text.clone());
                     set(&t, h.title.clone(), window, cx);
                     set(&o, h.owns.clone(), window, cx);
-                    set(&b, usd(h.budget_usd), window, cx);
                     set(&w, h.max_workers.to_string(), window, cx);
                     let text = role_file_text(&h);
                     rt.update(cx, |s, cx| s.set_value(text, window, cx));
@@ -932,16 +884,12 @@ impl ChatApp {
                 labeled("Reviewed by", reviewer, muted),
             ))
             .child(row2(
-                labeled("Provider", provider, muted),
                 labeled(
                     h_flex().gap(px(6.)).child("Model").child(pill("pinned".into(), pinned.opacity(0.15), pinned)),
-                    model,
+                    agent,
                     muted,
                 )
                 .child(help("Changing it hands the session off; the role and memory carry over.", muted)),
-            ))
-            .child(row2(
-                labeled("Budget per day", field(&budget).small(), muted),
                 labeled("Max workers", field(&workers).small(), muted),
             ))
             .child(labeled("Owns", field(&owns).small(), muted))
@@ -975,7 +923,6 @@ impl ChatApp {
                     h.title = title;
                 }
                 h.owns = value(&f.owns, cx);
-                h.budget_usd = parse_usd(&value(&f.budget, cx)).unwrap_or(h.budget_usd);
                 h.max_workers = parse_count(&value(&f.workers, cx)).unwrap_or(h.max_workers);
                 let text = f.role_text.read(cx).value().to_string();
                 let result = if adding {
@@ -1133,23 +1080,20 @@ impl ChatApp {
                     d.card = c;
                 }
             });
-        let providers = self.org_providers(head.map_or(Provider::Claude, |h| h.provider));
-        let options: Vec<((Provider, String), String)> = hire_models(&providers)
-            .into_iter()
-            .map(|(p, m)| ((p, m.to_string()), format!("{} / {m}", p.key())))
-            .collect();
-        let chosen = if draft.model.is_empty() {
-            options.first().map(|o| o.0.clone()).unwrap_or((draft.provider, String::new()))
-        } else {
-            (draft.provider, draft.model.clone())
-        };
-        let model_pick =
-            select("org-hire-model", chosen.clone(), options, cx, |this, (p, m), _, _| {
+        let chosen = (draft.provider, draft.model.clone());
+        let model_pick = self.agent_picker(
+            "org-hire-agent".into(),
+            chosen.0,
+            &chosen.1,
+            &draft.effort,
+            window,
+            cx,
+            |this, f, _| {
                 if let Some(d) = this.org_hire_draft() {
-                    d.provider = p;
-                    d.model = m;
+                    f(&mut d.provider, &mut d.model, &mut d.effort)
                 }
-            });
+            },
+        );
         let (busy, cap) = (self.org_pool_busy(), self.org_pool_cap());
         let mut checks = vec![];
         if let Some(h) = head {
@@ -1159,11 +1103,6 @@ impl ChatApp {
                 .filter(|c| c.parent.is_some() && c.parent == h.chat && !c.archived && c.busy())
                 .count();
             checks = hire_checks(h, draft.card, running, busy, cap);
-            let spent = h.chat.map_or(0., |id| self.org_spend(id));
-            checks.push((
-                format!("Budget left ${:.2}", (h.budget_usd - spent).max(0.)),
-                spent < h.budget_usd,
-            ));
         }
         let free = busy < cap;
         let body = v_flex()

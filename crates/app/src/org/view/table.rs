@@ -186,17 +186,13 @@ impl ChatApp {
     fn org_seat(&self, head: &Head, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let spend = head.chat.map_or(0., |id| self.org_spend(id));
-        let ring: Hsla = if spend >= head.budget_usd {
-            rgb(0xf85149).into()
-        } else {
-            match self.org_head_status(head) {
-                ChatStatus::Starting | ChatStatus::Working { .. } | ChatStatus::Quiet { .. } => {
-                    rgb(0x58a6ff).into()
-                }
-                ChatStatus::Waiting | ChatStatus::Retrying => rgb(0xf5a524).into(),
-                ChatStatus::Failed => rgb(0xf85149).into(),
-                _ => theme.border,
+        let ring: Hsla = match self.org_head_status(head) {
+            ChatStatus::Starting | ChatStatus::Working { .. } | ChatStatus::Quiet { .. } => {
+                rgb(0x58a6ff).into()
             }
+            ChatStatus::Waiting | ChatStatus::Retrying => rgb(0xf5a524).into(),
+            ChatStatus::Failed => rgb(0xf85149).into(),
+            _ => theme.border,
         };
         let doing = short(&self.org_head_doing(head), 34);
         let workers: Vec<bool> = head
@@ -255,7 +251,7 @@ impl ChatApp {
                 div()
                     .text_size(px(11.))
                     .text_color(theme.muted_foreground)
-                    .child(format!("{} · ${spend:.2}/${:.0}", head.model, head.budget_usd)),
+                    .child(format!("{} · ${spend:.2} today", head.model)),
             )
             .child(div().text_size(px(11.)).text_color(theme.foreground).opacity(0.7).child(doing))
             .child(h_flex().mt(px(5.)).gap(px(3.)).children(slots))

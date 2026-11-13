@@ -4,7 +4,7 @@ use gpui_kit::{
     AnyElement, App, Context, FontWeight, SharedString, Window, div, prelude::*, px, rgb,
 };
 
-use super::shared::{avatar, context_bar, report, spend_bar, status_dot};
+use super::shared::{avatar, context_bar, report, status_dot};
 use crate::app::{ChatApp, now_ms};
 use crate::board::model::BoardCard;
 use crate::org::model::{Head, Org};
@@ -142,10 +142,9 @@ impl ChatApp {
                     .mb(px(3.))
                     .text_size(px(11.))
                     .text_color(muted)
-                    .child(format!("${spent:.2} of ${:.0}", head.budget_usd))
+                    .child(format!("${spent:.2} today"))
                     .child(format!("ctx {ctx}%")),
-            )
-            .child(spend_bar(spent, head.budget_usd, cx));
+            );
         let chips: Vec<_> = self
             .chart_workers(head)
             .into_iter()
@@ -247,7 +246,6 @@ impl ChatApp {
             .map(|c| format!("#{}", c.id))
             .collect();
         let reviewer = head.reviewer.as_deref().map_or("You".to_string(), |r| r.to_string());
-        let over = head.budget_usd > 0. && spent / head.budget_usd >= 0.8;
         let role = head.role.clone();
         let chat = head.chat;
         v_flex()
@@ -282,14 +280,7 @@ impl ChatApp {
                     .child(kv("Doing", self.org_head_doing(head), cx))
                     .child(kv("Owns", div().text_color(muted).child(head.owns.clone()), cx))
                     .child(kv("Reviewed by", reviewer, cx))
-                    .child(kv(
-                        "Spend today",
-                        h_flex()
-                            .gap(px(6.))
-                            .child(format!("${spent:.2} of ${:.0}", head.budget_usd))
-                            .when(over, |c| c.child(pill("80%+"))),
-                        cx,
-                    ))
+                    .child(kv("Spend today", format!("${spent:.2}"), cx))
                     .child(kv(
                         "Context",
                         v_flex()

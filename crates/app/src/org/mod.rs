@@ -101,6 +101,7 @@ fn hire_args(spec: &HireSpec, nonce: Option<String>) -> Value {
     let mut args = json!({
         "provider": spec.provider.key(),
         "model": spec.model,
+        "effort": spec.effort,
         "title": spec.title,
         "task": spec.task,
         "worktree": spec.worktree,
@@ -508,6 +509,7 @@ impl ChatApp {
             why: req.why.clone(),
             provider: req.provider,
             model: req.model.clone(),
+            effort: String::new(),
             worktree: true,
         };
         let name = format!("#{} \"{}\"", req.id, req.title);
@@ -593,14 +595,6 @@ impl ChatApp {
                 .filter(|c| c.project == org.project && c.col == Col::Review)
                 .map(|c| NeedsYou::Review { card: c.id }),
         );
-        out.extend(
-            org.heads
-                .iter()
-                .filter(|h| {
-                    h.budget_usd > 0. && h.chat.is_some_and(|c| self.org_spend(c) >= h.budget_usd)
-                })
-                .map(|h| NeedsYou::Budget { role: h.role.clone() }),
-        );
         out
     }
 
@@ -648,6 +642,7 @@ impl ChatApp {
             why: text("why"),
             provider,
             model,
+            effort: text("effort"),
             worktree: true,
         };
         let running = self.running_children(lead_ix);

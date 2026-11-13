@@ -478,13 +478,6 @@ static SETTING_CATALOG: &[SettingItem] = &[
         keywords: &["org", "hire", "hiring", "rules", "approve", "ask"],
     },
     SettingItem {
-        id: "org-budget",
-        tab: SettingsTab::Organization,
-        title: "Org budget per day",
-        description: "Warns you when the org's spend today reaches it.",
-        keywords: &["org", "budget", "spend", "cost", "dollars"],
-    },
-    SettingItem {
         id: "org-rotate",
         tab: SettingsTab::Organization,
         title: "Rotate a head's session at",

@@ -294,20 +294,24 @@ impl ChatApp {
         }
     }
 
-    /// Pushes every provider's rows, favorites and the active chat's choice to the selector.
-    pub(crate) fn sync_selector(&self, cx: &mut Context<Self>) {
-        let chat = &self.chats[self.active];
-        let current = chat.provider;
-        let mut model = SharedString::default();
-        let providers = Provider::ALL
-            .map(|provider| {
+    /// Selector tabs for `providers`, `model` kept selectable under `current`; plus its row id.
+    pub(crate) fn selector_rows(
+        &self,
+        providers: &[Provider],
+        current: Provider,
+        model: &str,
+    ) -> (Vec<ProviderModels>, SharedString) {
+        let mut picked = SharedString::default();
+        let rows = providers
+            .iter()
+            .map(|&provider| {
                 let mut items = self.model_items(provider);
                 if provider == current {
-                    let value = picker_value(provider, &chat.model(&self.settings), &items);
+                    let value = picker_value(provider, model, &items);
                     if !value.is_empty() && !items.iter().any(|item| item.id == value) {
                         items.insert(0, ModelItem::custom(value.clone()));
                     }
-                    model = value.into();
+                    picked = value.into();
                 }
                 let installed = self.probes.get(&provider).map(|probe| probe.installed);
                 ProviderModels {
@@ -316,7 +320,16 @@ impl ChatApp {
                     hidden: rail_hidden(provider, current, installed),
                 }
             })
-            .to_vec();
+            .collect();
+        (rows, picked)
+    }
+
+    /// Pushes every provider's rows, favorites and the active chat's choice to the selector.
+    pub(crate) fn sync_selector(&self, cx: &mut Context<Self>) {
+        let chat = &self.chats[self.active];
+        let current = chat.provider;
+        let (providers, model) =
+            self.selector_rows(&Provider::ALL, current, &chat.model(&self.settings));
         let favorites = self.settings.favorite_models.clone();
         let efforts = self.effort_options(chat);
         let effort = chat.effort.clone();
@@ -343,7 +356,7 @@ impl ChatApp {
         });
     }
 
-    pub(super) fn toggle_favorite(
+    pub(crate) fn toggle_favorite(
         &mut self,
         provider: Provider,
         model: &str,
@@ -662,14 +675,18 @@ impl ChatApp {
 
     /// Effort levels the chat's model takes: the catalog's per-model list, else the CLI's.
     pub(in crate::app) fn effort_options(&self, chat: &Chat) -> Vec<String> {
-        let model = chat.model(&self.settings);
+        self.model_efforts(chat.provider, &chat.model(&self.settings))
+    }
+
+    /// Reasoning levels `model` takes, from its probe, else the provider's list.
+    pub(crate) fn model_efforts(&self, provider: Provider, model: &str) -> Vec<String> {
         self.probes
-            .get(&chat.provider)
+            .get(&provider)
             .and_then(|p| {
                 p.models.iter().find(|m| if model.is_empty() { m.default } else { m.id == model })
             })
             .and_then(|m| m.efforts.clone())
-            .unwrap_or_else(|| effort_levels(chat.provider).iter().map(|e| e.to_string()).collect())
+            .unwrap_or_else(|| effort_levels(provider).iter().map(|e| e.to_string()).collect())
     }
 
     pub(crate) fn enabled_skills(&self) -> Vec<Skill> {
@@ -794,7 +811,7 @@ fn openrouter_item(m: &ModelInfo) -> ModelItem {
     }
 }
 
-fn stored_model(provider: Provider, value: &str) -> String {
+pub(crate) fn stored_model(provider: Provider, value: &str) -> String {
     if provider != Provider::OpenRouter && value == CLI_DEFAULT {
         String::new()
     } else {

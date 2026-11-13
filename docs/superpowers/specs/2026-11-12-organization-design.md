@@ -44,7 +44,6 @@ pub struct Head {
     pub owns: String,
     pub provider: Provider, pub model: String, pub effort: String,
     pub reviewer: Option<String>,   // role, None = the user
-    pub budget_usd: f64,            // per day, display + warning only in v1
     pub max_workers: usize,
     pub chat: Option<i64>,          // head chat id; None until created
 }
@@ -54,7 +53,7 @@ pub struct Request { pub id: u64, pub head: String, pub title: String, pub why: 
 pub struct Template { pub id: &'static str, pub name: &'static str, pub desc: &'static str, pub roles: &'static [&'static str] }
 ```
 
-Built-in role defaults (title, owns, provider/model, reviewer, budget) match the prototype's
+Built-in role defaults (title, owns, provider/model, reviewer) match the prototype's
 `ROLE_DEF`; templates match `TEMPLATES` (Solo builder, Startup (default), Full company, Custom).
 Serde JSON for `org.json`. Helpers: `role_file_text(head) -> String` (default persona markdown),
 `onboarding_prompt(head, ceo_chat, paths) -> String`, `hire_checks(org, head, card, running_by_head, pool_busy, pool_cap) -> Vec<(String,bool)>`,
@@ -65,12 +64,12 @@ Serde JSON for `org.json`. Helpers: `role_file_text(head) -> String` (default pe
 `org_enabled: bool` (false), `org_layout: OrgLayout` (`Roster` default, `Chart`, `Table`; serde
 lowercase; `ALL`, `label()`, `hint()` like `ChatLayout`), `org_pool: Option<usize>` (None = auto),
 `org_builds: usize` (1), `org_workers_per_head: usize` (2), `org_hire: OrgHire` (`Rules` default,
-`Auto`, `Ask`), `org_budget_usd: f64` (25.0), `org_rotate_at: u8` (75), `org_template: String`
+`Auto`, `Ask`), `org_rotate_at: u8` (75), `org_template: String`
 ("startup"). All `#[serde(default)]`.
 
 Settings UI: new "Organization" section in `settings_view.rs` (and `settings_search.rs` keys):
 enable toggle, layout dropdown, default template, worker pool (Auto / number), builds at a time,
-workers per head, hiring policy, daily budget, rotate-at percent. Layout dropdown also appears
+workers per head, hiring policy, rotate-at percent. Layout dropdown also appears
 under Appearance next to Chat layout.
 
 ## Page and entry points
@@ -89,21 +88,24 @@ under Appearance next to Chat layout.
   `Settings`. Goal row: text input, target select (CEO or a head), Send.
 - Needs-you items (derived each render plus stored requests): pending hire requests with check
   pills and Approve / Queue / Deny; heads or workers waiting on a question or approval (existing
-  wait state) with "Open chat"; org cards in Review awaiting Done with "Open card"; heads at or over
-  budget.
-- Head editor drawer: title, reviewer, provider, model (pinned; changing it uses the existing
-  provider switch / handoff), budget, max workers, owns, role file (editable, saved to
+  wait state) with "Open chat"; org cards in Review awaiting Done with "Open card".
+- Head editor drawer: title, reviewer, agent picker (pinned; changing the provider uses the
+  existing provider switch / handoff), max workers, owns, role file (editable, saved to
   `roles/<role>.md`), memory file (read-only view), buttons Remove head, Rotate session, Open chat,
   Save.
-- Setup wizard: Template, Staff (rows: role, title, provider, model, reviewer, budget, remove;
-  add role), Rules (policy fields), Review (what will be created). Create builds the org.
-- Hire dialog: head, card (existing or new), model (cheap tier list), task, own worktree,
-  check pills, Hire / Queue hire.
+- Setup wizard: Template, Staff (rows: role, title, agent picker, reviewer, remove; add role),
+  Rules (policy fields), Review (what will be created). Create builds the org.
+- Hire dialog: head, card (existing or new), agent picker (defaults to the cheapest tier), task,
+  own worktree, check pills, Hire / Queue hire.
+- Agent picker: the composer's `AgentSelector` chip and panel (search, provider rail with icons,
+  Reasoning pills from the model's probed efforts), limited to installed lead CLIs. The effort is
+  `Head.effort` (set on the head chat by `org_create` / `org_add_head` / `org_update_head`) or
+  `HireSpec.effort` (spawn arg `effort`).
 
 ## Layouts
 
 - Roster console (default, variant C): table rows per head (status, who, doing now, cards, team
-  n/max, spend/budget bar, context bar, menu) with indented worker rows; right panel tabs
+  n/max, spend today, context bar, menu) with indented worker rows; right panel tabs
   Needs you / Messages / Rules.
 - Org chart (variant A): CEO node, connector, heads row with worker chips under each, `+ Add
   head`; right inspector for the selected head or worker with details, actions, needs-you, recent
@@ -135,5 +137,5 @@ Org pool: when the spawning lead is an org head, `spawn_agent` also enforces
 
 ## Out of scope for v1
 
-Budget enforcement (display and warn only), automatic session rotation (manual button only),
+Budgets (none; spend shows as a plain amount), automatic session rotation (manual button only),
 drag to merge roles, multiple orgs per project, cross-project org.

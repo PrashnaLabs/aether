@@ -1,12 +1,7 @@
 use super::*;
 
 #[test]
-fn parses_typed_amounts() {
-    assert_eq!(parse_usd("$12.5"), Some(12.5));
-    assert_eq!(parse_usd(" 3 "), Some(3.));
-    assert_eq!(parse_usd("$ 4"), Some(4.));
-    assert_eq!(parse_usd("-1"), None);
-    assert_eq!(parse_usd("ten"), None);
+fn parses_typed_counts() {
     assert_eq!(parse_count(" 2"), Some(2));
     assert_eq!(parse_count("-2"), None);
 }

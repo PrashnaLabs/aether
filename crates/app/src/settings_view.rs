@@ -1606,7 +1606,6 @@ impl ChatApp {
             None => format!("Auto ({})", self.org_pool_cap()),
             Some(_) => "Auto from machine".into(),
         };
-        let budgets = [5., 10., 25., 50., 100., 200., 500.];
         let general = SettingsSection::new("Organization")
             .icon(Icon::new(gpui_kit::assets::IconName::Users))
             .when(show("org-enabled"), |section| {
@@ -1712,24 +1711,6 @@ impl ChatApp {
                         OrgHire::ALL.map(|h| h.label()),
                         cx.listener(|this, ix: &usize, _, cx| {
                             this.update_settings(cx, |s| s.org_hire = OrgHire::ALL[*ix]);
-                        }),
-                        cx,
-                    )
-                    .into_any_element(),
-                ))
-            })
-            .when(show("org-budget"), |section| {
-                section.child(row(
-                    "org-budget",
-                    "Org budget per day",
-                    "Warns you when the org's spend today reaches it.".into(),
-                    settings_dropdown(
-                        "org-budget",
-                        "Org budget per day",
-                        budgets.iter().position(|b| *b == s.org_budget_usd).unwrap_or(2),
-                        budgets.map(|b| format!("${b}")),
-                        cx.listener(move |this, ix: &usize, _, cx| {
-                            this.update_settings(cx, |s| s.org_budget_usd = budgets[*ix]);
                         }),
                         cx,
                     )

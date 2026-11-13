@@ -80,19 +80,6 @@ fn bar(fraction: f64, fill: Hsla, cx: &App) -> impl IntoElement {
         .child(div().h_full().w(gpui_kit::relative(fraction.clamp(0., 1.) as f32)).bg(fill))
 }
 
-/// Spend against the daily budget: amber from 80%, red at or over.
-pub(crate) fn spend_bar(spent: f64, budget: f64, cx: &App) -> impl IntoElement {
-    let f = if budget > 0. { spent / budget } else { 1. };
-    let fill = if f >= 1. {
-        RED
-    } else if f >= 0.8 {
-        AMBER
-    } else {
-        BLUE
-    };
-    bar(f, rgb(fill).into(), cx)
-}
-
 /// Context used; amber once at the rotate threshold.
 pub(crate) fn context_bar(percent: u8, rotate_at: u8, cx: &App) -> impl IntoElement {
     let fill = if percent >= rotate_at { AMBER } else { BLUE };
@@ -258,7 +245,7 @@ impl ChatApp {
             ))
     }
 
-    /// Hire requests, waiting chats, cards in review and heads over budget, each with its actions.
+    /// Hire requests, waiting chats and cards in review, each with its actions.
     pub(crate) fn org_needs_you_list(&self, org: &Org, cx: &mut Context<Self>) -> impl IntoElement {
         let items = self.org_needs_you();
         if items.is_empty() {
@@ -343,14 +330,6 @@ impl ChatApp {
                         vec![],
                         vec![open_card(card).into_any_element()],
                     )
-                }
-                NeedsYou::Budget { role } => {
-                    let Some(h) = org.head(&role) else { return div().into_any_element() };
-                    let spent = h.chat.map_or(0., |c| self.org_spend(c));
-                    let why = format!("{} of {} today", money(spent), money(h.budget_usd));
-                    (role, format!("{} is over budget", h.title), why, vec![], {
-                        h.chat.map(|c| open_chat(c).into_any_element()).into_iter().collect()
-                    })
                 }
             };
         v_flex()
@@ -438,8 +417,19 @@ impl ChatApp {
             let first = org.heads.iter().find(|h| h.role != "CEO").or(org.heads.first());
             first.map(|h| h.role.clone())
         });
-        let draft =
-            HireSpec { head: head.unwrap_or_default(), worktree: true, ..HireSpec::default() };
+        let installed: Vec<_> = crate::app::CLIS
+            .into_iter()
+            .filter(|p| self.probes.get(p).is_none_or(|probe| probe.installed))
+            .collect();
+        let (provider, model) =
+            crate::org::view::dialogs::hire_models(&installed).into_iter().next().unzip();
+        let draft = HireSpec {
+            head: head.unwrap_or_default(),
+            provider: provider.unwrap_or_default(),
+            model: model.map(str::to_string).unwrap_or_default(),
+            worktree: true,
+            ..HireSpec::default()
+        };
         self.org.overlay = OrgOverlay::Hire(draft);
     }
 
@@ -453,12 +443,11 @@ impl ChatApp {
         let s = &self.settings;
         let muted = cx.theme().muted_foreground;
         let pool = if s.org_pool.is_some() { "set" } else { "auto" };
-        let rows: [(&str, String); 7] = [
+        let rows: [(&str, String); 6] = [
             ("Hiring", s.org_hire.label().into()),
             ("Worker pool", format!("{} at once ({pool})", self.org_pool_cap())),
             ("Builds", format!("{} at a time", s.org_builds)),
             ("Per head", format!("{} workers", s.org_workers_per_head)),
-            ("Org budget", format!("{}/day", money(s.org_budget_usd))),
             ("Rotate session", format!("at {}% context", s.org_rotate_at)),
             ("Done", "Only you".into()),
         ];

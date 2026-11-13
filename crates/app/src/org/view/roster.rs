@@ -3,7 +3,7 @@ use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable, h_flex, v_flex};
 use gpui_kit::{AnyElement, Context, FontWeight, Hsla, Window, div, prelude::*, px, rgb};
 
-use super::shared::{avatar, context_bar, money, spend_bar, status_dot};
+use super::shared::{avatar, context_bar, money, status_dot};
 use crate::app::{Chat, ChatApp, now_ms};
 use crate::org::model::{Head, Org};
 use crate::org::{OrgOverlay, OrgSel, OrgTab};
@@ -188,11 +188,7 @@ impl ChatApp {
                     .text_color(if workers > head.max_workers { amber } else { muted })
                     .child(format!("{workers}/{} workers", head.max_workers)),
             )
-            .child(cell(W_SPEND).child(labelled_bar(
-                format!("{} / {}", money(spent), money(head.budget_usd)),
-                None,
-                spend_bar(spent, head.budget_usd, cx),
-            )))
+            .child(cell(W_SPEND).text_size(px(11.5)).child(money(spent)))
             .child(cell(W_CTX).child(labelled_bar(
                 format!("ctx {ctx}%"),
                 (ctx >= rotate_at).then_some(amber),

@@ -23,8 +23,6 @@ pub(crate) struct Head {
     pub effort: String,
     /// Role that reviews this head's work; `None` is the user.
     pub reviewer: Option<String>,
-    /// Per day; display and warning only.
-    pub budget_usd: f64,
     pub max_workers: usize,
     pub chat: Option<i64>,
 }
@@ -71,6 +69,7 @@ pub(crate) struct HireSpec {
     pub why: String,
     pub provider: Provider,
     pub model: String,
+    pub effort: String,
     pub worktree: bool,
 }
 
@@ -86,7 +85,6 @@ pub(crate) enum NeedsYou {
     Hire(u64),
     Waiting { chat: i64 },
     Review { card: i64 },
-    Budget { role: String },
 }
 
 /// A `message_agent` note between org chats.
@@ -125,9 +123,9 @@ pub(crate) const TEMPLATES: [Template; 4] = [
     },
 ];
 
-/// role, title, owns, provider, model, budget per day, reviewer (`None` = the user)
+/// role, title, owns, provider, model, reviewer (`None` = the user)
 type RoleDef =
-    (&'static str, &'static str, &'static str, Provider, &'static str, f64, Option<&'static str>);
+    (&'static str, &'static str, &'static str, Provider, &'static str, Option<&'static str>);
 
 pub(crate) const ROLES: [RoleDef; 8] = [
     (
@@ -136,7 +134,6 @@ pub(crate) const ROLES: [RoleDef; 8] = [
         "Intake, routing, roster, hiring gate, status to you",
         Provider::Claude,
         "sonnet",
-        5.,
         None,
     ),
     (
@@ -145,7 +142,6 @@ pub(crate) const ROLES: [RoleDef; 8] = [
         "Design, implementation through workers, code review",
         Provider::Codex,
         "gpt-6.1-sol",
-        10.,
         Some("SEC"),
     ),
     (
@@ -154,17 +150,15 @@ pub(crate) const ROLES: [RoleDef; 8] = [
         "Requirements, acceptance criteria, docs, release notes",
         Provider::Antigravity,
         "gemini-3.8-flash-high",
-        3.,
         Some("ENG"),
     ),
-    ("SEC", "Security", "Threat review, release gate", Provider::Claude, "opus", 8., Some("ENG")),
+    ("SEC", "Security", "Threat review, release gate", Provider::Claude, "opus", Some("ENG")),
     (
         "DESIGN",
         "Design",
         "UI specs, prototypes, UX review",
         Provider::Claude,
         "sonnet",
-        4.,
         Some("PRODUCT"),
     ),
     (
@@ -173,7 +167,6 @@ pub(crate) const ROLES: [RoleDef; 8] = [
         "Test plans, regression runs, bug triage",
         Provider::Codex,
         "gpt-6-luna",
-        3.,
         Some("ENG"),
     ),
     (
@@ -182,7 +175,6 @@ pub(crate) const ROLES: [RoleDef; 8] = [
         "Builds, packaging, CI, release checklist",
         Provider::Codex,
         "gpt-6.1-terra",
-        3.,
         Some("SEC"),
     ),
     (
@@ -191,7 +183,6 @@ pub(crate) const ROLES: [RoleDef; 8] = [
         "Website, launch copy, changelog voice",
         Provider::Antigravity,
         "gemini-3.8-flash-high",
-        2.,
         Some("PRODUCT"),
     ),
 ];
@@ -238,11 +229,11 @@ impl Head {
     /// Built-in defaults for `role`; an unknown role is a custom head titled after it.
     pub(crate) fn new(role: &str, max_workers: usize) -> Self {
         let def = ROLES.iter().find(|r| r.0 == role);
-        let (title, owns, provider, model, budget_usd, reviewer) = match def {
-            Some(&(_, title, owns, provider, model, budget, reviewer)) => {
-                (title.to_string(), owns.to_string(), provider, model, budget, reviewer)
+        let (title, owns, provider, model, reviewer) = match def {
+            Some(&(_, title, owns, provider, model, reviewer)) => {
+                (title.to_string(), owns.to_string(), provider, model, reviewer)
             }
-            None => (role.to_string(), String::new(), Provider::Claude, "sonnet", 3., None),
+            None => (role.to_string(), String::new(), Provider::Claude, "sonnet", None),
         };
         Self {
             role: role.into(),
@@ -252,7 +243,6 @@ impl Head {
             model: model.into(),
             effort: String::new(),
             reviewer: reviewer.map(Into::into),
-            budget_usd,
             max_workers,
             chat: None,
         }

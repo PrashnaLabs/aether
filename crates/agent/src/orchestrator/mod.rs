@@ -149,6 +149,7 @@ pub fn tool_specs() -> Value {
                     "card": {"type": "integer", "description": "Board card id the work is tracked on"},
                     "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity; default your own"},
                     "model": {"type": "string", "description": "Model id for the provider; default your own"},
+                    "effort": {"type": "string", "description": "Optional reasoning effort for the model"},
                     "why": {"type": "string", "description": "One line on why this worker is needed"}
                 },
                 "required": ["title", "task"]

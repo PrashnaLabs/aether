@@ -29,10 +29,12 @@ organization**. The wizard has four steps:
 1. **Template.** Solo builder (CEO and Engineering), Startup (adds Product and
    Security; the default), Full company (adds Design, QA, Release ops and
    Marketing), or Custom (just a CEO).
-2. **Staff.** Per head: title, provider, model, reviewer and daily budget. Add
-   or remove roles.
+2. **Staff.** Per head: title, model, reviewer. Add or remove roles. The model
+   control is the composer's picker: search, a tab per installed CLI that can
+   lead (Claude Code, Codex, Pi, OpenCode, Antigravity) with its icon, and a
+   Reasoning row with the efforts the chosen model supports.
 3. **Rules.** Worker pool, builds at a time, workers per head, hiring policy,
-   budget, rotate threshold.
+   rotate threshold.
 4. **Review.** What gets created.
 
 **Create** makes one pinned lead chat per head, titled `[ROLE] Title`, and
@@ -62,14 +64,15 @@ The header has **+ Hire worker**, **+ Add head**, **Pause org** and
 ## Heads
 
 Click a head (on the page or in the sidebar) to open its editor: title,
-reviewer, provider and model, daily budget, max workers, what it owns, its role
-file (editable) and its memory file (read only). From there you can **Rotate
+reviewer, model and reasoning (same picker as the wizard), max workers, what
+it owns, its role file (editable) and its memory file (read only). From there
+you can **Rotate
 session** (clear the CLI session and onboard again with the same role),
 **Open chat**, **Remove head** (archives the chat, keeps its files) or
 **Save**. Changing the provider hands the chat off like any provider switch.
 
-Budgets warn; they don't stop anything yet. Context bars turn amber at
-**Settings > Organization > Rotate a head's session at**.
+The org has no budgets; spend today shows as a plain amount. Context bars turn
+amber at **Settings > Organization > Rotate a head's session at**.
 
 ## Card review and notes
 
@@ -86,8 +89,9 @@ Done stays yours: move reviewed cards to Done on the board.
 
 ## Workers and hiring rules
 
-Workers are child chats of a head, in their own worktree by default. A hire
-passes the rules when:
+Workers are child chats of a head, in their own worktree by default. The
+**+ Hire worker** dialog picks the worker's model and reasoning with the same
+picker. A hire passes the rules when:
 
 - the request has a board card;
 - the head is under its worker cap (**Workers per head** sets the default);

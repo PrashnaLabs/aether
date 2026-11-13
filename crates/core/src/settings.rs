@@ -1036,8 +1036,6 @@ pub struct Settings {
     pub org_builds: usize,
     pub org_workers_per_head: usize,
     pub org_hire: OrgHire,
-    /// Org budget per day, warn only.
-    pub org_budget_usd: f64,
     /// Context percent at which a head's session should be rotated.
     pub org_rotate_at: u8,
     pub org_template: String,
@@ -1189,7 +1187,6 @@ impl Default for Settings {
             org_builds: 1,
             org_workers_per_head: 2,
             org_hire: OrgHire::Rules,
-            org_budget_usd: 25.,
             org_rotate_at: 75,
             org_template: "startup".into(),
             org_section_collapsed: false,

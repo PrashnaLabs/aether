@@ -532,7 +532,6 @@ fn org_settings_default_off_and_load_from_old_files() {
     assert_eq!(old.org_pool, None);
     assert_eq!((old.org_builds, old.org_workers_per_head), (1, 2));
     assert_eq!(old.org_hire, OrgHire::Rules);
-    assert_eq!(old.org_budget_usd, 25.);
     assert_eq!(old.org_rotate_at, 75);
     assert_eq!(old.org_template, "startup");
     assert_eq!(serde_json::to_string(&OrgLayout::Table).unwrap(), "\"table\"");

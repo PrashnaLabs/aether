@@ -14,7 +14,7 @@ fn templates_and_roles_match_the_prototype() {
         (eng.title.as_str(), eng.provider, eng.model.as_str()),
         ("Engineering", Provider::Codex, "gpt-6.1-sol")
     );
-    assert_eq!((eng.budget_usd, eng.reviewer.as_deref(), eng.max_workers), (10., Some("SEC"), 2));
+    assert_eq!((eng.reviewer.as_deref(), eng.max_workers), (Some("SEC"), 2));
     assert_eq!(Head::new("CEO", 2).reviewer, None);
     assert_eq!(eng.chat_title(), "[ENG] Engineering");
     let custom = Head::new("LEGAL", 1);
@@ -22,6 +22,13 @@ fn templates_and_roles_match_the_prototype() {
     assert!(models(Provider::Codex).contains(&"gpt-6-luna"));
     assert_eq!(role_badge("PRODUCT"), "PM");
     assert_eq!(role_badge("DESIGN"), "DES");
+}
+
+#[test]
+fn old_org_files_with_a_budget_still_load() {
+    let json = r#"{"project":"/p","heads":[{"role":"ENG","budget_usd":10.0,"effort":"high"}]}"#;
+    let org: Org = serde_json::from_str(json).unwrap();
+    assert_eq!((org.heads[0].role.as_str(), org.heads[0].effort.as_str()), ("ENG", "high"));
 }
 
 #[test]
