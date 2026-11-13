@@ -131,3 +131,12 @@ fn header_exports_busy_count_or_idle_without_inventing_paused_state(
         }
     });
 }
+
+#[test]
+fn hire_needs_a_head_other_than_the_ceo() {
+    let head = |role: &str| Head { role: role.into(), ..Default::default() };
+    assert!(hire_blocked(&Org::default()).is_some());
+    assert!(hire_blocked(&Org { heads: vec![head("CEO")], ..Default::default() }).is_some());
+    let org = Org { heads: vec![head("CEO"), head("ENG")], ..Default::default() };
+    assert_eq!(hire_blocked(&org), None);
+}

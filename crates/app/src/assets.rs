@@ -111,6 +111,7 @@ gpui_kit::assets::icon_assets!(
         SquareRoundCorner,
         Grid2x2,
         Users,
+        UserPlus,
         SquareCheck,
         ClockAlert,
         Hash,

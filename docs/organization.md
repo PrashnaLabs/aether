@@ -76,8 +76,10 @@ layout: ...**), or cycle with the `CycleOrgLayout` action.
 - **Round table**: heads seated around the goal, board counts and pool use in
   the middle, needs you on the left, the message log on the right.
 
-The header has **+ Hire worker**, **+ Add head**, **Pause org** and
-**Settings**. The goal box at the bottom of the main area works like the chat composer (Enter sends, Shift+Enter adds a line); its chip picks the CEO or one head as the target.
+The header has **Hire worker** (disabled until there is a head besides the
+CEO), **Add head**, **Pause** (asks first; disabled while nothing runs) and a
+settings icon that opens Settings > Organization. Narrow windows keep the icons
+and drop the labels. The goal box at the bottom of the main area works like the chat composer (Enter sends, Shift+Enter adds a line); its chip picks the CEO or one head as the target.
 
 ## Heads
 

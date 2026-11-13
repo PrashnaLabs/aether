@@ -1,15 +1,19 @@
 use aether_ui::ChatStatus;
-use gpui_kit::component::button::ButtonVariants;
+use std::path::Path;
+
+use gpui_kit::component::button::{ButtonVariant, ButtonVariants};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, FontWeight, Hsla, Role, Window, div, prelude::*, px, rgb,
+    AnyElement, App, Context, FontWeight, Hsla, Role, SharedString, Window, div, prelude::*, px,
+    rgb,
 };
 
 use gpui_kit::assets::IconName;
 
+use crate::actions::ToggleSidebar;
 use crate::app::{Chat, ChatApp, Page, display_path, now_ms};
 use crate::board::model::Col;
 use crate::org::model::{Decision, Head, NeedsYou, Org, role_badge, role_color};
@@ -108,6 +112,14 @@ pub(crate) fn status_dot(status: ChatStatus, cx: &App) -> impl IntoElement {
         .child(Icon::new(icon).size(px(12.)).text_color(color))
 }
 
+/// Why Hire worker can't open: workers report to a head other than the CEO.
+fn hire_blocked(org: &Org) -> Option<&'static str> {
+    org.heads
+        .iter()
+        .all(|h| h.role == "CEO")
+        .then_some("Add a head first; workers report to a head")
+}
+
 /// Busy heads and workers in this org only; archived chats no longer belong to its live roster.
 fn org_busy_counts(org: &Org, chats: &[Chat]) -> (usize, usize) {
     chats.iter().filter(|chat| !chat.archived && chat.busy()).fold(
@@ -204,62 +216,141 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let lights = aether_ui::traffic_lights_gap(self.settings.sidebar_collapsed, window, cx);
-        let theme = cx.theme();
-        let project = self
-            .org_project()
-            .map(|p| display_path(&p, &aether_core::home_dir()))
-            .unwrap_or_default();
+        let narrow = window.viewport_size().width < px(1100.);
+        let expand = self.settings.sidebar_collapsed.then(|| {
+            aether_ui::button("expand-sidebar")
+                .ghost()
+                .small()
+                .icon(IconName::PanelLeftOpen)
+                .accessibility_label("Expand sidebar")
+                .tooltip_with_action("Expand sidebar", &ToggleSidebar, None)
+                .on_click(cx.listener(|this, _, window, cx| this.toggle_sidebar(window, cx)))
+        });
+        let muted = cx.theme().muted_foreground;
+        let project = self.org_project().map(|dir| {
+            let path = display_path(&dir, &aether_core::home_dir());
+            div()
+                .id("org-project")
+                .min_w_0()
+                .truncate()
+                .text_xs()
+                .text_color(muted)
+                .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx))
+                .child(self.project_name(Path::new(&dir)))
+        });
         let status = org.map(|org| org_header_status(org, &self.chats, cx));
-        let buttons = org.map(|_| {
+        let buttons = org.map(|org| {
+            let blocked = hire_blocked(org);
+            let idle = org_busy_counts(org, &self.chats) == (0, 0);
             h_flex()
+                .flex_none()
                 .gap(px(6.))
-                .child(aether_ui::button("org-hire").small().label("+ Hire worker").on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.org_open_hire(None);
-                        cx.notify();
-                    }),
-                ))
-                .child(aether_ui::button("org-add-head").small().label("+ Add head").on_click(
-                    cx.listener(|this, _, _, cx| {
-                        this.org.overlay = OrgOverlay::HeadEditor(String::new());
-                        cx.notify();
-                    }),
-                ))
+                .items_center()
+                .child(
+                    aether_ui::button("org-hire")
+                        .primary()
+                        .small()
+                        .icon(IconName::UserPlus)
+                        .when(!narrow, |b| b.label("Hire worker"))
+                        .accessibility_label("Hire worker")
+                        .tooltip(blocked.unwrap_or("Hire worker"))
+                        .disabled(blocked.is_some())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.org_open_hire(None);
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    aether_ui::button("org-add-head")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Plus)
+                        .when(!narrow, |b| b.label("Add head"))
+                        .accessibility_label("Add head")
+                        .tooltip("Add head")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.org.overlay = OrgOverlay::HeadEditor(String::new());
+                            cx.notify();
+                        })),
+                )
                 .child(
                     aether_ui::button("org-pause")
+                        .ghost()
                         .small()
-                        .label("Pause org")
-                        .on_click(cx.listener(|this, _, _, cx| this.org_pause(cx))),
+                        .icon(IconName::Pause)
+                        .when(!narrow, |b| b.label("Pause"))
+                        .accessibility_label("Pause organization")
+                        .tooltip(if idle { "Nothing is running" } else { "Pause organization" })
+                        .disabled(idle)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.org_confirm_pause(window, cx)),
+                        ),
                 )
         });
         h_flex()
-            .child(lights)
-            .px(px(20.))
-            .py(px(12.))
-            .gap(px(10.))
+            .flex_none()
+            .h(px(36.))
+            .px(px(16.))
+            .gap(px(8.))
             .items_center()
             .border_b_1()
-            .border_color(theme.border)
+            .border_color(cx.theme().border)
+            .child(lights)
+            .children(expand)
             .child(
-                div()
-                    .id("org-title")
-                    .role(Role::Heading)
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Organization"),
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(8.))
+                    .items_center()
+                    .child(
+                        div()
+                            .id("org-title")
+                            .role(Role::Heading)
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Organization"),
+                    )
+                    .children(project)
+                    .children(status),
             )
-            .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(project))
-            .children(status)
-            .child(div().flex_1())
             .children(extra)
             .children(buttons)
             .child(
                 aether_ui::button("org-settings")
+                    .ghost()
                     .small()
-                    .label("Settings")
+                    .icon(IconName::Settings)
+                    .accessibility_label("Organization settings")
+                    .tooltip("Organization settings")
                     .on_click(cx.listener(|this, _, _, cx| this.org_open_settings(cx))),
             )
             .child(aether_ui::window_controls_gap(window))
+    }
+
+    fn org_confirm_pause(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let project = self.org_project().map(|dir| self.project_name(Path::new(&dir)));
+        let text = format!(
+            "Stops every running head and worker turn in {}. Queued messages stay queued; nothing is deleted.",
+            project.unwrap_or_default()
+        );
+        let view = cx.entity();
+        aether_ui::theme::open_alert(window, cx, move |alert, _, _| {
+            let view = view.clone();
+            alert
+                .confirm()
+                .title("Pause the organization?")
+                .description(SharedString::from(text.clone()))
+                .ok_text("Pause")
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text("Cancel")
+                .on_ok(move |_, _, cx| {
+                    view.update(cx, |this, cx| this.org_pause(cx));
+                    true
+                })
+        });
     }
 
     /// Goal input, target (CEO or a head) and Send.
