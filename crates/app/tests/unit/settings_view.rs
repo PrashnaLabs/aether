@@ -928,3 +928,10 @@ fn model_reasoning_cards_change_effort_and_preserve_search(cx: &mut gpui_kit::Te
     assert!(visual.debug_bounds("instructions").is_some());
     assert!(visual.debug_bounds("reasoning").is_none());
 }
+
+#[test]
+fn every_settings_tab_is_in_the_sidebar() {
+    let listed: Vec<_> =
+        SETTINGS_GROUPS.iter().flat_map(|(_, tabs)| tabs.iter().copied()).collect();
+    assert_eq!(listed, SettingsTab::ALL);
+}

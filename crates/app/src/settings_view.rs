@@ -80,6 +80,30 @@ impl SettingsTab {
     }
 }
 
+pub(crate) const SETTINGS_GROUPS: [(&str, &[SettingsTab]); 2] = [
+    (
+        "General",
+        &[
+            SettingsTab::Appearance,
+            SettingsTab::BottomBar,
+            SettingsTab::Tiling,
+            SettingsTab::Composer,
+            SettingsTab::Model,
+        ],
+    ),
+    (
+        "Developer",
+        &[
+            SettingsTab::Providers,
+            SettingsTab::Worktrees,
+            SettingsTab::Attachments,
+            SettingsTab::Tools,
+            SettingsTab::Organization,
+            SettingsTab::Terminal,
+        ],
+    ),
+];
+
 fn next_settings_tab(current: SettingsTab, next: bool) -> SettingsTab {
     let index = SettingsTab::ALL.iter().position(|&tab| tab == current).unwrap_or(0);
     SettingsTab::ALL
@@ -2089,28 +2113,7 @@ impl ChatApp {
             .on_action(
                 cx.listener(|this, _: &SettingsPrevious, _, cx| this.cycle_settings_tab(false, cx)),
             );
-        for (label, tabs) in [
-            (
-                "General",
-                &[
-                    SettingsTab::Appearance,
-                    SettingsTab::BottomBar,
-                    SettingsTab::Tiling,
-                    SettingsTab::Composer,
-                    SettingsTab::Model,
-                ][..],
-            ),
-            (
-                "Developer",
-                &[
-                    SettingsTab::Providers,
-                    SettingsTab::Worktrees,
-                    SettingsTab::Attachments,
-                    SettingsTab::Tools,
-                    SettingsTab::Terminal,
-                ][..],
-            ),
-        ] {
+        for (label, tabs) in SETTINGS_GROUPS {
             let mut group = v_flex()
                 .gap_1()
                 .child(div().px_2().pb_1().text_xs().font_medium().text_color(muted).child(label));
