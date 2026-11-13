@@ -91,6 +91,12 @@ impl ChatApp {
     ) -> Option<impl IntoElement + use<>> {
         let text = self.org_status_text()?;
         let needs = self.org_needs_you().len();
+        let tip: SharedString = match needs {
+            0 => format!("Organization: {text}"),
+            n => format!("Organization: {text} · {n} need you"),
+        }
+        .into();
+        let color = if needs > 0 { warning_text(cx) } else { cx.theme().muted_foreground };
         let open_view = view.clone();
         let item = h_flex()
             .id("status-org")
@@ -98,22 +104,19 @@ impl ChatApp {
             .flex_none()
             .cursor_pointer()
             .items_center()
-            .gap(px(4.))
             .px(px(6.))
             .py(px(2.))
             .corner(px(4.))
             .hover(|s| s.bg(cx.theme().tokens.accent.opacity(0.15)))
-            .child(
-                gpui_kit::svg()
-                    .path(Lucide::Users.path())
-                    .size(px(12.))
-                    .text_color(cx.theme().muted_foreground),
-            )
-            .child(text)
-            .when(needs > 0, |row| {
-                row.child(div().child("·"))
-                    .child(div().text_color(warning_text(cx)).child(format!("{needs} need you")))
+            .role(Role::Button)
+            .aria_label(tip.clone())
+            .tooltip({
+                let tip = tip.clone();
+                move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                }
             })
+            .child(gpui_kit::svg().path(Lucide::Users.path()).size(px(12.)).text_color(color))
             .when(!self.org_pop.open, |item| {
                 // open only: outside mouse-down already closed it, a click would reopen
                 item.on_click(move |_, window, cx| {

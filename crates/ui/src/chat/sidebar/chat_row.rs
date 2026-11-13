@@ -830,12 +830,14 @@ pub(super) fn render_chat(
             return with_card(row, ix, title, card_line, state);
         }
         let idle = matches!(status, ChatStatus::Idle | ChatStatus::Background(_));
+        let background = line.as_ref().and_then(|l| background_chip(l.background, ix, cx));
         if style == SidebarStyle::Minimal {
             let top = h_flex()
                 .w_full()
                 .gap_2()
                 .items_center()
                 .child(title_cell(title.clone()))
+                .children(background)
                 .children((!idle).then(|| status.badge(("chat-status-badge", ix), Some(now), cx)))
                 .children(approve_action);
             let folder = Icon::new(Lucide::Folder)
@@ -888,6 +890,7 @@ pub(super) fn render_chat(
             .child(slot(swap(icon, chevron)))
             .child(Icon::new(Lucide::Users).size(rems(0.75)).text_color(muted).flex_none())
             .child(title_cell(title.clone()))
+            .children(background)
             .children(approve_action)
             .child(hover_swap(trailing, actions, &group, show_menu));
         if !big {
