@@ -24,8 +24,8 @@ fn scans_claude_home_and_project() {
     write(&cwd.join("CLAUDE.md"), "1234");
     write(&root.join("CLAUDE.md"), "above the repo, Claude still reads it");
     let projects = format!(
-        r#"{{"mcpServers":{{"postman":{{}}}},"projects":{{"{}":{{"mcpServers":{{"supabase":{{}}}}}}}}}}"#,
-        cwd.display()
+        r#"{{"mcpServers":{{"postman":{{}}}},"projects":{{{}:{{"mcpServers":{{"supabase":{{}}}}}}}}}}"#,
+        serde_json::to_string(&cwd.display().to_string()).unwrap()
     );
     write(&home.join(".claude.json"), &projects);
     write(&repo.join(".mcp.json"), r#"{"mcpServers":{"postman":{},"figma":{}}}"#);

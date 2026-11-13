@@ -570,7 +570,7 @@ pub(crate) struct ChatApp {
     pub(crate) branches: HashMap<PathBuf, Option<BranchInfo>>,
     pub(crate) missing_folders: HashSet<PathBuf>,
     pub(crate) missing_attachments: HashSet<PathBuf>,
-    refreshing_branches: bool,
+    pub(crate) refreshing_branches: bool,
     /// A refresh was asked for while one ran; run a full pass after it.
     branches_stale: bool,
     /// Base branches per draft folder; `None` outside a git repo.

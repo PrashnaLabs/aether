@@ -107,5 +107,5 @@ fn long_lined_markdown_opens_as_source(cx: &mut gpui_kit::TestAppContext) {
     });
     assert!(visual.debug_bounds("explorer-markdown-preview").is_none());
     assert!(visual.debug_bounds("markdown-preview-toggle").is_some());
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }

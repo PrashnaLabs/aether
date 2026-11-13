@@ -82,8 +82,8 @@ fn role_file_and_onboarding_name_the_files_and_ceo() {
     assert!(role.contains("memory/eng.md"));
     let prompt = onboarding_prompt(&org, &eng, &role, dir);
     assert!(prompt.contains("CEO, chat 11"));
-    assert!(prompt.contains("/cfg/org/p/roles/eng.md"));
-    assert!(prompt.contains("/cfg/org/p/memory/eng.md"));
+    assert!(prompt.contains(&role_path(dir, "ENG").display().to_string()));
+    assert!(prompt.contains(&memory_path(dir, "ENG").display().to_string()));
     assert!(prompt.contains("reviewed by SEC"));
     assert!(prompt.contains("# Role: Engineering"));
     let ceo = onboarding_prompt(&org, &org.heads[0], "", dir);

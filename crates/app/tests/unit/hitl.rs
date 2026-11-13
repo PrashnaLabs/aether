@@ -368,6 +368,8 @@ fn rewind_clear_restart_and_delete_drop_pending_requests(cx: &mut gpui_kit::Test
     });
     window
         .update(cx, |app, window, cx| {
+            // branch refresh finishes on a tokio thread, which the test scheduler rejects
+            app.refreshing_branches = true;
             let ask = Ask::Approval(Approval::default());
             let mut m = aether_core::Message::assistant();
             m.apply(aether_core::Update::Ask { id: 820, ask: ask.clone() });

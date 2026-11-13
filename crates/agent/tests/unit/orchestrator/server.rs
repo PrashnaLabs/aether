@@ -73,6 +73,7 @@ fn stale_socket_file_is_replaced_and_mode_is_0600() {
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
 }
 
+#[cfg(unix)]
 #[test]
 fn too_long_path_is_an_error_not_a_panic() {
     let p = std::env::temp_dir().join("x".repeat(200)).join("o.sock");
