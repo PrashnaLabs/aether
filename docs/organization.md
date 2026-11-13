@@ -14,14 +14,18 @@ It is off by default, because heads keep spending tokens while they work.
 - on each project in the sidebar's Projects list: an **Organization** icon
   (first of the hover icons) when the project has an org, or **Set up
   organization** in its `⋯` menu when it doesn't;
-- a status bar item: `N heads · busy/cap workers · $spent today · K need you`
-  (click it to open the page);
+- a status bar item: `N heads · busy/cap workers · K need you`. Click it for
+  a popover: `Organization · <project>` with running/idle, one row per head
+  (role chip, title, provider/model, status, doing now, workers n/max; click
+  to open its chat), worker slots and builds at a time, `K need you` (opens
+  the page), then **Open organization** and **Hire worker**. Escape, a click
+  outside or a second click closes it;
 - **Alt+O** and the palette command **Organization**.
 
 Turning it off hides all of that. Nothing is deleted.
 
-Alt+O, the palette and the status bar open the page for the current project;
-the project row opens it for that project. While the page is open the sidebar
+Alt+O, the palette and the status bar popover open the page for the current
+project; the project row opens it for that project. While the page is open the sidebar
 shows `Organization · <project>`: **Overview** (the page), then each head with
 its role chip, followed by its workers. Heads and workers are org agents: they
 stay out of Pinned and Projects, and opening one from anywhere (sidebar, page,

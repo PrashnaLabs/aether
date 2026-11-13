@@ -539,6 +539,7 @@ pub(crate) struct ChatApp {
     detected_provider: Option<Provider>,
     pub(crate) sys_sample: Option<crate::sysinfo::Sample>,
     pub(crate) usage_pop: status_bar::UsagePop,
+    pub(crate) org_pop: status_bar::OrgPop,
     pub(crate) crew_pop: bool,
     pub(crate) crew_pop_trigger: TriggerBounds,
     pub(crate) show_usage_limits: bool,

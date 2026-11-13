@@ -152,7 +152,7 @@ fn refresh_button(id: &'static str, view: &Entity<ChatApp>, cx: &App) -> impl In
     )
 }
 
-fn footer_row(id: &'static str, label: &'static str, cx: &App) -> Stateful<Div> {
+pub(super) fn footer_row(id: &'static str, label: &'static str, cx: &App) -> Stateful<Div> {
     h_flex()
         .id(id)
         .debug_selector(move || id.into())
@@ -165,7 +165,7 @@ fn footer_row(id: &'static str, label: &'static str, cx: &App) -> Stateful<Div> 
         .child(Icon::new(IconName::ChevronRight).small().text_color(cx.theme().muted_foreground))
 }
 
-fn focusable(
+pub(super) fn focusable(
     row: Stateful<Div>,
     focus: &FocusHandle,
     label: impl Into<SharedString>,
@@ -195,7 +195,7 @@ fn pct_text(id: String, pct: f32, cx: &App) -> Div {
         .child(format!("{pct:.0}%"))
 }
 
-fn divider(cx: &App) -> Div {
+pub(super) fn divider(cx: &App) -> Div {
     div().h(px(1.)).mx(px(8.)).my(px(4.)).bg(cx.theme().border)
 }
 

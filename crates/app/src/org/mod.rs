@@ -1,5 +1,5 @@
 pub(crate) mod model;
-mod view;
+pub(crate) mod view;
 
 use std::path::{Path, PathBuf};
 
@@ -199,7 +199,7 @@ impl ChatApp {
     }
 
     /// Chat ids of the org's heads and their workers.
-    fn org_chats(&self, org: &Org) -> Vec<i64> {
+    pub(crate) fn org_chats(&self, org: &Org) -> Vec<i64> {
         let heads: Vec<i64> = org.heads.iter().filter_map(|h| h.chat).collect();
         self.chats
             .iter()

@@ -554,6 +554,7 @@ impl ChatApp {
             detected_provider: None,
             sys_sample: None,
             usage_pop: super::status_bar::UsagePop::new(cx),
+            org_pop: super::status_bar::OrgPop::new(cx),
             crew_pop: false,
             crew_pop_trigger: Default::default(),
             show_usage_limits: false,

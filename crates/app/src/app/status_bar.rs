@@ -11,6 +11,7 @@ use gpui_kit::{
 
 use super::{ChatApp, Page, SidebarView};
 
+mod org;
 mod usage;
 
 const GB: f64 = (1u64 << 30) as f64;
@@ -55,6 +56,7 @@ fn resource_item(
         .child(text)
 }
 
+pub(crate) use org::OrgPop;
 pub(crate) use usage::UsagePop;
 
 /// Micros spent on replies finished at or after `since_ms` (end time, else turn time plus run time).
@@ -152,53 +154,6 @@ impl ChatApp {
             .earliest()
             .map_or(0, |t| t.timestamp_millis());
         spend_since(&chat.messages, &self.model_prices, midnight) as f64 / 1e6
-    }
-
-    /// "N heads · busy/cap workers · $spent today · K need you" for the current project's org.
-    fn render_org_status(&self, view: &Entity<ChatApp>, cx: &App) -> Option<impl IntoElement> {
-        let org = self.org_current().filter(|_| self.settings.org_enabled)?;
-        let heads: Vec<i64> = org.heads.iter().filter_map(|h| h.chat).collect();
-        let spent: f64 = self
-            .chats
-            .iter()
-            .filter(|c| heads.contains(&c.id) || c.parent.is_some_and(|p| heads.contains(&p)))
-            .map(|c| self.spend_today(c))
-            .sum();
-        let needs = self.org_needs_you().len();
-        let text = format!(
-            "{} heads · {}/{} workers · ${:.2} today",
-            org.heads.len(),
-            self.org_pool_busy(),
-            self.org_pool_cap(),
-            spent
-        );
-        let view = view.clone();
-        Some(
-            h_flex()
-                .id("status-org")
-                .debug_selector(|| "status-org".into())
-                .flex_none()
-                .cursor_pointer()
-                .items_center()
-                .gap(px(4.))
-                .px(px(6.))
-                .py(px(2.))
-                .corner(px(4.))
-                .hover(|s| s.bg(cx.theme().tokens.accent.opacity(0.15)))
-                .child(
-                    gpui_kit::svg()
-                        .path(Lucide::Users.path())
-                        .size(px(12.))
-                        .text_color(cx.theme().muted_foreground),
-                )
-                .child(text)
-                .when(needs > 0, |row| {
-                    row.child(div().child("·")).child(
-                        div().text_color(warning_text(cx)).child(format!("{needs} need you")),
-                    )
-                })
-                .on_click(move |_, _, cx| view.update(cx, |this, cx| this.open_org_page(None, cx))),
-        )
     }
 
     fn render_status_nav(&self, view: &Entity<ChatApp>, cx: &App) -> Div {
@@ -377,7 +332,7 @@ impl ChatApp {
 
         let clock_click_view = view.clone();
         let nav = self.render_status_nav(view, cx);
-        let org = self.render_org_status(view, cx);
+        let org = self.render_org_status(view, window, cx);
         let usage = self.render_usage_strip(view, window, cx);
         let visible = |key: &str| !self.settings.bottom_bar_hidden.iter().any(|k| k == key);
         let resources = self.sys_sample.filter(|_| visible("cpu") || visible("memory")).map(|s| {
