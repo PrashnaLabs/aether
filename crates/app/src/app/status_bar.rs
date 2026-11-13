@@ -57,6 +57,25 @@ fn resource_item(
 
 pub(crate) use usage::UsagePop;
 
+/// Micros spent on replies to turns sent at or after `since_ms`; a reply takes its turn's time.
+pub(super) fn spend_since(
+    messages: &[aether_core::Message],
+    prices: &std::collections::HashMap<String, (f64, f64)>,
+    since_ms: i64,
+) -> u64 {
+    let mut turn = None;
+    messages
+        .iter()
+        .filter_map(|m| {
+            if m.role == aether_core::Role::User {
+                turn = m.sent_at_ms;
+                return None;
+            }
+            turn.is_some_and(|t| t >= since_ms).then(|| super::format::reply_spend(m, prices).0)
+        })
+        .sum()
+}
+
 pub(super) fn direct_label(count: usize) -> String {
     if count > 0 { format!("Direct Chats · {count}") } else { "Direct Chats".into() }
 }
@@ -123,6 +142,66 @@ fn badged_nav_button(
 }
 
 impl ChatApp {
+    /// Dollars spent on this chat's turns sent since local midnight.
+    pub(crate) fn spend_today(&self, chat: &super::Chat) -> f64 {
+        let midnight = Local::now()
+            .date_naive()
+            .and_time(chrono::NaiveTime::MIN)
+            .and_local_timezone(Local)
+            .earliest()
+            .map_or(0, |t| t.timestamp_millis());
+        spend_since(&chat.messages, &self.model_prices, midnight) as f64 / 1e6
+    }
+
+    /// "N heads · busy/cap workers · $spent today · K need you" for the current project's org.
+    fn render_org_status(&self, view: &Entity<ChatApp>, cx: &App) -> Option<impl IntoElement> {
+        let org = self.org_current().filter(|_| self.settings.org_enabled)?;
+        let heads: Vec<i64> = org.heads.iter().filter_map(|h| h.chat).collect();
+        let spent: f64 = self
+            .chats
+            .iter()
+            .filter(|c| heads.contains(&c.id) || c.parent.is_some_and(|p| heads.contains(&p)))
+            .map(|c| self.spend_today(c))
+            .sum();
+        let needs = self.org_needs_you().len();
+        let text = format!(
+            "{} heads · {}/{} workers · ${:.2} today",
+            org.heads.len(),
+            self.org_pool_busy(),
+            self.org_pool_cap(),
+            spent
+        );
+        let view = view.clone();
+        Some(
+            h_flex()
+                .id("status-org")
+                .debug_selector(|| "status-org".into())
+                .flex_none()
+                .cursor_pointer()
+                .items_center()
+                .gap(px(4.))
+                .px(px(6.))
+                .py(px(2.))
+                .corner(px(4.))
+                .hover(|s| s.bg(cx.theme().tokens.accent.opacity(0.15)))
+                .child(
+                    gpui_kit::svg()
+                        .path(Lucide::Users.path())
+                        .size(px(12.))
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(text)
+                .when(needs > 0, |row| {
+                    row.child(div().child("·")).child(
+                        div().text_color(warning_text(cx)).child(format!("{needs} need you")),
+                    )
+                })
+                .on_click(move |_, _, cx| {
+                    view.update(cx, |this, cx| this.open_page(Page::Org, cx))
+                }),
+        )
+    }
+
     fn render_status_nav(&self, view: &Entity<ChatApp>, cx: &App) -> Div {
         let (page, sidebar) = (self.page, self.sidebar_view);
         let (outside, direct) = (self.external.len(), self.direct_chat_count());
@@ -299,6 +378,7 @@ impl ChatApp {
 
         let clock_click_view = view.clone();
         let nav = self.render_status_nav(view, cx);
+        let org = self.render_org_status(view, cx);
         let usage = self.render_usage_strip(view, window, cx);
         let visible = |key: &str| !self.settings.bottom_bar_hidden.iter().any(|k| k == key);
         let resources = self.sys_sample.filter(|_| visible("cpu") || visible("memory")).map(|s| {
@@ -361,6 +441,7 @@ impl ChatApp {
                     .min_w_0()
                     .gap_2()
                     .items_center()
+                    .children(org)
                     .children(resources)
                     // Right Side: Global Date & Time Clock
                     .when(visible("clock"), |row| {

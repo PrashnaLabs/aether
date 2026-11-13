@@ -31,7 +31,7 @@ pub(super) fn reply_spend(message: &Message, prices: &HashMap<String, (f64, f64)
 }
 
 /// Dollars spent across a chat, rounded to cents.
-pub(super) fn chat_spend(chat: &Chat, prices: &HashMap<String, (f64, f64)>) -> f64 {
+pub(crate) fn chat_spend(chat: &Chat, prices: &HashMap<String, (f64, f64)>) -> f64 {
     let micros: u64 = chat.messages.iter().map(|m| reply_spend(m, prices).0).sum();
     (micros as f64 / 1e4).round() / 100.
 }

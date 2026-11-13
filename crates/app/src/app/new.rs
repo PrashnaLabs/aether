@@ -131,6 +131,10 @@ impl ChatApp {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search stories..."));
         let skill_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
         let board_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search cards"));
+        let org_goal = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Give the org a goal. The CEO turns it into cards and routes them.")
+        });
         let explorer_quick_open_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search files by name..."));
         let grep_tip = key_hint(&SearchWorkspace, cx)
@@ -712,6 +716,10 @@ impl ChatApp {
             hn_browser,
             hn_reader_open: false,
             hn_search_input,
+            org: crate::org::OrgState::new(
+                if background_services { crate::org::load_orgs() } else { vec![] },
+                org_goal,
+            ),
             _subscriptions: subscriptions,
         };
         app.workspace.persistence_enabled = background_services;

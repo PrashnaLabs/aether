@@ -21,6 +21,7 @@ pub(crate) enum PaletteCommand {
     SessionLayout(crate::session_workspace::PaneAction),
     TileLayout(aether_core::TileLayout),
     ChatLayout(aether_core::ChatLayout),
+    OrgLayout(aether_core::OrgLayout),
     OpenChat(usize),
     SearchMatch {
         chat: usize,
@@ -174,6 +175,9 @@ impl ChatApp {
             Some(PaletteCommand::ChatLayout(layout)) => {
                 self.update_settings(cx, |s| s.chat_layout = layout)
             }
+            Some(PaletteCommand::OrgLayout(layout)) => {
+                self.update_settings(cx, |s| s.org_layout = layout)
+            }
             Some(PaletteCommand::OpenChat(chat)) => self.select(chat, window, cx),
             Some(PaletteCommand::SearchMatch { chat, message }) => {
                 self.jump_to_message(chat, message, window, cx)
@@ -270,6 +274,27 @@ impl ChatApp {
             })
             .collect(),
         ));
+        if self.settings.org_enabled {
+            groups.push((
+                "Organization",
+                std::iter::once((
+                    item("Organization")
+                        .icon(gpui_kit::assets::IconName::Users)
+                        .keywords(["org", "company", "heads", "ceo", "team"])
+                        .action(Box::new(crate::actions::OpenOrg)),
+                    None,
+                ))
+                .chain(aether_core::OrgLayout::ALL.into_iter().map(|layout| {
+                    (
+                        item(format!("Organization layout: {}", layout.label()))
+                            .keywords(["org layout", "roster", "chart", "round table"])
+                            .checked(self.settings.org_layout == layout),
+                        Some(PaletteCommand::OrgLayout(layout)),
+                    )
+                }))
+                .collect(),
+            ));
+        }
         let mut chat = vec![
             action_row("New chat", IconName::Plus, Box::new(NewChat)),
             (

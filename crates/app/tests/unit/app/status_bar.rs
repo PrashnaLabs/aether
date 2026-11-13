@@ -664,3 +664,22 @@ fn mid_width_clips_resources_before_the_clock(cx: &mut TestAppContext) {
         }
     }
 }
+
+#[test]
+fn org_spend_counts_replies_to_turns_since_midnight() {
+    use aether_core::Message;
+    let user = |at| {
+        let mut m = Message::user("go");
+        m.sent_at_ms = Some(at);
+        m
+    };
+    let reply = |micros| {
+        let mut m = Message::assistant();
+        m.cost_micros = micros;
+        m
+    };
+    let messages = [reply(7), user(50), reply(100), user(200), reply(20), reply(3)];
+    let prices = std::collections::HashMap::new();
+    assert_eq!(spend_since(&messages, &prices, 100), 23);
+    assert_eq!(spend_since(&messages, &prices, 0), 123);
+}

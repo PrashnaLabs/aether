@@ -673,6 +673,59 @@ impl ChatLayout {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrgLayout {
+    #[default]
+    Roster,
+    Chart,
+    Table,
+}
+
+impl OrgLayout {
+    pub const ALL: [Self; 3] = [Self::Roster, Self::Chart, Self::Table];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Roster => "Roster console",
+            Self::Chart => "Org chart",
+            Self::Table => "Round table",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Roster => "A row per head with its workers, needs-you and messages on the right.",
+            Self::Chart => "CEO above the heads, an inspector for the selected one.",
+            Self::Table => "Heads seated around the goal, needs-you and messages beside.",
+        }
+    }
+}
+
+/// Who approves a head's request for a worker.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrgHire {
+    /// The rules decide: approve when they pass, deny when not.
+    #[default]
+    Rules,
+    /// Approve when the rules pass, else ask the user.
+    Auto,
+    Ask,
+}
+
+impl OrgHire {
+    pub const ALL: [Self; 3] = [Self::Rules, Self::Auto, Self::Ask];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rules => "CEO decides by rules",
+            Self::Auto => "Auto-approve within rules",
+            Self::Ask => "Always ask me",
+        }
+    }
+}
+
 /// Which window corner the watch-list button sits in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WatchCorner {
@@ -975,6 +1028,20 @@ pub struct Settings {
     pub watch_corner: WatchCorner,
     /// Peek card x, y, width, height in window px; `None` opens it beside the FAB.
     pub watch_peek_bounds: Option<[f32; 4]>,
+    /// Organization page, its shortcut, sidebar section and status item.
+    pub org_enabled: bool,
+    pub org_layout: OrgLayout,
+    /// Org-wide worker cap; `None` sizes it from the machine.
+    pub org_pool: Option<usize>,
+    pub org_builds: usize,
+    pub org_workers_per_head: usize,
+    pub org_hire: OrgHire,
+    /// Org budget per day, warn only.
+    pub org_budget_usd: f64,
+    /// Context percent at which a head's session should be rotated.
+    pub org_rotate_at: u8,
+    pub org_template: String,
+    pub org_section_collapsed: bool,
 }
 
 impl Settings {
@@ -1116,6 +1183,16 @@ impl Default for Settings {
             watchlist: Vec::new(),
             watch_corner: WatchCorner::BottomRight,
             watch_peek_bounds: None,
+            org_enabled: false,
+            org_layout: OrgLayout::Roster,
+            org_pool: None,
+            org_builds: 1,
+            org_workers_per_head: 2,
+            org_hire: OrgHire::Rules,
+            org_budget_usd: 25.,
+            org_rotate_at: 75,
+            org_template: "startup".into(),
+            org_section_collapsed: false,
         }
     }
 }

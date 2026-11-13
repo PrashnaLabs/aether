@@ -929,6 +929,21 @@ impl ChatSidebar {
             })
             .chain(self.search.take().map(ChatRow::SearchField))
             .collect();
+        if let Some((title, collapse)) = self.top_section.take()
+            && let Some(at) = self.custom_sections.iter().position(|(s, _)| *s == title)
+        {
+            let (_, chats) = self.custom_sections.remove(at);
+            let collapsed = collapse.0;
+            rows.push(ChatRow::Header {
+                tools: None,
+                title,
+                on_add: None,
+                collapse: Some(collapse),
+            });
+            if !collapsed {
+                rows.extend(self.crew_rows(chats, false));
+            }
+        }
         if !self.agents.is_empty() {
             let collapsed = self.agents_collapse.as_ref().is_some_and(|(folded, _)| *folded);
             rows.push(ChatRow::Header {

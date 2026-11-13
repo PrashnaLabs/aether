@@ -21,6 +21,7 @@ mod menus;
 mod notes;
 mod notify;
 mod open_in;
+mod org;
 mod palette;
 mod project_page;
 mod projects;

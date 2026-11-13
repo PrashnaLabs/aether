@@ -373,7 +373,7 @@ impl ChatApp {
         }
         let chrome = self.sidebar_chrome("Aether", cx);
         let mut sidebar = self
-            .with_search(chrome, cx)
+            .with_org(self.with_search(chrome, cx), cx)
             .on_new_chat(
                 cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
             )
@@ -549,6 +549,57 @@ impl ChatApp {
         )
     }
 
+    /// Organization row, with what needs you, and the current project's heads.
+    fn with_org(&self, sidebar: ChatSidebar, cx: &mut Context<Self>) -> ChatSidebar {
+        if !self.settings.org_enabled {
+            return sidebar;
+        }
+        let needs = self.org_needs_you().len();
+        let mut sidebar = sidebar.top_action_count(
+            gpui_kit::assets::IconName::Users,
+            "Organization",
+            (needs > 0).then_some(needs),
+            cx.listener(|this, _, _, cx| this.open_page(Page::Org, cx)),
+        );
+        let Some(org) = self.org_current() else { return sidebar };
+        let section = format!("Organization · {}", self.project_name(Path::new(&org.project)));
+        sidebar = sidebar.top_section(
+            section.clone(),
+            self.settings.org_section_collapsed,
+            cx.listener(|this, collapsed: &bool, _, cx| {
+                this.update_settings(cx, |s| s.org_section_collapsed = *collapsed)
+            }),
+        );
+        let now = now_ms();
+        for head in &org.heads {
+            let Some(ix) = head.chat.and_then(|id| self.chat_ix(id)) else { continue };
+            let chat = &self.chats[ix];
+            let role = head.role.clone();
+            sidebar = sidebar.chat_in_section(
+                section.clone(),
+                ix,
+                chat.id,
+                format!("[{}] {}", crate::org::model::role_badge(&head.role), head.title),
+                false,
+                chat.status(now),
+                false,
+                None,
+                cx.listener(move |this, _, _, cx| {
+                    this.org.overlay = crate::org::OrgOverlay::HeadEditor(role.clone());
+                    this.open_page(Page::Org, cx);
+                }),
+                cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
+                cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
+                cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
+                cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
+                None,
+                None,
+            );
+        }
+        sidebar
+    }
+
     /// Leaving an empty search field folds it back into its Search row.
     pub(crate) fn close_empty_search(&mut self, cx: &mut Context<Self>) {
         if self.sidebar_search.read(cx).value().is_empty() {
@@ -598,7 +649,7 @@ impl ChatApp {
                 )
                 .section_tools(self.sidebar_tools(cx));
         }
-        sidebar = self.with_search(sidebar, cx);
+        sidebar = self.with_org(self.with_search(sidebar, cx), cx);
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }

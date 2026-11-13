@@ -31,6 +31,10 @@ the agent CLIs you already have installed and signed in to.
   Layouts, drafts, and window positions come back after a restart.
 - **Orchestration.** Turn a chat into a lead that spawns, messages, and stops
   child agents through Aether's built-in MCP server.
+- **Organization.** Run a project like a small company: a CEO lead routes
+  work to persistent heads (Engineering, Product, Security, ...), each with its
+  own model, and heads hire cheap workers under rules you set. Off by default;
+  see [docs/organization.md](docs/organization.md).
 - **Git and worktrees.** Review changes, switch branches, and give each chat
   its own worktree.
 - **Terminals and files.** Split terminals, a file explorer and editor with

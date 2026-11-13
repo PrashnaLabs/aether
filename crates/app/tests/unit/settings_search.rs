@@ -139,3 +139,12 @@ fn status_bar_position_and_visibility_are_not_searchable() {
         );
     }
 }
+
+#[test]
+fn organization_searches_find_its_settings() {
+    assert!(search_settings("organization").iter().any(|m| m.id == "org-enabled"));
+    for query in ["org layout", "roster", "round table", "org chart"] {
+        let hit = search_settings(query).into_iter().find(|m| m.id == "org-layout");
+        assert_eq!(hit.expect(query).tab, SettingsTab::Appearance);
+    }
+}

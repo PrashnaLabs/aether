@@ -1,8 +1,8 @@
 use crate::settings_search::{SettingItem, search_settings, tab_match_count};
 use aether_core::{
-    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor, Reasoning,
-    Settings, THEME_FAMILIES, TerminalCursor, TerminalTheme, ThemeFamily, TileLayout, TimeFormat,
-    ToolPolicy, WatchCorner, family_index,
+    AccessMode, Appearance, ChatLayout, CornerStyle, DateFormat, IconPack, NotesEditor, OrgHire,
+    OrgLayout, Reasoning, Settings, THEME_FAMILIES, TerminalCursor, TerminalTheme, ThemeFamily,
+    TileLayout, TimeFormat, ToolPolicy, WatchCorner, family_index,
 };
 use aether_driver::{DriverStartOptions, ProviderProbe};
 use aether_git::Listed;
@@ -44,11 +44,12 @@ pub(crate) enum SettingsTab {
     Worktrees,
     Attachments,
     Tools,
+    Organization,
     Terminal,
 }
 
 impl SettingsTab {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::Appearance,
         Self::BottomBar,
         Self::Tiling,
@@ -58,6 +59,7 @@ impl SettingsTab {
         Self::Worktrees,
         Self::Attachments,
         Self::Tools,
+        Self::Organization,
         Self::Terminal,
     ];
 
@@ -72,6 +74,7 @@ impl SettingsTab {
             Self::Worktrees => "Worktrees",
             Self::Attachments => "Attachments",
             Self::Tools => "Tools",
+            Self::Organization => "Organization",
             Self::Terminal => "Terminal",
         }
     }
@@ -572,7 +575,7 @@ impl ChatApp {
                     .iter()
                     .position(|w| *w == settings.right_panel_share)
                     .unwrap_or(3);
-                page = page.when(show("chat-layout") || show("right-panel-width"), |page| {
+                page = page.when(show("chat-layout") || show("org-layout") || show("right-panel-width"), |page| {
                     page.child(
                         SettingsSection::new("Chat layout")
                             .icon(Icon::new(gpui_kit::assets::IconName::PanelLeft))
@@ -597,6 +600,7 @@ impl ChatApp {
                                         ),
                                 )
                             })
+                            .when(show("org-layout") && (settings.org_enabled || matches.is_some()), |section| section.child(self.org_layout_row(cx)))
                             .when(show("right-panel-width") && settings.chat_layout != ChatLayout::Tabbed, |section| {
                                 section.child(
                                     div()
@@ -1533,8 +1537,200 @@ impl ChatApp {
                                             })),
                                     ))) })) });
             }
+            SettingsTab::Organization => {
+                page = page.child(self.org_settings(&show, matches.is_some(), cx));
+            }
         }
         page
+    }
+
+    fn org_layout_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let layout = self.settings.org_layout;
+        div().id("org-layout").debug_selector(|| "org-layout".into()).child(
+            SettingsRow::new("Organization layout").description(layout.hint()).control(
+                settings_dropdown(
+                    "org-layout",
+                    "Organization layout",
+                    OrgLayout::ALL.iter().position(|l| *l == layout).unwrap_or(0),
+                    OrgLayout::ALL.map(|l| l.label()),
+                    cx.listener(|this, ix: &usize, _, cx| {
+                        this.update_settings(cx, |s| s.org_layout = OrgLayout::ALL[*ix]);
+                    }),
+                    cx,
+                ),
+            ),
+        )
+    }
+
+    /// Enable toggle, then layout, template and the default rules once on (or while searching).
+    fn org_settings(
+        &self,
+        show: &dyn Fn(&str) -> bool,
+        searching: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        use crate::org::model::TEMPLATES;
+        let s = &self.settings;
+        let on = s.org_enabled || searching;
+        let row = |id: &'static str, title: &'static str, description: String, control| {
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .child(SettingsRow::new(title).description(description).control(control))
+        };
+        let pool = match s.org_pool {
+            None => format!("Auto ({})", self.org_pool_cap()),
+            Some(_) => "Auto from machine".into(),
+        };
+        let budgets = [5., 10., 25., 50., 100., 200., 500.];
+        let general = SettingsSection::new("Organization")
+            .icon(Icon::new(gpui_kit::assets::IconName::Users))
+            .when(show("org-enabled"), |section| {
+                section.child(row(
+                    "org-enabled",
+                    "Enable organizations",
+                    "Shows the Organization view, sidebar section and status bar item. Turning it off pauses every org; nothing is deleted.".into(),
+                    Switch::new("org-enabled-setting")
+                        .checked(s.org_enabled)
+                        .accessibility_label("Enable organizations")
+                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            let checked = *checked;
+                            this.update_settings(cx, |s| s.org_enabled = checked);
+                        }))
+                        .into_any_element(),
+                ))
+            })
+            .when(on && !searching, |section| section.child(self.org_layout_row(cx)))
+            .when(on && show("org-template"), |section| {
+                section.child(row(
+                    "org-template",
+                    "Default template",
+                    "Used by Set up organization.".into(),
+                    settings_dropdown(
+                        "org-template",
+                        "Default template",
+                        TEMPLATES.iter().position(|t| t.id == s.org_template).unwrap_or(1),
+                        TEMPLATES.map(|t| t.name),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_template = TEMPLATES[*ix].id.into());
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            });
+        let rules = SettingsSection::new("Default rules")
+            .icon(Icon::new(gpui_kit::assets::IconName::Wrench))
+            .when(show("org-pool"), |section| {
+                section.child(row(
+                    "org-pool",
+                    "Worker pool",
+                    "Most workers running at once across every head.".into(),
+                    settings_dropdown(
+                        "org-pool",
+                        "Worker pool",
+                        s.org_pool.map_or(0, |n| n.clamp(1, 8)),
+                        std::iter::once(pool).chain((1..=8).map(|n| n.to_string())),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            let pool = (*ix > 0).then_some(*ix);
+                            this.update_settings(cx, |s| s.org_pool = pool);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-builds"), |section| {
+                section.child(row(
+                    "org-builds",
+                    "Builds at a time",
+                    "Builds are serialized; shared target dirs clobber when parallel.".into(),
+                    settings_dropdown(
+                        "org-builds",
+                        "Builds at a time",
+                        s.org_builds.clamp(1, 4) - 1,
+                        (1..=4).map(|n| n.to_string()),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_builds = ix + 1);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-workers-per-head"), |section| {
+                section.child(row(
+                    "org-workers-per-head",
+                    "Workers per head",
+                    "Worker cap a new head starts with.".into(),
+                    settings_dropdown(
+                        "org-workers-per-head",
+                        "Workers per head",
+                        s.org_workers_per_head.clamp(1, 6) - 1,
+                        (1..=6).map(|n| n.to_string()),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_workers_per_head = ix + 1);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-hire"), |section| {
+                section.child(row(
+                    "org-hire",
+                    "Hiring policy",
+                    "Rules: the request has a card, the head is under its cap, the pool has a slot.".into(),
+                    settings_dropdown(
+                        "org-hire",
+                        "Hiring policy",
+                        OrgHire::ALL.iter().position(|h| *h == s.org_hire).unwrap_or(0),
+                        OrgHire::ALL.map(|h| h.label()),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_hire = OrgHire::ALL[*ix]);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-budget"), |section| {
+                section.child(row(
+                    "org-budget",
+                    "Org budget per day",
+                    "Warns you when the org's spend today reaches it.".into(),
+                    settings_dropdown(
+                        "org-budget",
+                        "Org budget per day",
+                        budgets.iter().position(|b| *b == s.org_budget_usd).unwrap_or(2),
+                        budgets.map(|b| format!("${b}")),
+                        cx.listener(move |this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_budget_usd = budgets[*ix]);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            })
+            .when(show("org-rotate"), |section| {
+                section.child(row(
+                    "org-rotate",
+                    "Rotate a head's session at",
+                    "Context bars turn amber here. Rotate session starts the head fresh with the same role.".into(),
+                    settings_dropdown(
+                        "org-rotate",
+                        "Rotate session at",
+                        usize::from(s.org_rotate_at.clamp(50, 95) - 50) / 5,
+                        (50..=95).step_by(5).map(|p| format!("{p}% context")),
+                        cx.listener(|this, ix: &usize, _, cx| {
+                            this.update_settings(cx, |s| s.org_rotate_at = 50 + *ix as u8 * 5);
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                ))
+            });
+        v_flex().gap_8().child(general).when(on, |page| page.child(rules))
     }
 }
 
@@ -1809,6 +2005,7 @@ impl SettingsTab {
             Self::Worktrees => "Manage isolated checkouts used by your chats.",
             Self::Attachments => "Files saved from chats across every project.",
             Self::Tools => "Control tool permissions and planning.",
+            Self::Organization => "Run a project as a lead, persistent heads and their workers.",
             Self::Terminal => "Set the terminal's colors, font, cursor and keys.",
         }
     }
@@ -1825,6 +2022,7 @@ impl SettingsTab {
             Self::Worktrees => Lucide::GitFork,
             Self::Attachments => Lucide::Paperclip,
             Self::Tools => Lucide::Wrench,
+            Self::Organization => Lucide::Users,
             Self::Terminal => Lucide::SquareTerminal,
         }
     }

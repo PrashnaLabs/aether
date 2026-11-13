@@ -215,7 +215,7 @@ fn font_row_matches_the_font_size_row(cx: &mut gpui_kit::TestAppContext) {
 #[cfg(unix)]
 #[gpui_kit::test]
 fn terminal_settings_live_in_their_own_developer_tab(cx: &mut gpui_kit::TestAppContext) {
-    assert_eq!(SettingsTab::ALL[9], SettingsTab::Terminal);
+    assert_eq!(SettingsTab::ALL[10], SettingsTab::Terminal);
     let window = settings_test_window(cx);
     let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
     settle(&mut visual);

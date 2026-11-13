@@ -77,6 +77,7 @@ pub(crate) enum Page {
     HackerNews,
     Notes,
     Board,
+    Org,
 }
 
 pub(crate) const CLIS: [Provider; 5] =
@@ -536,7 +537,7 @@ pub(crate) struct ChatApp {
     pub(crate) crew_pop_trigger: TriggerBounds,
     pub(crate) show_usage_limits: bool,
     /// Dollars per token per model, from OpenRouter's model list.
-    model_prices: HashMap<String, (f64, f64)>,
+    pub(crate) model_prices: HashMap<String, (f64, f64)>,
     pub(crate) settings: Settings,
     api_key: Option<String>,
     pub(crate) key_status: SharedString,
@@ -734,6 +735,7 @@ pub(crate) struct ChatApp {
     pub(crate) hn_browser: Entity<crate::browser::Browser>,
     pub(crate) hn_reader_open: bool,
     pub(crate) hn_search_input: Entity<InputState>,
+    pub(crate) org: crate::org::OrgState,
     _subscriptions: Vec<Subscription>,
 }
 

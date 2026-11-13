@@ -96,6 +96,15 @@ read any chat. A negative `offset` counts back from the end, so `-3` reads
 the last three messages. `list_chats` and the other chat filters take
 `search`, words that must all appear in the title.
 
+`request_worker` is for organization heads only (`title`, `task`, optional
+`card`, `provider`, `model`, `why`). Aether checks the hiring rules (the
+request has a card, the head is under its worker cap, the org pool has a
+free slot) and applies the hiring policy from Settings: it replies
+`hired` with the worker's id, `denied` with the failing rules, or
+`pending` with a request id the user decides on in the Organization page;
+that decision reaches the head as its next turn. A head's `spawn_agent`
+also waits for a free slot under its worker cap and the org pool.
+
 ## Linux troubleshooting
 
 If orchestration does not work on Linux, check in this order:

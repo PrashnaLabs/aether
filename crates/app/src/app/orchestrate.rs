@@ -293,6 +293,7 @@ impl ChatApp {
                 }
                 "list_agents" => Ok(self.list_agents(ix)),
                 "spawn_agent" => self.spawn_agent(ix, &call.args, window, cx),
+                "request_worker" => self.org_request_worker(ix, &call.args, window, cx),
                 "read_agent" => self.read_agent(ix, &call.args),
                 "message_agent" => self.message_agent(ix, &call.args, window, cx),
                 "stop_agent" => self.stop_agent(ix, &call.args, cx),
@@ -800,6 +801,18 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
+        self.spawn_capped(lead_ix, args, true, window, cx)
+    }
+
+    /// `capped: false` skips the slot caps, for a hire the user approved over them.
+    pub(crate) fn spawn_capped(
+        &mut self,
+        lead_ix: usize,
+        args: &Value,
+        capped: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Value, String> {
         let a = SpawnArgs::parse(args, &self.probes)?;
         let lead_id = self.chats[lead_ix].id;
         if !a.nonce.is_empty() {
@@ -820,7 +833,7 @@ impl ChatApp {
         if let Some(id) = a.card {
             self.check_spawn_card(id, &project)?;
         }
-        if self.running_children(lead_ix) >= self.settings.max_children {
+        if capped && self.spawn_full(lead_ix) {
             let same = |(lead, queued): &(i64, Value)| {
                 *lead == lead_id && !a.nonce.is_empty() && queued["nonce"] == a.nonce.as_str()
             };
@@ -842,10 +855,7 @@ impl ChatApp {
             return Ok(json!({
                 "status": "queued",
                 "position": position,
-                "note": format!(
-                    "all {} agent slots are busy; this starts when one finishes, and its id arrives as your next turn. Don't poll.",
-                    self.settings.max_children
-                ),
+                "note": "all your agent slots are busy; this starts when one finishes, and its id arrives as your next turn. Don't poll.",
             }));
         }
         let lead = &self.chats[lead_ix];
@@ -932,11 +942,12 @@ impl ChatApp {
                 self.spawn_queue.remove(i);
                 continue;
             };
-            if self.running_children(lead_ix) >= self.settings.max_children {
+            if self.spawn_full(lead_ix) {
                 i += 1;
                 continue;
             }
             self.spawn_queue.remove(i);
+            self.org_request_started(&args);
             let title = args["title"].as_str().unwrap_or_default().to_string();
             let text = match self.spawn_agent(lead_ix, &args, window, cx) {
                 Ok(reply) => format!("[Aether] Queued spawn \"{title}\" started: {reply}"),
@@ -979,7 +990,16 @@ impl ChatApp {
         self.select(ix, window, cx);
     }
 
-    pub(super) fn running_children(&self, lead_ix: usize) -> usize {
+    /// No free slot for `lead_ix`: its own cap, or an org head's worker cap or the org pool.
+    pub(crate) fn spawn_full(&self, lead_ix: usize) -> bool {
+        let running = self.running_children(lead_ix);
+        running >= self.settings.max_children
+            || self.org_head_by_chat(self.chats[lead_ix].id).is_some_and(|h| {
+                running >= h.max_workers || self.org_pool_busy() >= self.org_pool_cap()
+            })
+    }
+
+    pub(crate) fn running_children(&self, lead_ix: usize) -> usize {
         let lead = self.chats[lead_ix].id;
         self.chats.iter().filter(|c| c.parent == Some(lead) && (c.busy() || starting(c))).count()
     }

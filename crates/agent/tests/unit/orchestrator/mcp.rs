@@ -50,6 +50,7 @@ fn tools_list_is_empty_without_token() {
         [
             "list_agents",
             "spawn_agent",
+            "request_worker",
             "read_agent",
             "message_agent",
             "stop_agent",

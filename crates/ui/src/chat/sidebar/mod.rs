@@ -519,6 +519,7 @@ pub struct ChatSidebar {
     on_collapse: Option<ClickHandler>,
     collapse_action: Option<Box<dyn Action>>,
     custom_sections: Vec<(SharedString, Vec<ChatItem>)>,
+    top_section: Option<(SharedString, (bool, CollapseHandler))>,
     style: SidebarStyle,
     archived: bool,
     pins_only: bool,
@@ -566,6 +567,7 @@ impl ChatSidebar {
             on_collapse: None,
             collapse_action: None,
             custom_sections: Vec::new(),
+            top_section: None,
             style: SidebarStyle::Default,
             archived: false,
             pins_only: false,
@@ -984,6 +986,34 @@ impl ChatSidebar {
             count: None,
             on_click: Rc::new(on_click),
         });
+        self
+    }
+
+    /// A top action row with a count chip when `count` is set.
+    pub fn top_action_count(
+        mut self,
+        icon: impl Into<Icon>,
+        label: impl Into<SharedString>,
+        count: Option<usize>,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.top.push(SectionButtonItem {
+            icon: icon.into(),
+            label: label.into(),
+            count,
+            on_click: Rc::new(on_click),
+        });
+        self
+    }
+
+    /// Shows the custom section `title` right under the top actions, collapsible.
+    pub fn top_section(
+        mut self,
+        title: impl Into<SharedString>,
+        collapsed: bool,
+        handler: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.top_section = Some((title.into(), (collapsed, Rc::new(handler))));
         self
     }
 

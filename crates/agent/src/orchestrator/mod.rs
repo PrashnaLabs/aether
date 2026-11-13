@@ -139,6 +139,22 @@ pub fn tool_specs() -> Value {
             }
         },
         {
+            "name": "request_worker",
+            "description": "Org heads only: ask to hire a worker under you. The org's hiring rules (card, your worker cap, the org pool) and policy decide: replies {\"status\":\"hired\",\"id\":..}, {\"status\":\"denied\",\"reasons\":[..]}, or {\"status\":\"pending\",\"request\":..} when the user must decide; that decision arrives as your next turn, so don't poll.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short worker title"},
+                    "task": {"type": "string", "description": "What the worker should do"},
+                    "card": {"type": "integer", "description": "Board card id the work is tracked on"},
+                    "provider": {"type": "string", "description": "One of: claude, codex, pi, opencode, antigravity; default your own"},
+                    "model": {"type": "string", "description": "Model id for the provider; default your own"},
+                    "why": {"type": "string", "description": "One line on why this worker is needed"}
+                },
+                "required": ["title", "task"]
+            }
+        },
+        {
             "name": "read_agent",
             "description": "Read a child agent's status and latest replies. Use when you need a child's output early; finished results arrive automatically.",
             "inputSchema": {

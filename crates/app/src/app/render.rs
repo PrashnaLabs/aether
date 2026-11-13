@@ -96,6 +96,8 @@ impl Render for ChatApp {
             self.render_terminal_page(window, cx)
         } else if self.page == Page::Board {
             self.render_board(window, cx)
+        } else if self.page == Page::Org {
+            self.render_org(window, cx)
         } else if self.page == Page::HackerNews {
             self.render_hackernews_page(window, cx).into_any_element()
         } else if self.page == Page::Chat || self.page == Page::Explorer {
@@ -232,11 +234,25 @@ impl Render for ChatApp {
             .on_action(cx.listener(|this, _: &crate::actions::OpenBoard, window, cx| {
                 this.open_board(window, cx)
             }))
+            .on_action(cx.listener(|this, _: &crate::actions::OpenOrg, window, cx| {
+                this.open_org(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::actions::CycleOrgLayout, _, cx| {
+                if this.settings.org_enabled {
+                    this.update_settings(cx, |s| {
+                        s.org_layout = crate::org::next_layout(s.org_layout)
+                    })
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleHackerNews, window, cx| {
                 this.toggle_hackernews_page(window, cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleWatchList, _, cx| this.toggle_watch_list(cx)))
             .on_action(cx.listener(|this, _: &BackToChat, window, cx| {
+                if this.page == Page::Org && this.org.overlay != crate::org::OrgOverlay::None {
+                    this.org.overlay = crate::org::OrgOverlay::None;
+                    return cx.notify();
+                }
                 let editing_skill = this.page == Page::Skills && this.skill_editor.is_some();
                 if matches!(
                     this.page,
@@ -246,6 +262,7 @@ impl Render for ChatApp {
                         | Page::HackerNews
                         | Page::Notes
                         | Page::Board
+                        | Page::Org
                 ) && !editing_skill
                 {
                     this.open_page(Page::Chat, cx);

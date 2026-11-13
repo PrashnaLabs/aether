@@ -523,3 +523,19 @@ fn settings_saved_before_the_watch_toggle_keep_watching_on() {
     json.as_object_mut().unwrap().remove("watch_enabled");
     assert!(serde_json::from_value::<Settings>(json).unwrap().watch_enabled);
 }
+
+#[test]
+fn org_settings_default_off_and_load_from_old_files() {
+    let old: Settings = serde_json::from_str("{}").unwrap();
+    assert!(!old.org_enabled);
+    assert_eq!(old.org_layout, OrgLayout::Roster);
+    assert_eq!(old.org_pool, None);
+    assert_eq!((old.org_builds, old.org_workers_per_head), (1, 2));
+    assert_eq!(old.org_hire, OrgHire::Rules);
+    assert_eq!(old.org_budget_usd, 25.);
+    assert_eq!(old.org_rotate_at, 75);
+    assert_eq!(old.org_template, "startup");
+    assert_eq!(serde_json::to_string(&OrgLayout::Table).unwrap(), "\"table\"");
+    assert_eq!(serde_json::from_str::<OrgHire>("\"ask\"").unwrap(), OrgHire::Ask);
+    assert_eq!(OrgLayout::ALL.map(|l| l.label()), ["Roster console", "Org chart", "Round table"]);
+}
