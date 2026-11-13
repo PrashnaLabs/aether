@@ -421,7 +421,11 @@ impl ChatApp {
             );
         }
         let now = now_ms();
-        let (groups, hidden) = self.project_groups();
+        let (mut groups, hidden) = self.project_groups();
+        let org = self.org_listed();
+        for g in &mut groups {
+            g.chats.retain(|&ix| !org.contains(&self.chats[ix].id));
+        }
         // Keep each lead's children together for the sidebar's crew preview.
         let nested: Vec<Vec<(usize, u8)>> =
             groups.iter().map(|g| nest_children(&self.chats, &g.chats)).collect();
@@ -493,10 +497,9 @@ impl ChatApp {
             }
         }
         sidebar = sidebar.pins_only();
-        let heads = self.org_section_heads();
         for ix in (0..self.chats.len()).rev() {
             let chat = &self.chats[ix];
-            if chat.pinned && !chat.archived && chat.is_agent() && !heads.contains(&chat.id) {
+            if chat.pinned && !chat.archived && chat.is_agent() && !org.contains(&chat.id) {
                 sidebar =
                     self.chat_row(sidebar, ix, None, None, self.chat_line(ix, false, now), cx);
             }
@@ -562,8 +565,14 @@ impl ChatApp {
             (needs > 0).then_some(needs),
             cx.listener(|this, _, _, cx| this.open_page(Page::Org, cx)),
         );
-        let Some(org) = self.org_current() else { return sidebar };
-        let section = format!("Organization · {}", self.project_name(Path::new(&org.project)));
+        let orgs: Vec<_> = self.org.orgs.iter().filter(|o| !o.heads.is_empty()).collect();
+        if orgs.is_empty() {
+            return sidebar;
+        }
+        let section = match orgs.as_slice() {
+            [org] => format!("Organization · {}", self.project_name(Path::new(&org.project))),
+            _ => "Organization".to_string(),
+        };
         sidebar = sidebar.top_section(
             section.clone(),
             self.settings.org_section_collapsed,
@@ -572,45 +581,68 @@ impl ChatApp {
             }),
         );
         let now = now_ms();
-        for head in &org.heads {
-            let Some(ix) = head.chat.and_then(|id| self.chat_ix(id)) else { continue };
-            let chat = &self.chats[ix];
-            let role = head.role.clone();
-            sidebar = sidebar.chat_in_section(
-                section.clone(),
-                ix,
-                chat.id,
-                head.title.clone(),
-                false,
-                chat.status(now),
-                false,
-                None,
-                cx.listener(move |this, _, _, cx| {
-                    this.org.overlay = crate::org::OrgOverlay::HeadEditor(role.clone());
-                    this.open_page(Page::Org, cx);
-                }),
-                cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
-                cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-                cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-                cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
-                cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
-                None,
-                None,
-            );
-            sidebar = sidebar.chat_badge(
-                &section,
-                crate::org::model::role_badge(&head.role),
-                gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
-            );
+        for org in &orgs {
+            for head in &org.heads {
+                let Some(ix) = head.chat.and_then(|id| self.chat_ix(id)) else { continue };
+                let chat = &self.chats[ix];
+                if chat.archived {
+                    continue;
+                }
+                let title = match orgs.len() {
+                    1 => head.title.clone(),
+                    _ => format!("{} · {}", head.title, self.project_name(Path::new(&org.project))),
+                };
+                sidebar = sidebar.chat_in_section(
+                    section.clone(),
+                    ix,
+                    chat.id,
+                    title,
+                    ix == self.active && self.page == Page::Chat,
+                    chat.status(now),
+                    false,
+                    self.chat_line(ix, false, now),
+                    cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
+                    cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                    cx.listener(move |this, _, window, cx| {
+                        this.confirm_archive_chat(ix, window, cx)
+                    }),
+                    cx.listener(move |this, _, window, cx| {
+                        this.confirm_delete_chat(ix, window, cx)
+                    }),
+                    None,
+                    None,
+                );
+                sidebar = sidebar.chat_badge(
+                    &section,
+                    crate::org::model::role_badge(&head.role),
+                    gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
+                );
+                let id = chat.id;
+                for w in (0..self.chats.len()).rev() {
+                    let worker = &self.chats[w];
+                    if worker.parent == Some(id) && !worker.archived {
+                        sidebar = self.section_chat_row(sidebar, section.clone(), w, now, cx);
+                    }
+                }
+            }
         }
         sidebar
     }
 
-    /// Head chats listed in the org section, left out of Pinned so they show once.
-    fn org_section_heads(&self) -> Vec<i64> {
-        self.org_current()
-            .filter(|_| self.settings.org_enabled)
-            .map_or_else(Vec::new, |org| org.heads.iter().filter_map(|h| h.chat).collect())
+    /// Org heads and their workers: listed only in the Organization section.
+    fn org_listed(&self) -> std::collections::HashSet<i64> {
+        if !self.settings.org_enabled {
+            return Default::default();
+        }
+        let heads: std::collections::HashSet<i64> =
+            self.org.orgs.iter().flat_map(|o| o.heads.iter().filter_map(|h| h.chat)).collect();
+        self.chats
+            .iter()
+            .filter(|c| heads.contains(&c.id) || c.parent.is_some_and(|p| heads.contains(&p)))
+            .map(|c| c.id)
+            .collect()
     }
 
     /// Leaving an empty search field folds it back into its Search row.
@@ -670,15 +702,18 @@ impl ChatApp {
         let row = |sidebar: ChatSidebar, section: &str, ix: usize, cx: &mut Context<Self>| {
             self.section_chat_row(sidebar, section.to_string(), ix, now, cx)
         };
-        let heads = self.org_section_heads();
+        let org = self.org_listed();
         let pinned: Vec<usize> = (0..self.chats.len())
             .rev()
             .filter(|&ix| {
                 let chat = &self.chats[ix];
-                chat.pinned && !chat.archived && chat.is_agent() && !heads.contains(&chat.id)
+                chat.pinned && !chat.archived && chat.is_agent() && !org.contains(&chat.id)
             })
             .collect();
-        let (groups, _) = self.project_groups();
+        let (mut groups, _) = self.project_groups();
+        for g in &mut groups {
+            g.chats.retain(|&ix| !org.contains(&self.chats[ix].id));
+        }
         let names = self.project_names();
         let listed: Vec<(usize, String)> = groups
             .iter()
