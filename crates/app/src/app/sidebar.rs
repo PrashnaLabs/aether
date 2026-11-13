@@ -444,31 +444,9 @@ impl ChatApp {
         let mut names = disambiguated_names(&folders);
         for (k, group) in groups.iter().enumerate() {
             let name = names.remove(&group.folder).unwrap_or_default();
-            let path = group.folder.display().to_string();
-            let statuses: Vec<ChatStatus> =
-                group.chats.iter().map(|&ix| self.chats[ix].status(now)).collect();
-            let (_, added, deleted, ahead_behind) =
-                self.sidebar_git_summary(&group.folder).unwrap_or((0, 0, 0, None));
-            let header = ProjectHeader {
-                name: name.into(),
-                count: group.chats.len(),
-                collapsed: projects::listed(&self.settings.collapsed_projects, &group.folder),
-                status: projects::rollup(statuses.iter().copied()),
-                missing: self.missing_folders.contains(&group.folder),
-                path: path.into(),
-                branch: self
-                    .branches
-                    .get(&group.folder)
-                    .cloned()
-                    .flatten()
-                    .map(|b| b.branch.into()),
-                no_git: matches!(self.branches.get(&group.folder), Some(None)),
-                added,
-                deleted,
-                ahead: ahead_behind.map_or(0, |(ahead, _)| ahead),
-                needs_you: statuses.iter().filter(|s| s.is_waiting()).count(),
-                failed: statuses.iter().filter(|s| **s == ChatStatus::Failed).count(),
-            };
+            let collapsed = projects::listed(&self.settings.collapsed_projects, &group.folder);
+            let header =
+                self.sidebar_project_header(&group.folder, name, &group.chats, collapsed, now);
             let (fold, new, files, hide, page) = (
                 group.folder.clone(),
                 group.folder.clone(),
@@ -564,29 +542,51 @@ impl ChatApp {
         )
     }
 
-    /// The Org page's sidebar: each head with its role chip, followed by its workers.
+    /// A project row's header: name, branch line and status chips over `chats`.
+    fn sidebar_project_header(
+        &self,
+        folder: &Path,
+        name: String,
+        chats: &[usize],
+        collapsed: bool,
+        now: i64,
+    ) -> ProjectHeader {
+        let statuses: Vec<ChatStatus> =
+            chats.iter().map(|&ix| self.chats[ix].status(now)).collect();
+        let (_, added, deleted, ahead_behind) =
+            self.sidebar_git_summary(folder).unwrap_or((0, 0, 0, None));
+        ProjectHeader {
+            name: name.into(),
+            count: chats.len(),
+            collapsed,
+            status: projects::rollup(statuses.iter().copied()),
+            missing: self.missing_folders.contains(folder),
+            path: folder.display().to_string().into(),
+            branch: self.branches.get(folder).cloned().flatten().map(|b| b.branch.into()),
+            no_git: matches!(self.branches.get(folder), Some(None)),
+            added,
+            deleted,
+            ahead: ahead_behind.map_or(0, |(ahead, _)| ahead),
+            needs_you: statuses.iter().filter(|s| s.is_waiting()).count(),
+            failed: statuses.iter().filter(|s| **s == ChatStatus::Failed).count(),
+        }
+    }
+
+    /// The Org view's sidebar: every org as a project row, holding its heads (role
+    /// chip) and their workers.
     fn render_org_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
-        let title = match self.org_project() {
-            Some(p) => format!("Organization · {}", self.project_name(Path::new(&p))),
-            None => "Organization".to_string(),
-        };
         let mut sidebar = self
-            .sidebar_chrome(title, cx)
+            .sidebar_chrome("Organizations", cx)
             .on_new_chat(cx.listener(|this, _, _, cx| this.org_add(cx)))
             .new_chat_label("Hire")
-            .top_action(
-                gpui_kit::assets::IconName::Users,
-                "Overview",
-                cx.listener(|this, _, _, cx| this.open_page(Page::Org, cx)),
-            )
             .on_back(cx.listener(|this, _, window, cx| this.org_exit(window, cx)))
-            .empty("No organization in this project")
-            .style(self.settings.sidebar_style);
+            .empty("No organizations yet");
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }
-        let Some(org) = self.org_current() else { return sidebar };
-        let heads: Vec<i64> = org.heads.iter().filter_map(|h| h.chat).collect();
+        let live = |id: i64| self.chat_ix(id).filter(|&ix| !self.chats[ix].archived);
+        let heads: Vec<i64> =
+            self.org.orgs.iter().flat_map(|o| o.heads.iter().filter_map(|h| h.chat)).collect();
         sidebar = sidebar.child_agents(
             self.chats
                 .iter()
@@ -594,44 +594,82 @@ impl ChatApp {
                 .map(|c| (c.id, 1))
                 .collect(),
         );
-        let section = "Heads".to_string();
         let now = now_ms();
-        for head in &org.heads {
-            let Some(ix) = head.chat.and_then(|id| self.chat_ix(id)) else { continue };
-            let chat = &self.chats[ix];
-            if chat.archived {
+        let shown = (self.page == Page::Org).then(|| self.org_project()).flatten();
+        let mut k = 0;
+        for org in &self.org.orgs {
+            let rows: Vec<(usize, Option<&crate::org::model::Head>)> = org
+                .heads
+                .iter()
+                .filter_map(|h| Some((live(h.chat?)?, h)))
+                .flat_map(|(ix, head)| {
+                    let id = self.chats[ix].id;
+                    let workers = (0..self.chats.len())
+                        .rev()
+                        .filter(move |&w| {
+                            self.chats[w].parent == Some(id) && !self.chats[w].archived
+                        })
+                        .map(|w| (w, None));
+                    std::iter::once((ix, Some(head))).chain(workers)
+                })
+                .collect();
+            if rows.is_empty() {
                 continue;
             }
-            sidebar = sidebar.chat_in_section(
-                section.clone(),
-                ix,
-                chat.id,
-                head.title.clone(),
-                ix == self.active && self.page == Page::Chat,
-                chat.status(now),
-                false,
-                self.chat_line(ix, false, now),
-                cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
-                cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
-                cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-                cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-                cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
-                cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
-                None,
-                None,
+            let folder = PathBuf::from(&org.project);
+            let ixs: Vec<usize> = rows.iter().map(|(ix, _)| *ix).collect();
+            let collapsed = projects::listed(&self.settings.collapsed_orgs, &folder);
+            let name = self.project_name(&folder).to_string();
+            let header = self.sidebar_project_header(&folder, name, &ixs, collapsed, now);
+            let (fold, open, hire) = (folder.clone(), org.project.clone(), org.project.clone());
+            sidebar = sidebar.org_project(
+                header,
+                shown.as_ref() == Some(&org.project),
+                cx.listener(move |this, collapsed: &bool, _, cx| {
+                    this.update_settings(cx, |s| {
+                        projects::set_listed(&mut s.collapsed_orgs, &fold, *collapsed)
+                    })
+                }),
+                cx.listener(move |this, _, _, cx| this.open_org_page(Some(open.clone()), cx)),
+                cx.listener(move |this, _, _, cx| {
+                    this.open_org_page(Some(hire.clone()), cx);
+                    this.org_add(cx);
+                }),
             );
-            sidebar = sidebar.chat_badge(
-                &section,
-                crate::org::model::role_badge(&head.role),
-                gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
-            );
-            let id = chat.id;
-            for w in (0..self.chats.len()).rev() {
-                let worker = &self.chats[w];
-                if worker.parent == Some(id) && !worker.archived {
-                    sidebar = self.section_chat_row(sidebar, section.clone(), w, now, cx);
+            for (ix, head) in rows {
+                let chat = &self.chats[ix];
+                sidebar = sidebar.chat(
+                    ix,
+                    chat.id,
+                    head.map_or_else(|| chat.title.clone(), |h| h.title.clone().into()),
+                    ix == self.active && self.page == Page::Chat,
+                    chat.status(now),
+                    false,
+                    Some(k),
+                    None,
+                    self.chat_line(ix, false, now),
+                    cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
+                    cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                    cx.listener(move |this, _, window, cx| {
+                        this.confirm_archive_chat(ix, window, cx)
+                    }),
+                    cx.listener(move |this, _, window, cx| {
+                        this.confirm_delete_chat(ix, window, cx)
+                    }),
+                    None,
+                    None,
+                );
+                if let Some(head) = head {
+                    sidebar = sidebar.chat_badge(
+                        k,
+                        crate::org::model::role_badge(&head.role),
+                        gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
+                    );
                 }
             }
+            k += 1;
         }
         sidebar
     }

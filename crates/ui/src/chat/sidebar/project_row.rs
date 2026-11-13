@@ -75,6 +75,7 @@ pub(super) struct ProjectRow {
     pub(super) on_hide: Option<RowHandler>,
     pub(super) on_page: Option<RowHandler>,
     pub(super) org: Option<(bool, RowHandler)>,
+    pub(super) on_open: Option<RowHandler>,
     pub(super) now: i64,
 }
 
@@ -102,6 +103,7 @@ impl ProjectRow {
             on_hide,
             on_page,
             org,
+            on_open,
             now,
         } = self;
         let ProjectHeader {
@@ -126,6 +128,8 @@ impl ProjectRow {
             if missing { format!("Folder not found: {path}").into() } else { path.clone() };
         let new_tip: SharedString = if missing {
             "Folder not found".into()
+        } else if on_open.is_some() {
+            format!("Hire in {name}").into()
         } else {
             format!("New agent chat in {name}").into()
         };
@@ -280,18 +284,22 @@ impl ProjectRow {
                     on_new(ev, window, cx)
                 }),
         )
-        .child(swallow_click(
-            ("project-menu-slot", id),
-            crate::components::button(("project-menu", id))
-                .ghost()
-                .xsmall()
-                .icon(IconName::Ellipsis)
-                .accessibility_label(format!("Project actions for {name}"))
-                .tooltip("Project actions")
-                .dropdown_menu_with_anchor(Anchor::TopRight, menu)
-                .on_open_change(on_menu),
-        ));
+        .when(on_open.is_none(), |act| {
+            act.child(swallow_click(
+                ("project-menu-slot", id),
+                crate::components::button(("project-menu", id))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Ellipsis)
+                    .accessibility_label(format!("Project actions for {name}"))
+                    .tooltip("Project actions")
+                    .dropdown_menu_with_anchor(Anchor::TopRight, menu)
+                    .on_open_change(on_menu),
+            ))
+        });
         let toggle = on_collapse.clone();
+        let fold = on_collapse.clone();
+        let org_row = on_open.is_some();
         let row = row_style(
             h_flex()
                 .id(("project", id))
@@ -315,10 +323,19 @@ impl ProjectRow {
         .text_color(muted)
         .child(
             h_flex()
+                .id(("project-fold", id))
+                .debug_selector({
+                    let path = path.clone();
+                    move || format!("project-fold:{path}")
+                })
                 .flex_none()
                 .h(rems(1.25))
                 .gap_2()
                 .items_center()
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    fold(&!collapsed, window, cx)
+                })
                 .child(
                     Icon::new(project_chevron_icon(collapsed)).size(rems(0.6875)).text_color(muted),
                 )
@@ -369,7 +386,10 @@ impl ProjectRow {
                     .bg(cx.theme().sidebar_border),
             )
         })
-        .on_click(move |_, window, cx| toggle(&!collapsed, window, cx))
+        .on_click(move |ev, window, cx| match &on_open {
+            Some(open) => open(ev, window, cx),
+            None => toggle(&!collapsed, window, cx),
+        })
         .on_key_down(move |ev, window, cx| {
             let fold = match ev.keystroke.key.as_str() {
                 "left" => true,
@@ -383,9 +403,12 @@ impl ProjectRow {
             if fold != collapsed {
                 on_collapse(&fold, window, cx);
             }
-        })
-        .context_menu(context)
-        .into_any_element();
+        });
+        let row = if org_row {
+            row.into_any_element()
+        } else {
+            row.context_menu(context).into_any_element()
+        };
         nest(row, nested, cx)
     }
 }

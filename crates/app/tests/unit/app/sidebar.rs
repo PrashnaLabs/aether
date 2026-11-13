@@ -832,3 +832,55 @@ fn org_chats_open_in_the_org_sidebar(cx: &mut gpui_kit::TestAppContext) {
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn org_sidebar_lists_every_org_as_a_project_row(cx: &mut gpui_kit::TestAppContext) {
+    use crate::org::model::{Head, Org};
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        );
+        app.settings.org_enabled = true;
+        for project in ["/tmp/aether-org-a", "/tmp/aether-org-b"] {
+            app.new_chat_in(PathBuf::from(project), window, cx);
+            app.chats[app.active].messages = vec![aether_core::Message::user("hi")];
+            let ceo = Head { chat: Some(app.chats[app.active].id), ..Head::new("CEO", 2) };
+            app.org.orgs.push(Org { project: project.into(), heads: vec![ceo], ..Org::default() });
+        }
+        app.open_org_for(Path::new("/tmp/aether-org-a"), false, cx);
+        app
+    });
+    let app = window.root(cx).unwrap();
+    let mut visual = gpui_kit::VisualTestContext::from_window(*window, cx);
+    let draw = |visual: &mut gpui_kit::VisualTestContext| {
+        visual.update(|window, cx| {
+            let _ = window.draw(cx);
+        })
+    };
+    let shows = |visual: &mut gpui_kit::VisualTestContext| {
+        app.read_with(visual, |app, _| (app.page, app.sidebar_view, app.org_project()))
+    };
+    draw(&mut visual);
+    assert!(visual.debug_bounds("project:/tmp/aether-org-a").is_some());
+    let row = visual.debug_bounds("project:/tmp/aether-org-b").expect("second org row");
+    visual.simulate_click(row.center(), gpui_kit::Modifiers::default());
+    let org_b = (Page::Org, SidebarView::Org, Some("/tmp/aether-org-b".to_string()));
+    assert_eq!(shows(&mut visual), org_b);
+
+    draw(&mut visual);
+    let fold = visual.debug_bounds("project-fold:/tmp/aether-org-a").expect("chevron");
+    visual.simulate_click(fold.center(), gpui_kit::Modifiers::default());
+    assert_eq!(shows(&mut visual), org_b, "the chevron only folds");
+    app.read_with(&visual, |app, _| {
+        assert_eq!(app.settings.collapsed_orgs, ["/tmp/aether-org-a"]);
+        assert!(app.settings.collapsed_projects.is_empty(), "main sidebar keeps its own folds");
+    });
+}

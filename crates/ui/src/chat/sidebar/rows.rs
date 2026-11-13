@@ -67,10 +67,11 @@ pub(super) enum ChatRow {
         nested: bool,
         on_collapse: CollapseHandler,
         on_new: RowHandler,
-        on_files: RowHandler,
-        on_hide: RowHandler,
-        on_page: RowHandler,
+        on_files: Option<RowHandler>,
+        on_hide: Option<RowHandler>,
+        on_page: Option<RowHandler>,
         org: Option<(bool, RowHandler)>,
+        on_open: Option<RowHandler>,
         active: bool,
         now: i64,
     },
@@ -364,6 +365,7 @@ impl ChatRow {
                 on_hide,
                 on_page,
                 org,
+                on_open,
                 active,
                 now,
             } => {
@@ -380,10 +382,11 @@ impl ChatRow {
                     active,
                     on_collapse,
                     on_new,
-                    on_files: Some(on_files),
-                    on_hide: Some(on_hide),
-                    on_page: Some(on_page),
+                    on_files,
+                    on_hide,
+                    on_page,
                     org,
+                    on_open,
                     now,
                 }
                 .render(
@@ -413,6 +416,7 @@ impl ChatRow {
                     on_hide: None,
                     on_page: None,
                     org: None,
+                    on_open: None,
                     now,
                 }
                 .render(
@@ -973,7 +977,8 @@ impl ChatSidebar {
             .filter(|project| project.header.count > 0)
             .collect();
         let projects_collapsed = self.projects_collapse.as_ref().is_some_and(|(folded, _)| *folded);
-        if !projects.is_empty()
+        let orgs = !projects.is_empty() && projects.iter().all(|p| p.on_open.is_some());
+        if !orgs && !projects.is_empty()
             || self.hidden.is_some()
             || self.on_add_project.is_some()
             || self.projects_collapse.is_some()
@@ -990,8 +995,9 @@ impl ChatSidebar {
         for (k, project) in projects.into_iter().filter(|_| !projects_collapsed).enumerate() {
             let collapsed = project.header.collapsed;
             let holds = |chats: &[ChatItem]| chats.iter().any(|chat| chat.active);
-            let active = collapsed
-                && (holds(&project.chats) || project.worktrees.iter().any(|w| holds(&w.chats)));
+            let active = project.active
+                || collapsed
+                    && (holds(&project.chats) || project.worktrees.iter().any(|w| holds(&w.chats)));
             let chats: Vec<ChatItem> = project.chats.into_iter().filter(|_| !collapsed).collect();
             let mut held: Vec<(WorktreeItem, Vec<ChatItem>, bool)> = Vec::new();
             for mut worktree in project.worktrees.into_iter().filter(|_| !collapsed) {
@@ -1015,6 +1021,7 @@ impl ChatSidebar {
                 on_hide: project.on_hide,
                 on_page: project.on_page,
                 org: project.org,
+                on_open: project.on_open,
                 active,
                 now,
             });

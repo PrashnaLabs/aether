@@ -474,11 +474,14 @@ struct ProjectItem {
     header: ProjectHeader,
     on_collapse: CollapseHandler,
     on_new: RowHandler,
-    on_files: RowHandler,
-    on_hide: RowHandler,
-    on_page: RowHandler,
+    on_files: Option<RowHandler>,
+    on_hide: Option<RowHandler>,
+    on_page: Option<RowHandler>,
     /// Has an org, and what opens its page.
     org: Option<(bool, RowHandler)>,
+    /// Org sidebar row: a click opens this, the chevron folds.
+    on_open: Option<RowHandler>,
+    active: bool,
     chats: Vec<ChatItem>,
     worktrees: Vec<WorktreeItem>,
 }
@@ -718,13 +721,54 @@ impl ChatSidebar {
             header,
             on_collapse: Rc::new(on_collapse),
             on_new: Rc::new(on_new),
-            on_files: Rc::new(on_files),
-            on_hide: Rc::new(on_hide),
-            on_page: Rc::new(on_page),
+            on_files: Some(Rc::new(on_files)),
+            on_hide: Some(Rc::new(on_hide)),
+            on_page: Some(Rc::new(on_page)),
             org: None,
+            on_open: None,
+            active: false,
             chats: Vec::new(),
             worktrees: Vec::new(),
         });
+        self
+    }
+
+    /// Adds an organization as a project group: a click runs `on_open`, the
+    /// chevron folds, + runs `on_hire`. `active` highlights it.
+    pub fn org_project(
+        mut self,
+        header: ProjectHeader,
+        active: bool,
+        on_collapse: impl Fn(&bool, &mut Window, &mut App) + 'static,
+        on_open: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_hire: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.projects.push(ProjectItem {
+            header,
+            on_collapse: Rc::new(on_collapse),
+            on_new: Rc::new(on_hire),
+            on_files: None,
+            on_hide: None,
+            on_page: None,
+            org: None,
+            on_open: Some(Rc::new(on_open)),
+            active,
+            chats: Vec::new(),
+            worktrees: Vec::new(),
+        });
+        self
+    }
+
+    /// Puts a coloured chip before the title of the last chat added to project `project`.
+    pub fn chat_badge(
+        mut self,
+        project: usize,
+        text: impl Into<SharedString>,
+        color: Hsla,
+    ) -> Self {
+        if let Some(chat) = self.projects.get_mut(project).and_then(|p| p.chats.last_mut()) {
+            chat.badge = Some((text.into(), color));
+        }
         self
     }
 
@@ -1078,19 +1122,6 @@ impl ChatSidebar {
             list.push(item);
         } else {
             self.custom_sections.push((section, vec![item]));
-        }
-        self
-    }
-
-    /// Puts a coloured chip before the title of the last chat added to `section`.
-    pub fn chat_badge(mut self, section: &str, text: impl Into<SharedString>, color: Hsla) -> Self {
-        if let Some(chat) = self
-            .custom_sections
-            .iter_mut()
-            .find(|(s, _)| s == section)
-            .and_then(|(_, l)| l.last_mut())
-        {
-            chat.badge = Some((text.into(), color));
         }
         self
     }

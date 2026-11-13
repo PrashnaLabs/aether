@@ -913,6 +913,9 @@ pub struct Settings {
     /// Project folders folded in the sidebar, by path.
     #[serde(default)]
     pub collapsed_projects: Vec<String>,
+    /// Organizations folded in the Organization sidebar, by project path.
+    #[serde(default)]
+    pub collapsed_orgs: Vec<String>,
     /// Whether the entire Projects section is folded in the sidebar.
     #[serde(default)]
     pub projects_section_collapsed: bool,
@@ -1135,6 +1138,7 @@ impl Default for Settings {
             favorite_models: Vec::new(),
             open_in_app: String::new(),
             collapsed_projects: Vec::new(),
+            collapsed_orgs: Vec::new(),
             projects_section_collapsed: false,
             pinned_section_collapsed: false,
             agents_section_collapsed: false,
