@@ -145,34 +145,21 @@ When messaging a chat that is **not** the caller's direct child:
   replies using `read_history` with the destination chat's `id`. (Ending the
   caller's turn after messaging is workflow guidance for the agent, not
   enforced tool behavior.)
-- **Sender tagging:** Aether automatically prepends `[from <title> #<id>] ` to
-  the message text, where `<title>` is the sending chat's title and `<id>` is its
-  chat id. This tag lets the recipient identify the sender and reply back via
-  `message_agent`.
-- **Loop guard:** To prevent unattended agent-to-agent message loops, Aether
-  enforces a 6-message streak limit (`MAX_AGENT_STREAK = 6`).
-  - **What is counted:** `agent_streak` counts the trailing tagged suffix of
-    stored `Role::User` messages plus queued messages in the destination chat,
-    ignoring assistant messages. It scans backwards through user-role and
-    queued text, counting consecutive entries starting with the caller's exact
-    sender tag (`[from <title> #<id>]`). The streak is tracked per sender
-    (counting consecutive messages sent to that destination chat by the same
-    sender).
-  - **Limit behavior:** If the caller has sent 6 or more consecutive tagged
-    messages in a row to the destination chat with no intervening message
-    (`n >= 6`), `message_agent` refuses to send and returns an error before
-    queueing:
-    `agent-to-agent loop guard: you sent chat <id> <n> messages in a row with no reply from another sender or the user; ask the user before sending more`
-    (e.g. reporting `you sent chat <id> 6 messages...`).
-  - **Resetting the guard:** The backward scan stops at the first entry that
-    does not start with this caller's exact `[from <title> #<id>]` tag. The
-    streak count is the number of newer entries from this sender following that
-    entry (and is 0 when the newest entry is not from this sender). Entries that
-    end the scan include messages from other senders (tagged with a different
-    sender title/id), prompts sent by a human user, child result deliveries, or
-    spawn-queue notices. Note that if a user prompt literally starts with the
-    exact `[from <title> #<id>]` prefix, it matches and counts toward that
-    sender's streak.
+- **Sender tagging:** Aether prepends `[from <title> #<id>] ` to the text,
+  where `<id>` is the sending chat's id. The title is cleaned first: `[`, `]`,
+  `#`, control characters, bidi and zero-width characters are removed and it
+  is cut to 40 characters, so a chat cannot forge another sender by renaming
+  itself. The id after `#` is what identifies the sender.
+- **Loop guard:** a lead can send the same non-child chat at most 6 messages
+  in a row. The count is the run of most recent messages (sent or queued) in
+  that chat carrying this sender's id; a message from anyone else, from you,
+  or a child result ends the run. Renaming the sender does not reset it. The
+  seventh send fails with
+  `agent-to-agent loop guard: you sent chat <id> <n> messages in a row with no reply from another sender or the user; ask the user before sending more`.
+  A message you type that starts with the exact tag also counts.
+
+`update_chat` (rename, pin) only reaches the lead's own chat and its direct
+children, plus, for an organization's CEO, that organization's heads.
 
 `read_history` reads earlier messages of this chat (or, for a lead, any chat)
 with full tool calls and output. A negative `offset` counts back from the end,

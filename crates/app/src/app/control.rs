@@ -394,10 +394,21 @@ impl ChatApp {
 
     pub(super) fn update_chat(
         &mut self,
+        caller_ix: usize,
         args: &Value,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
         let ix = self.target(args)?;
+        let caller = self.chats[caller_ix].id;
+        if ix != caller_ix
+            && self.chats[ix].parent != Some(caller)
+            && !self.org_ceo_of(caller, self.chats[ix].id)
+        {
+            return Err(
+                "a lead can only update its own chat, a direct child, or (as an org CEO) its org's heads"
+                    .into(),
+            );
+        }
         let title = args["title"].as_str().map(str::trim).filter(|t| !t.is_empty());
         let pinned = args["pinned"].as_bool();
         if title.is_none() && pinned.is_none() {

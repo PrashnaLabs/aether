@@ -56,6 +56,7 @@ impl ClaudeDriver {
                 me.die("claude is not installed; install it or set an explicit binary path".into());
                 return me;
             };
+            configure_orchestration_env(&mut cmd, opts.lead.as_ref());
             cmd.args(&args).stdin(Stdio::piped()).stdout(Stdio::piped());
             let child = match spawn_logged(&mut cmd) {
                 Ok(child) => child,
@@ -258,6 +259,16 @@ impl ClaudeDriver {
     }
 }
 
+pub(crate) fn configure_orchestration_env(
+    cmd: &mut std::process::Command,
+    lead: Option<&crate::LeadTools>,
+) {
+    if let Some(lead) = lead {
+        cmd.env("AETHER_ORCH_SOCK", &lead.sock);
+        cmd.env("AETHER_ORCH_TOKEN", &lead.token);
+    }
+}
+
 pub(crate) fn send(stdin: &Mutex<Option<ChildStdin>>, v: &Value) {
     if let Some(stdin) = stdin.guard().as_mut() {
         let _ = stdin.write_all(format!("{v}\n").as_bytes());
@@ -419,7 +430,11 @@ pub(crate) fn write_mcp_config(lead: &crate::LeadTools) -> std::io::Result<PathB
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-    opts.open(&path)?.write_all(crate::mcp_config_json(lead).as_bytes())?;
+    let mut config: Value = serde_json::from_str(&crate::mcp_config_json(lead))
+        .expect("serialized MCP config is valid JSON");
+    config["mcpServers"]["aether"]["env"]["AETHER_ORCH_SOCK"] = json!("${AETHER_ORCH_SOCK}");
+    config["mcpServers"]["aether"]["env"]["AETHER_ORCH_TOKEN"] = json!("${AETHER_ORCH_TOKEN}");
+    opts.open(&path)?.write_all(config.to_string().as_bytes())?;
     Ok(path)
 }
 

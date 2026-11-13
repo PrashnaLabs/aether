@@ -678,6 +678,14 @@ impl ChatApp {
             .sum()
     }
 
+    /// `ceo` is the CEO chat of an org that has `head` as one of its heads.
+    pub(crate) fn org_ceo_of(&self, ceo: i64, head: i64) -> bool {
+        self.org.orgs.iter().any(|o| {
+            o.heads.iter().any(|h| h.role == "CEO" && h.chat == Some(ceo))
+                && o.heads.iter().any(|h| h.chat == Some(head))
+        })
+    }
+
     pub(crate) fn org_spend(&self, chat: i64) -> f64 {
         self.chats.iter().find(|c| c.id == chat).map_or(0., |c| self.spend_today(c))
     }

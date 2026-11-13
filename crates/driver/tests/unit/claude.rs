@@ -2156,8 +2156,9 @@ fn lead_launch_adds_aether_mcp_server() {
     let s = &v["mcpServers"]["aether"];
     assert_eq!(s["command"], "/x/aether");
     assert_eq!(s["args"], json!(["mcp"]));
-    assert_eq!(s["env"]["AETHER_ORCH_TOKEN"], "tok123");
-    assert_eq!(s["env"]["AETHER_ORCH_SOCK"], "/s/o.sock");
+    assert_eq!(s["env"]["AETHER_ORCH_TOKEN"], "${AETHER_ORCH_TOKEN}");
+    assert_eq!(s["env"]["AETHER_ORCH_SOCK"], "${AETHER_ORCH_SOCK}");
+    assert!(!body.contains("tok123"), "serialized config must not contain the lead token");
     assert!(args.windows(2).any(|w| w[0] == "--allowedTools" && w[1].contains("mcp__aether")));
     assert!(!args.iter().any(|a| a.contains("tok123")), "token stays out of argv");
     #[cfg(unix)]
@@ -2172,6 +2173,35 @@ fn lead_launch_adds_aether_mcp_server() {
 fn non_lead_launch_has_no_mcp_flags() {
     let (args, ..) = launch_args(&test_opts());
     assert!(!args.iter().any(|a| a == "--mcp-config" || a == "--allowedTools"));
+}
+
+#[test]
+fn claude_launch_scopes_orchestration_environment_to_leads() {
+    use std::ffi::OsStr;
+
+    let mut opts = test_opts();
+    opts.binary = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+    let lead = crate::LeadTools {
+        exe: "/x/aether".into(),
+        sock: "/tmp/dummy-orch.sock".into(),
+        token: "dummy-lead-token".into(),
+        specs: Value::Null,
+    };
+    opts.lead = Some(lead);
+    let mut cmd = crate::spawn::command(&opts, "claude").unwrap();
+    crate::claude::spawn::configure_orchestration_env(&mut cmd, opts.lead.as_ref());
+    let envs: Vec<_> = cmd.get_envs().collect();
+    assert!(
+        envs.contains(&(OsStr::new("AETHER_ORCH_SOCK"), Some(OsStr::new("/tmp/dummy-orch.sock"))))
+    );
+    assert!(
+        envs.contains(&(OsStr::new("AETHER_ORCH_TOKEN"), Some(OsStr::new("dummy-lead-token"))))
+    );
+
+    let cmd = crate::spawn::command(&DriverStartOptions { lead: None, ..opts }, "claude").unwrap();
+    let envs: Vec<_> = cmd.get_envs().collect();
+    assert!(envs.contains(&(OsStr::new("AETHER_ORCH_SOCK"), None)));
+    assert!(envs.contains(&(OsStr::new("AETHER_ORCH_TOKEN"), None)));
 }
 
 #[test]

@@ -202,13 +202,36 @@ const SEP: &str = "\n\n---\n\n";
 const FROM_TAG: &str = "[from ";
 const MAX_AGENT_STREAK: usize = 6;
 
-pub(super) fn agent_streak(chat: &Chat, from: &str) -> usize {
+pub(super) fn agent_streak(chat: &Chat, sender: i64) -> usize {
     let users = chat.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text.as_str());
     users
         .chain(chat.queue.iter().map(|q| q.text.as_str()))
         .rev()
-        .take_while(|t| t.starts_with(from))
+        .take_while(|t| tag_sender(t) == Some(sender))
         .count()
+}
+
+/// Bidi controls, zero-width and line/paragraph separators can reorder or hide tag text.
+fn invisible(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+        )
+}
+
+pub(super) fn sender_tag(title: &str, id: i64) -> String {
+    let title: String = title
+        .chars()
+        .filter(|c| !matches!(c, '[' | ']' | '#') && !invisible(*c))
+        .take(40)
+        .collect();
+    format!("{FROM_TAG}{} #{id}]", title.trim())
+}
+
+pub(super) fn tag_sender(text: &str) -> Option<i64> {
+    let rest = text.strip_prefix(FROM_TAG)?;
+    rest[..rest.find(']')?].rsplit_once(" #")?.1.parse().ok()
 }
 
 pub(super) fn unread(deliveries: Vec<Delivery>, chats: &[Chat]) -> Vec<Delivery> {
@@ -306,7 +329,7 @@ impl ChatApp {
                 "archive_chats" => self.ask_bulk(ix, Bulk::Archive, &call.args, window, cx),
                 "delete_chats" => self.ask_bulk(ix, Bulk::Delete, &call.args, window, cx),
                 "unarchive_chats" => self.unarchive_chats(ix, &call.args, window, cx),
-                "update_chat" => self.update_chat(&call.args, cx),
+                "update_chat" => self.update_chat(ix, &call.args, cx),
                 "stop_chat" => self.stop_any_chat(ix, &call.args, cx),
                 "open_chat" => self.open_chat_tool(&call.args, window, cx),
                 "delete_cards" => self.delete_cards(ix, &call.args, window, cx),
@@ -613,8 +636,8 @@ impl ChatApp {
             text
         } else {
             let lead = &self.chats[lead_ix];
-            let from = format!("{FROM_TAG}{} #{}]", lead.title, lead.id);
-            let n = agent_streak(&self.chats[ix], &from);
+            let from = sender_tag(&lead.title, lead.id);
+            let n = agent_streak(&self.chats[ix], lead.id);
             if n >= MAX_AGENT_STREAK {
                 return Err(format!(
                     "agent-to-agent loop guard: you sent chat {id} {n} messages in a row with no reply from another sender or the user; ask the user before sending more"

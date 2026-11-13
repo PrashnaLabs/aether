@@ -167,18 +167,21 @@ fn unarchive_update_and_stop(cx: &mut TestAppContext) {
     window
         .update(cx, |app, window, cx| {
             app.chats[1].archived = true;
+            app.chats[1].parent = Some(10);
             let back = app.unarchive_chats(0, &json!({"filter": {}}), window, cx).unwrap();
             assert_eq!(back["unarchived"], 1);
             assert!(!app.chats[1].archived);
             let done = app
-                .update_chat(&json!({"id": 20, "title": " Renamed ", "pinned": true}), cx)
+                .update_chat(0, &json!({"id": 20, "title": " Renamed ", "pinned": true}), cx)
                 .unwrap();
             assert_eq!(done, json!({"id": 20, "title": "Renamed", "pinned": true}));
             assert!(
-                app.update_chat(&json!({"id": 20}), cx).unwrap_err().contains("nothing to change")
+                app.update_chat(0, &json!({"id": 20}), cx)
+                    .unwrap_err()
+                    .contains("nothing to change")
             );
             assert_eq!(
-                app.update_chat(&json!({"id": 99, "title": "x"}), cx).unwrap_err(),
+                app.update_chat(0, &json!({"id": 99, "title": "x"}), cx).unwrap_err(),
                 "chat 99 not found"
             );
             assert_eq!(
@@ -189,6 +192,57 @@ fn unarchive_update_and_stop(cx: &mut TestAppContext) {
                 app.stop_any_chat(0, &json!({"id": 20}), cx).unwrap(),
                 json!({"stopped": false})
             );
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn update_chat_allows_caller_and_direct_child_but_rejects_unrelated_targets(
+    cx: &mut TestAppContext,
+) {
+    let window = app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            // The caller index is explicit: chat 10 is the lead; chat 20 is its direct child.
+            app.chats[1].parent = Some(10);
+            app.update_chat(0, &json!({"id": 10, "title": "Lead renamed"}), cx).unwrap();
+            app.update_chat(0, &json!({"id": 20, "title": "Child renamed", "pinned": true}), cx)
+                .unwrap();
+            assert_eq!(app.chats[0].title.as_ref(), "Lead renamed");
+            assert_eq!(app.chats[1].title.as_ref(), "Child renamed");
+            assert!(app.chats[1].pinned);
+
+            let before_title = app.chats[2].title.clone();
+            let before_pinned = app.chats[2].pinned;
+            assert!(app.update_chat(0, &json!({"id": 21, "title": "Intrusion"}), cx).is_err());
+            assert!(app.update_chat(0, &json!({"id": 21, "pinned": false}), cx).is_err());
+            assert_eq!(app.chats[2].title, before_title);
+            assert_eq!(app.chats[2].pinned, before_pinned);
+
+            // Authorization must precede all mutation, including when a request mixes fields.
+            assert!(
+                app.update_chat(0, &json!({"id": 21, "title": "Partial", "pinned": false}), cx)
+                    .is_err()
+            );
+            assert_eq!(app.chats[2].title, before_title);
+            assert_eq!(app.chats[2].pinned, before_pinned);
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn update_chat_lets_an_org_ceo_manage_its_heads(cx: &mut TestAppContext) {
+    use crate::org::model::{Head, Org};
+    let window = app(cx);
+    window
+        .update(cx, |app, _, cx| {
+            let head = |role: &str, chat: i64| Head { chat: Some(chat), ..Head::new(role, 2) };
+            app.org
+                .orgs
+                .push(Org { heads: vec![head("CEO", 10), head("ENG", 21)], ..Org::default() });
+            app.update_chat(0, &json!({"id": 21, "pinned": false}), cx).unwrap();
+            assert!(!app.chats[2].pinned);
+            assert!(app.update_chat(2, &json!({"id": 10, "title": "x"}), cx).is_err());
         })
         .unwrap();
 }
