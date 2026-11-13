@@ -23,7 +23,7 @@ use gpui_kit::{App, Context, Focusable, SharedString, Window, div, prelude::*, p
 use self::attach::{PasteKind, paste_kind, shell_command};
 use self::chips::resting_chip;
 use super::chat::limit_hit;
-use super::format::{format_cost, format_full, message_cost};
+use super::format::{format_cost, format_full, reply_spend};
 use super::{ChatApp, WorktreeJob, chat_cwd};
 
 pub(in crate::app) mod attach;
@@ -146,8 +146,9 @@ impl ChatApp {
         let used = chat.context_used();
         let chat_tokens: u64 =
             chat.messages.iter().map(|m| m.prompt_tokens + m.completion_tokens).sum();
-        let chat_cost: f64 =
-            chat.messages.iter().filter_map(|m| message_cost(m, &self.model_prices)).sum();
+        let chat_cost =
+            chat.messages.iter().map(|m| reply_spend(m, &self.model_prices).0).sum::<u64>() as f64
+                / 1e6;
         let chat_usage = (chat_tokens > 0).then(|| {
             let mut line = format!("{} tokens this chat", format_tokens(chat_tokens));
             if chat_cost > 0. {

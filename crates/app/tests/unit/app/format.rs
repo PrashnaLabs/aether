@@ -48,6 +48,18 @@ fn chat_spend_prefers_reported_cost_and_falls_back_to_prices() {
 }
 
 #[test]
+fn chat_spend_uses_reported_cost_even_without_model_prices() {
+    let mut chat = chat_with("reported", &["q", "a"]);
+    chat.messages[1].model = Some("m".into());
+    chat.messages[1].prompt_tokens = 1_000_000;
+    chat.messages[1].cost_micros = 120_000;
+    let prices = HashMap::from([("m".to_string(), (1e-6, 0.))]);
+    assert_eq!(message_cost(&chat.messages[1], &prices), Some(1.));
+    assert_eq!(chat_spend(&chat, &prices), 0.12);
+    assert_eq!(chat_spend(&chat, &HashMap::new()), 0.12);
+}
+
+#[test]
 fn costs_read_in_cents() {
     assert_eq!(cost_text(0, false), None);
     assert_eq!(cost_text(4_000, false).as_deref(), Some("<$0.01"));
