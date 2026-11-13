@@ -4,7 +4,7 @@ pub(crate) mod view;
 use std::path::{Path, PathBuf};
 
 use aether_core::{Message, Role, config_dir};
-use gpui_kit::component::input::InputState;
+use gpui_kit::component::input::TextareaState;
 use gpui_kit::{Context, Entity, Window};
 use serde_json::{Value, json};
 
@@ -52,7 +52,7 @@ pub(crate) struct OrgState {
     pub selected: Option<OrgSel>,
     pub overlay: OrgOverlay,
     pub tab: OrgTab,
-    pub goal: Entity<InputState>,
+    pub goal: Entity<TextareaState>,
     /// Head role the goal goes to; `None` is the CEO.
     pub goal_target: Option<String>,
     /// Card wake-ups waiting for a window: (head chat, text).
@@ -66,7 +66,7 @@ pub(crate) struct OrgState {
 }
 
 impl OrgState {
-    pub(crate) fn new(orgs: Vec<Org>, goal: Entity<InputState>) -> Self {
+    pub(crate) fn new(orgs: Vec<Org>, goal: Entity<TextareaState>) -> Self {
         Self {
             orgs,
             selected: None,

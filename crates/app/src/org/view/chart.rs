@@ -67,8 +67,14 @@ impl ChatApp {
             .flex_1()
             .min_h_0()
             .child(header)
-            .child(goal)
-            .child(h_flex().flex_1().min_h_0().items_stretch().child(canvas).child(inspector))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_stretch()
+                    .child(v_flex().flex_1().min_w_0().min_h_0().child(canvas).child(goal))
+                    .child(inspector),
+            )
             .into_any_element()
     }
 

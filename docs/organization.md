@@ -74,7 +74,7 @@ layout: ...**), or cycle with the `CycleOrgLayout` action.
   the middle, needs you on the left, the message log on the right.
 
 The header has **+ Hire worker**, **+ Add head**, **Pause org** and
-**Settings**. The goal row sends a goal to the CEO, or straight to one head.
+**Settings**. The goal box at the bottom of the main area works like the chat composer (Enter sends, Shift+Enter adds a line); its chip picks the CEO or one head as the target.
 
 ## Heads
 

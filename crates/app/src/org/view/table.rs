@@ -47,7 +47,6 @@ impl ChatApp {
             .flex_1()
             .min_h_0()
             .child(self.org_header(Some(&org), window, cx))
-            .child(self.org_goal_row(&org, cx))
             .child(
                 h_flex()
                     .flex_1()
@@ -67,15 +66,22 @@ impl ChatApp {
                             .child(self.org_needs_you_list(&org, cx)),
                     )
                     .child(
-                        div()
-                            .id("org-table-center")
+                        v_flex()
                             .flex_1()
+                            .min_w_0()
                             .h_full()
-                            .overflow_scroll()
-                            .flex()
-                            .justify_center()
-                            .items_center()
-                            .child(self.org_round_table(&org, cx)),
+                            .child(
+                                div()
+                                    .id("org-table-center")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_scroll()
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .child(self.org_round_table(&org, cx)),
+                            )
+                            .child(self.org_goal_row(&org, cx)),
                     )
                     .child(
                         div()

@@ -329,13 +329,19 @@ impl ChatApp {
             .flex_1()
             .min_h_0()
             .child(self.org_header_with(Some(&org), Some(seg.into_any_element()), window, cx))
-            .child(self.org_goal_row(&org, cx))
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
-                    .items_start()
-                    .child(table)
+                    .items_stretch()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .child(table)
+                            .child(self.org_goal_row(&org, cx)),
+                    )
                     .child(self.roster_side(&org, cx)),
             )
             .into_any_element()

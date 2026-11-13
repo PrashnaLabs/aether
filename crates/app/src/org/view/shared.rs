@@ -1,5 +1,4 @@
 use aether_ui::ChatStatus;
-use aether_ui::field;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
@@ -300,27 +299,29 @@ impl ChatApp {
                 }
                 menu
             });
-        h_flex()
-            .px(px(20.))
-            .py(px(10.))
-            .gap(px(8.))
-            .items_center()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(div().text_size(px(12.)).text_color(cx.theme().muted_foreground).child("Goal"))
-            .child(div().flex_1().child(field(&self.org.goal).small()))
-            .child(pick)
-            .child(aether_ui::button("org-goal-send").primary().small().label("Send").on_click(
-                cx.listener(|this, _, window, cx| {
-                    let text = this.org.goal.read(cx).value().to_string();
-                    let target = this.org.goal_target.clone();
-                    let sent = this.org_send_goal(text, target, window, cx);
-                    if sent.is_ok() {
-                        this.org.goal.update(cx, |s, cx| s.set_value("", window, cx));
-                    }
-                    report(sent, window, cx);
-                }),
-            ))
+        let empty = self.org.goal.read(cx).value().trim().is_empty();
+        div().w_full().px(px(20.)).pt(px(8.)).pb(px(14.)).child(
+            div().w_full().max_w(px(860.)).mx_auto().child(
+                aether_ui::Composer::new(&self.org.goal).leading(pick).action(
+                    aether_ui::SendButton::new().disabled(empty).on_send(
+                        cx.listener(|this, _, window, cx| this.org_goal_submit(window, cx)),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    pub(crate) fn org_goal_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.org.goal.read(cx).value().trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let target = self.org.goal_target.clone();
+        let sent = self.org_send_goal(text, target, window, cx);
+        if sent.is_ok() {
+            self.org.goal.update(cx, |s, cx| s.set_value("", window, cx));
+        }
+        report(sent, window, cx);
     }
 
     /// Hire requests, waiting chats and cards in review, each with its actions.

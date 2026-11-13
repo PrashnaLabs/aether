@@ -132,7 +132,9 @@ impl ChatApp {
         let skill_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
         let board_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search cards"));
         let org_goal = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
+                .auto_grow(1, 8)
+                .submit_on_enter(true)
                 .placeholder("Give the org a goal. The CEO turns it into cards and routes them.")
         });
         let explorer_quick_open_input =
@@ -251,6 +253,11 @@ impl ChatApp {
                         this.run_explorer_grep(cx);
                     }
                     _ => {}
+                }
+            }),
+            cx.subscribe_in(&org_goal, window, |this, _, ev: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = ev {
+                    this.org_goal_submit(window, cx);
                 }
             }),
             cx.subscribe_in(&instructions, window, |this, input, ev: &InputEvent, _, cx| {
