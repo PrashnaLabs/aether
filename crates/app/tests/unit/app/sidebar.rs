@@ -761,3 +761,74 @@ fn org_page_navigation_restores_the_page_and_sidebar(cx: &mut gpui_kit::TestAppC
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn org_chats_open_in_the_org_sidebar(cx: &mut gpui_kit::TestAppContext) {
+    use crate::org::OrgOverlay;
+    use crate::org::model::{Head, Org};
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            app.settings.org_enabled = true;
+            let (a, b) = (PathBuf::from("/tmp/aether-org-a"), PathBuf::from("/tmp/aether-org-b"));
+            let mut chat_in = |folder: &PathBuf, app: &mut ChatApp| {
+                app.new_chat_in(folder.clone(), window, cx);
+                app.chats[app.active].messages = vec![aether_core::Message::user("hi")];
+                app.active
+            };
+            let x = chat_in(&b, app);
+            let h = chat_in(&a, app);
+            let w = chat_in(&a, app);
+            let head = app.chats[h].id;
+            app.chats[w].parent = Some(head);
+            let ceo = Head { chat: Some(head), ..Head::new("CEO", 2) };
+            let project = a.display().to_string();
+            app.org.orgs.push(Org { project: project.clone(), heads: vec![ceo], ..Org::default() });
+            let shows = |app: &ChatApp| (app.page, app.sidebar_view);
+
+            app.select(x, window, cx);
+            app.open_org_for(&a, false, cx);
+            app.select(h, window, cx);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Org));
+            assert_eq!(app.org.project.as_deref(), Some(project.as_str()));
+            app.select(w, window, cx);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Org));
+            app.sync_org_view(false);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Org));
+
+            app.org_add(cx);
+            assert_eq!(shows(app), (Page::Org, SidebarView::Org));
+            assert_eq!(app.org.overlay, OrgOverlay::HeadEditor(String::new()));
+            app.org.orgs[0].heads.push(Head::new("ENG", 2));
+            app.org_add(cx);
+            assert!(matches!(app.org.overlay, OrgOverlay::Hire(_)));
+
+            app.select(h, window, cx);
+            app.org_exit(window, cx);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Projects));
+            assert_eq!((app.active, app.org.project.as_deref()), (x, None));
+
+            app.select(h, window, cx);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Org));
+            app.select(x, window, cx);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Projects));
+
+            app.select(h, window, cx);
+            app.switch_sidebar_to_outside(cx);
+            app.sync_org_view(false);
+            assert_eq!(shows(app), (Page::Chat, SidebarView::Outside));
+        })
+        .unwrap();
+}

@@ -393,10 +393,12 @@ impl ChatApp {
         self.active = ix;
         self.activate_session_ui(id, window, cx);
         self.draft_owner = Some(id);
-        self.sidebar_view = self
-            .sidebar_view
-            .off_org(Page::Chat, self.org.back.1)
-            .after_select(self.chats[ix].is_agent(), self.locked(ix));
+        if self.chat_org(ix).is_none() {
+            self.sidebar_view = self
+                .sidebar_view
+                .off_org(Page::Chat, self.org.back.1)
+                .after_select(self.chats[ix].is_agent(), self.locked(ix));
+        }
 
         self.copied = None;
         self.selection_bar = None;

@@ -770,9 +770,8 @@ impl ChatApp {
             self.ensure_usage_history(false, cx);
         }
         if page == Page::Org {
-            if self.page != Page::Org {
-                let view = self.sidebar_view.off_org(self.page, self.org.back.1);
-                self.org.back = (self.page, view);
+            if self.sidebar_view != SidebarView::Org {
+                self.org.back = (self.page, self.sidebar_view);
             }
             self.sidebar_view = SidebarView::Org;
         }
@@ -791,7 +790,7 @@ impl ChatApp {
             });
         }
         self.page = page;
-        self.leave_org();
+        self.sync_org_view(true);
         if page == Page::Settings {
             let focus = self.settings_sidebar_focus.clone();
             let search = self.settings_search_input.clone();

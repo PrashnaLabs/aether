@@ -22,10 +22,14 @@ Turning it off hides all of that. Nothing is deleted.
 
 Alt+O, the palette and the status bar open the page for the current project;
 the project row opens it for that project. While the page is open the sidebar
-shows `Organization · <project>`: each head with its role chip, followed by its
-workers. Click a row to open that chat. Back (or Escape) returns to the page
-and sidebar view you had before. Heads and workers stay out of Pinned and
-Projects.
+shows `Organization · <project>`: **Overview** (the page), then each head with
+its role chip, followed by its workers. Heads and workers are org agents: they
+stay out of Pinned and Projects, and opening one from anywhere (sidebar, page,
+palette, watch list, notifications, tabs) shows its chat with this sidebar for
+its org. Opening any other chat brings back the sidebar view you had before.
+The header's **+** opens the hire dialog (Add head while only the CEO exists).
+**Agent Projects** at the bottom returns to the page and chat you had before
+the org; Escape on the page returns to the page before it.
 
 ## Set up a project
 

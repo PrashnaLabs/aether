@@ -61,6 +61,8 @@ pub(crate) struct OrgState {
     pub project: Option<String>,
     /// Page and sidebar view to return to when the Org page closes.
     pub back: (Page, SidebarView),
+    /// Last non-org chat shown; the sidebar's back row returns to it.
+    pub back_chat: Option<i64>,
 }
 
 impl OrgState {
@@ -75,6 +77,7 @@ impl OrgState {
             wake: Vec::new(),
             project: None,
             back: (Page::Chat, SidebarView::Projects),
+            back_chat: None,
         }
     }
 }
@@ -187,6 +190,14 @@ impl ChatApp {
         self.org.orgs.iter().find_map(|o| o.head_of_chat(chat))
     }
 
+    /// Project of the org whose head or worker chat `ix` is.
+    pub(crate) fn chat_org(&self, ix: usize) -> Option<String> {
+        let chat = self.chats.get(ix).filter(|_| self.settings.org_enabled)?;
+        let of = |id: i64| id == chat.id || chat.parent == Some(id);
+        let org = self.org.orgs.iter().find(|o| o.heads.iter().any(|h| h.chat.is_some_and(of)))?;
+        Some(org.project.clone())
+    }
+
     /// Chat ids of the org's heads and their workers.
     fn org_chats(&self, org: &Org) -> Vec<i64> {
         let heads: Vec<i64> = org.heads.iter().filter_map(|h| h.chat).collect();
@@ -223,13 +234,30 @@ impl ChatApp {
 
     /// Opens the Org page for `project`, or for the current project when `None`.
     pub(crate) fn open_org_page(&mut self, project: Option<String>, cx: &mut Context<Self>) {
+        self.org_show(project);
+        self.open_page(Page::Org, cx);
+    }
+
+    fn org_show(&mut self, project: Option<String>) {
         let shown = self.org_project();
         self.org.project = project;
         if self.org_project() != shown {
             self.org.overlay = OrgOverlay::None;
             self.org.selected = None;
         }
+    }
+
+    /// Org sidebar's +: hire a worker, or add a head when only the CEO exists.
+    pub(crate) fn org_add(&mut self, cx: &mut Context<Self>) {
         self.open_page(Page::Org, cx);
+        match self.org_current() {
+            None => self.org_open_wizard(),
+            Some(org) if org.heads.iter().all(|h| h.role == "CEO") => {
+                self.org.overlay = OrgOverlay::HeadEditor(String::new())
+            }
+            Some(_) => self.org_open_hire(None),
+        }
+        cx.notify();
     }
 
     /// Org page for a project's sidebar row; `setup` opens the setup wizard.
@@ -254,10 +282,37 @@ impl ChatApp {
         }
     }
 
-    /// Off the Org page: the sidebar view from before it comes back and a picked project is dropped.
-    pub(crate) fn leave_org(&mut self) {
+    /// Org sidebar's back row: the normal sidebar and the page from before the org,
+    /// on the last non-org chat for the chat page.
+    pub(crate) fn org_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.org.back.0 != Page::Chat {
+            return self.open_page(self.org.back.0, cx);
+        }
+        let last = self.org.back_chat.and_then(|id| self.chat_ix(id));
+        match last.filter(|&ix| !self.chats[ix].archived && self.chat_org(ix).is_none()) {
+            Some(ix) => self.select(ix, window, cx),
+            None => self.new_chat_in_current_project(window, cx),
+        }
+    }
+
+    /// The sidebar follows the page and chat shown: the Org page or an org chat shows
+    /// that org's view (an org chat enters it only when `enter`), anything else leaves it.
+    pub(crate) fn sync_org_view(&mut self, enter: bool) {
         if self.page == Page::Org {
             return;
+        }
+        let org = (self.page == Page::Chat).then(|| self.chat_org(self.active)).flatten();
+        if let Some(project) = org.clone()
+            && (enter || self.sidebar_view == SidebarView::Org)
+        {
+            if self.sidebar_view != SidebarView::Org {
+                self.org.back = (Page::Chat, self.sidebar_view);
+                self.sidebar_view = SidebarView::Org;
+            }
+            return self.org_show(Some(project));
+        }
+        if self.page == Page::Chat && org.is_none() {
+            self.org.back_chat = self.chats.get(self.active).map(|c| c.id);
         }
         self.sidebar_view = self.sidebar_view.off_org(self.page, self.org.back.1);
         if self.org.project.take().is_some() {
@@ -275,10 +330,16 @@ impl ChatApp {
         cx: &mut Context<Self>,
     ) -> Result<i64, String> {
         let o = &self.org;
-        let keep = (o.back, o.project.clone(), o.overlay.clone(), o.selected.clone());
+        let keep = (o.back, o.back_chat, o.project.clone(), o.overlay.clone(), o.selected.clone());
         self.new_chat_in(PathBuf::from(project), window, cx);
         self.open_page(Page::Org, cx);
-        (self.org.back, self.org.project, self.org.overlay, self.org.selected) = keep;
+        (
+            self.org.back,
+            self.org.back_chat,
+            self.org.project,
+            self.org.overlay,
+            self.org.selected,
+        ) = keep;
         let ix = self.active;
         let access = self.settings.default_access(head.provider);
         let chat = &mut self.chats[ix];

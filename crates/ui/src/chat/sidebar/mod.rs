@@ -517,6 +517,7 @@ pub struct ChatSidebar {
     count: Option<usize>,
     empty: Option<SharedString>,
     on_new_chat: Option<ClickHandler>,
+    new_chat_label: SharedString,
     on_back: Option<ClickHandler>,
     on_add_project: Option<RowHandler>,
     new_chat_action: Option<Box<dyn Action>>,
@@ -564,6 +565,7 @@ impl ChatSidebar {
             count: None,
             empty: None,
             on_new_chat: None,
+            new_chat_label: "New chat".into(),
             on_back: None,
             on_add_project: None,
             new_chat_action: None,
@@ -854,6 +856,12 @@ impl ChatSidebar {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_new_chat = Some(Box::new(handler));
+        self
+    }
+
+    /// Tooltip of the header's + button.
+    pub fn new_chat_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.new_chat_label = label.into();
         self
     }
 

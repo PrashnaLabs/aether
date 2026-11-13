@@ -572,11 +572,14 @@ impl ChatApp {
         };
         let mut sidebar = self
             .sidebar_chrome(title, cx)
-            .on_new_chat(
-                cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
+            .on_new_chat(cx.listener(|this, _, _, cx| this.org_add(cx)))
+            .new_chat_label("Hire")
+            .top_action(
+                gpui_kit::assets::IconName::Users,
+                "Overview",
+                cx.listener(|this, _, _, cx| this.open_page(Page::Org, cx)),
             )
-            .new_chat_action(NewChat)
-            .on_back(cx.listener(|this, _, window, cx| this.org_back(window, cx)))
+            .on_back(cx.listener(|this, _, window, cx| this.org_exit(window, cx)))
             .empty("No organization in this project")
             .style(self.settings.sidebar_style);
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {

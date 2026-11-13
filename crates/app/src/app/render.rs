@@ -13,7 +13,7 @@ use super::{ChatApp, Page, apply_font_size};
 impl Render for ChatApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         apply_font_size(self.settings.font_size, window);
-        self.leave_org();
+        self.sync_org_view(false);
         let news_shown = self.page == Page::HackerNews;
         let reader_shown =
             news_shown && self.hn_reader_open && !self.palette_open && !self.notes.search_ui.open;
@@ -48,6 +48,7 @@ impl Render for ChatApp {
                 self.refresh_git(false, cx);
                 self.refresh_missing_attachments(false, cx);
                 self.load_bases(cx);
+                self.sync_org_view(true);
             }
         }
         let native_bounds = window.window_bounds().get_bounds();

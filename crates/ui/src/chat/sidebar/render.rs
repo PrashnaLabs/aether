@@ -99,12 +99,14 @@ impl ChatSidebar {
                             .ghost()
                             .small()
                             .icon(IconName::Plus)
-                            .accessibility_label("New chat")
+                            .accessibility_label(self.new_chat_label.clone())
                             .map(|b| match &self.new_chat_action {
-                                Some(action) => {
-                                    b.tooltip_with_action("New chat", action.as_ref(), None)
-                                }
-                                None => b.tooltip("New chat"),
+                                Some(action) => b.tooltip_with_action(
+                                    self.new_chat_label.clone(),
+                                    action.as_ref(),
+                                    None,
+                                ),
+                                None => b.tooltip(self.new_chat_label.clone()),
                             })
                             .when_some(self.on_new_chat.take(), |b, handler| b.on_click(handler)),
                     )
