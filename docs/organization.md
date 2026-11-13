@@ -11,20 +11,27 @@ It is off by default, because heads keep spending tokens while they work.
 
 **Settings > Organization > Enable organizations.** With it on you get:
 
-- an **Organization** row at the top of the sidebar, with a count of things
-  waiting on you;
-- an `Organization · <project>` sidebar section listing each head with its
-  status and role (click a head to edit it);
+- on each project in the sidebar's Projects list: an **Organization** icon
+  (first of the hover icons) when the project has an org, or **Set up
+  organization** in its `⋯` menu when it doesn't;
 - a status bar item: `N heads · busy/cap workers · $spent today · K need you`
   (click it to open the page);
 - **Alt+O** and the palette command **Organization**.
 
 Turning it off hides all of that. Nothing is deleted.
 
+Alt+O, the palette and the status bar open the page for the current project;
+the project row opens it for that project. While the page is open the sidebar
+shows `Organization · <project>`: each head with its role chip, followed by its
+workers. Click a row to open that chat. Back (or Escape) returns to the page
+and sidebar view you had before. Heads and workers stay out of Pinned and
+Projects.
+
 ## Set up a project
 
-Open a chat in the project, then the Organization page, and click **Set up
-organization**. The wizard has four steps:
+Pick **Set up organization** from the project's `⋯` menu in the sidebar, or
+open the Organization page for the project and click **Set up organization**.
+The wizard has four steps:
 
 1. **Template.** Solo builder (CEO and Engineering), Startup (adds Product and
    Security; the default), Full company (adds Design, QA, Release ops and
@@ -63,7 +70,7 @@ The header has **+ Hire worker**, **+ Add head**, **Pause org** and
 
 ## Heads
 
-Click a head (on the page or in the sidebar) to open its editor: title,
+Click a head on the page to open its editor: title,
 reviewer, model and reasoning (same picker as the wizard), max workers, what
 it owns, its role file (editable) and its memory file (read only). From there
 you can **Rotate

@@ -222,6 +222,7 @@ impl ChatApp {
                 }
                 crate::app::SidebarView::Outside => self.switch_sidebar_to_outside(cx),
                 crate::app::SidebarView::Archived => self.switch_sidebar_to_archive(cx),
+                crate::app::SidebarView::Org => self.open_org_page(None, cx),
             },
             None => {}
         }

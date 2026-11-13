@@ -6,11 +6,10 @@ mod table;
 
 use aether_core::OrgLayout;
 use gpui_kit::component::button::ButtonVariants;
-use gpui_kit::component::{ActiveTheme, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Sizable, v_flex};
 use gpui_kit::{AnyElement, Context, FontWeight, Role, Window, div, prelude::*, px};
 
 use super::OrgOverlay;
-use super::model::OrgSpec;
 use crate::app::ChatApp;
 use shared::avatar;
 
@@ -27,13 +26,11 @@ impl ChatApp {
                 OrgLayout::Table => self.render_org_table(window, cx),
             }
         };
-        let lights = aether_ui::traffic_lights_gap(self.settings.sidebar_collapsed, window, cx);
         let overlay = self.render_org_overlay(window, cx);
         v_flex()
             .size_full()
             .relative()
             .bg(cx.theme().background)
-            .child(h_flex().child(lights))
             .child(body)
             .children(overlay)
             .into_any_element()
@@ -69,9 +66,7 @@ impl ChatApp {
             "Pick a template and Aether creates the head chats, pins them, turns on their lead tools, writes their role files and wires up review. You can change everyone later.",
             aether_ui::button("org-setup").primary().small().label("Set up organization").on_click(
                 cx.listener(|this, _, _, cx| {
-                    let s = &this.settings;
-                    let draft = OrgSpec::from_template(&s.org_template, s.org_workers_per_head);
-                    this.org.overlay = OrgOverlay::Wizard { step: 0, draft };
+                    this.org_open_wizard();
                     cx.notify();
                 }),
             ),

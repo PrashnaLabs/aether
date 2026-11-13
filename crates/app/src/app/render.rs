@@ -13,6 +13,7 @@ use super::{ChatApp, Page, apply_font_size};
 impl Render for ChatApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         apply_font_size(self.settings.font_size, window);
+        self.leave_org();
         let news_shown = self.page == Page::HackerNews;
         let reader_shown =
             news_shown && self.hn_reader_open && !self.palette_open && !self.notes.search_ui.open;
@@ -253,6 +254,9 @@ impl Render for ChatApp {
                     this.org.overlay = crate::org::OrgOverlay::None;
                     return cx.notify();
                 }
+                if this.page == Page::Org {
+                    return this.org_back(window, cx);
+                }
                 let editing_skill = this.page == Page::Skills && this.skill_editor.is_some();
                 if matches!(
                     this.page,
@@ -262,7 +266,6 @@ impl Render for ChatApp {
                         | Page::HackerNews
                         | Page::Notes
                         | Page::Board
-                        | Page::Org
                 ) && !editing_skill
                 {
                     this.open_page(Page::Chat, cx);

@@ -197,9 +197,7 @@ impl ChatApp {
                         div().text_color(warning_text(cx)).child(format!("{needs} need you")),
                     )
                 })
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |this, cx| this.open_page(Page::Org, cx))
-                }),
+                .on_click(move |_, _, cx| view.update(cx, |this, cx| this.open_org_page(None, cx))),
         )
     }
 

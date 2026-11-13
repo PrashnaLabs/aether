@@ -74,16 +74,23 @@ pub(super) fn project_menu(
     on_files: Option<RowHandler>,
     on_hide: Option<RowHandler>,
     on_page: Option<RowHandler>,
+    on_setup_org: Option<RowHandler>,
 ) -> PopupMenu {
     let mut menu = menu;
     if let Some(on_page) = on_page {
-        menu = menu
-            .item(
-                PopupMenuItem::new("Open project page")
-                    .icon(Lucide::LayoutDashboard)
-                    .on_click(move |ev, window, cx| on_page(ev, window, cx)),
-            )
-            .separator();
+        menu = menu.item(
+            PopupMenuItem::new("Open project page")
+                .icon(Lucide::LayoutDashboard)
+                .on_click(move |ev, window, cx| on_page(ev, window, cx)),
+        );
+        if let Some(on_setup) = on_setup_org {
+            menu = menu.item(
+                PopupMenuItem::new("Set up organization")
+                    .icon(Lucide::Users)
+                    .on_click(move |ev, window, cx| on_setup(ev, window, cx)),
+            );
+        }
+        menu = menu.separator();
     }
     let mut menu = menu.item(
         PopupMenuItem::new("New agent chat here")

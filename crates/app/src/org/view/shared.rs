@@ -119,7 +119,7 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let _ = window;
+        let lights = aether_ui::traffic_lights_gap(self.settings.sidebar_collapsed, window, cx);
         let theme = cx.theme();
         let project = self
             .org_project()
@@ -158,6 +158,7 @@ impl ChatApp {
                 )
         });
         h_flex()
+            .child(lights)
             .px(px(20.))
             .py(px(12.))
             .gap(px(10.))
@@ -183,6 +184,7 @@ impl ChatApp {
                     .label("Settings")
                     .on_click(cx.listener(|this, _, _, cx| this.org_open_settings(cx))),
             )
+            .child(aether_ui::window_controls_gap(window))
     }
 
     /// Goal input, target (CEO or a head) and Send.

@@ -356,6 +356,9 @@ impl ChatApp {
     }
 
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
+        if self.sidebar_view == SidebarView::Org {
+            return self.render_org_sidebar(cx);
+        }
         if self.sidebar_view == SidebarView::DirectChats {
             return self.render_direct_chats_sidebar(cx);
         }
@@ -373,7 +376,7 @@ impl ChatApp {
         }
         let chrome = self.sidebar_chrome("Aether", cx);
         let mut sidebar = self
-            .with_org(self.with_search(chrome, cx), cx)
+            .with_search(chrome, cx)
             .on_new_chat(
                 cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
             )
@@ -491,6 +494,14 @@ impl ChatApp {
                 }),
                 cx.listener(move |this, _, _, cx| this.open_project_page(page.clone(), cx)),
             );
+            if self.settings.org_enabled {
+                let has_org = self.org_for_project(&group.folder.display().to_string()).is_some();
+                let folder = group.folder.clone();
+                sidebar = sidebar.project_org(
+                    has_org,
+                    cx.listener(move |this, _, _, cx| this.open_org_for(&folder, !has_org, cx)),
+                );
+            }
             for &(ix, _) in &nested[k] {
                 sidebar =
                     self.chat_row(sidebar, ix, Some(k), None, self.chat_line(ix, true, now), cx);
@@ -553,85 +564,68 @@ impl ChatApp {
         )
     }
 
-    /// Organization row, with what needs you, and the current project's heads.
-    fn with_org(&self, sidebar: ChatSidebar, cx: &mut Context<Self>) -> ChatSidebar {
-        if !self.settings.org_enabled {
-            return sidebar;
-        }
-        let needs = self.org_needs_you().len();
-        let mut sidebar = sidebar.top_action_count(
-            gpui_kit::assets::IconName::Users,
-            "Organization",
-            (needs > 0).then_some(needs),
-            cx.listener(|this, _, _, cx| this.open_page(Page::Org, cx)),
-        );
-        let orgs: Vec<_> = self.org.orgs.iter().filter(|o| !o.heads.is_empty()).collect();
-        if orgs.is_empty() {
-            return sidebar;
-        }
-        let section = match orgs.as_slice() {
-            [org] => format!("Organization · {}", self.project_name(Path::new(&org.project))),
-            _ => "Organization".to_string(),
+    /// The Org page's sidebar: each head with its role chip, followed by its workers.
+    fn render_org_sidebar(&self, cx: &mut Context<Self>) -> ChatSidebar {
+        let title = match self.org_project() {
+            Some(p) => format!("Organization · {}", self.project_name(Path::new(&p))),
+            None => "Organization".to_string(),
         };
-        sidebar = sidebar.top_section(
-            section.clone(),
-            self.settings.org_section_collapsed,
-            cx.listener(|this, collapsed: &bool, _, cx| {
-                this.update_settings(cx, |s| s.org_section_collapsed = *collapsed)
-            }),
-        );
+        let mut sidebar = self
+            .sidebar_chrome(title, cx)
+            .on_new_chat(
+                cx.listener(|this, _, window, cx| this.new_chat_in_current_project(window, cx)),
+            )
+            .new_chat_action(NewChat)
+            .on_back(cx.listener(|this, _, window, cx| this.org_back(window, cx)))
+            .empty("No organization in this project")
+            .style(self.settings.sidebar_style);
+        if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
+            sidebar = sidebar.renaming(ix, &self.rename_input);
+        }
+        let Some(org) = self.org_current() else { return sidebar };
+        let section = "Heads".to_string();
         let now = now_ms();
-        for org in &orgs {
-            for head in &org.heads {
-                let Some(ix) = head.chat.and_then(|id| self.chat_ix(id)) else { continue };
-                let chat = &self.chats[ix];
-                if chat.archived {
-                    continue;
-                }
-                let title = match orgs.len() {
-                    1 => head.title.clone(),
-                    _ => format!("{} · {}", head.title, self.project_name(Path::new(&org.project))),
-                };
-                sidebar = sidebar.chat_in_section(
-                    section.clone(),
-                    ix,
-                    chat.id,
-                    title,
-                    ix == self.active && self.page == Page::Chat,
-                    chat.status(now),
-                    false,
-                    self.chat_line(ix, false, now),
-                    cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
-                    cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
-                    cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
-                    cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
-                    cx.listener(move |this, _, window, cx| {
-                        this.confirm_archive_chat(ix, window, cx)
-                    }),
-                    cx.listener(move |this, _, window, cx| {
-                        this.confirm_delete_chat(ix, window, cx)
-                    }),
-                    None,
-                    None,
-                );
-                sidebar = sidebar.chat_badge(
-                    &section,
-                    crate::org::model::role_badge(&head.role),
-                    gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
-                );
-                let id = chat.id;
-                for w in (0..self.chats.len()).rev() {
-                    let worker = &self.chats[w];
-                    if worker.parent == Some(id) && !worker.archived {
-                        sidebar = self.section_chat_row(sidebar, section.clone(), w, now, cx);
-                    }
+        for head in &org.heads {
+            let Some(ix) = head.chat.and_then(|id| self.chat_ix(id)) else { continue };
+            let chat = &self.chats[ix];
+            if chat.archived {
+                continue;
+            }
+            sidebar = sidebar.chat_in_section(
+                section.clone(),
+                ix,
+                chat.id,
+                head.title.clone(),
+                ix == self.active && self.page == Page::Chat,
+                chat.status(now),
+                false,
+                self.chat_line(ix, false, now),
+                cx.listener(move |this, _, window, cx| this.select(ix, window, cx)),
+                cx.listener(move |this, _, window, cx| this.begin_rename(ix, window, cx)),
+                cx.listener(move |this, _, window, cx| this.duplicate_chat(ix, window, cx)),
+                cx.listener(move |this, _, _, cx| this.toggle_pin(ix, cx)),
+                cx.listener(move |this, _, window, cx| this.confirm_archive_chat(ix, window, cx)),
+                cx.listener(move |this, _, window, cx| this.confirm_delete_chat(ix, window, cx)),
+                None,
+                None,
+            );
+            sidebar = sidebar.chat_badge(
+                &section,
+                crate::org::model::role_badge(&head.role),
+                gpui_kit::rgb(crate::org::model::role_color(&head.role)).into(),
+            );
+            let id = chat.id;
+            for w in (0..self.chats.len()).rev() {
+                let worker = &self.chats[w];
+                if worker.parent == Some(id) && !worker.archived {
+                    sidebar = self.section_chat_row(sidebar, section.clone(), w, now, cx);
                 }
             }
         }
         sidebar
     }
 
-    /// Org heads and their workers: listed only in the Organization section.
+    /// Org heads and their workers: listed only in the Organization view.
     fn org_listed(&self) -> std::collections::HashSet<i64> {
         if !self.settings.org_enabled {
             return Default::default();
@@ -694,7 +688,7 @@ impl ChatApp {
                 )
                 .section_tools(self.sidebar_tools(cx));
         }
-        sidebar = self.with_org(self.with_search(sidebar, cx), cx);
+        sidebar = self.with_search(sidebar, cx);
         if let Some(ix) = self.renaming.filter(|_| !self.rename_in_tab) {
             sidebar = sidebar.renaming(ix, &self.rename_input);
         }
@@ -959,7 +953,11 @@ impl ChatApp {
     }
 
     /// Header and resizable edge shared by every sidebar view.
-    fn sidebar_chrome(&self, title: &'static str, cx: &mut Context<Self>) -> ChatSidebar {
+    fn sidebar_chrome(
+        &self,
+        title: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> ChatSidebar {
         let (resize, resize_end, watch, handoff) =
             (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         ChatSidebar::new(title)

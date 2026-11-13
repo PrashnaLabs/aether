@@ -705,3 +705,59 @@ fn bulk_actions_apply_to_picked_chats_and_clear_picks(cx: &mut gpui_kit::TestApp
         })
         .unwrap();
 }
+
+#[test]
+fn org_view_lasts_only_while_the_org_page_shows() {
+    use SidebarView::*;
+    assert_eq!(Org.off_org(Page::Org, Archived), Org);
+    assert_eq!(Org.off_org(Page::Chat, Archived), Archived);
+    assert_eq!(Org.off_org(Page::Board, Outside), Outside);
+    assert_eq!(DirectChats.off_org(Page::Chat, Archived), DirectChats);
+}
+
+#[gpui_kit::test]
+fn org_page_navigation_restores_the_page_and_sidebar(cx: &mut gpui_kit::TestAppContext) {
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            app.settings.org_enabled = true;
+            let (a, b) = (PathBuf::from("/tmp/aether-org-a"), PathBuf::from("/tmp/aether-org-b"));
+            app.new_chat_in(b.clone(), window, cx);
+            app.chats[app.active].messages = vec![aether_core::Message::user("hi")];
+            let in_b = app.active;
+            app.open_page(Page::Board, cx);
+            app.switch_sidebar_to_outside(cx);
+
+            app.open_org_for(&a, true, cx);
+            assert_eq!((app.page, app.sidebar_view), (Page::Org, SidebarView::Org));
+            assert_eq!(app.org_project().as_deref(), Some("/tmp/aether-org-a"));
+            assert!(matches!(app.org.overlay, crate::org::OrgOverlay::Wizard { .. }));
+
+            app.open_org_for(&b, false, cx);
+            assert_eq!(app.org_project().as_deref(), Some("/tmp/aether-org-b"));
+            assert_eq!(app.org.overlay, crate::org::OrgOverlay::None);
+
+            app.org_back(window, cx);
+            assert_eq!((app.page, app.sidebar_view), (Page::Board, SidebarView::Outside));
+            assert_eq!(app.org.project, None);
+
+            app.sidebar_view = SidebarView::Projects;
+            app.open_org_for(&a, false, cx);
+            app.select(in_b, window, cx);
+            assert_eq!((app.page, app.sidebar_view), (Page::Chat, SidebarView::Projects));
+            assert_eq!(app.org.project, None);
+        })
+        .unwrap();
+}

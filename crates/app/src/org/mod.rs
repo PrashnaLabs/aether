@@ -8,7 +8,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::{Context, Entity, Window};
 use serde_json::{Value, json};
 
-use crate::app::{CLIS, ChatApp, Page, Queued, now_ms};
+use crate::app::{CLIS, ChatApp, Page, Queued, SidebarView, now_ms};
 use crate::board::model::Col;
 use model::{
     Decision, Head, HireOutcome, HireSpec, NeedsYou, Org, OrgMessage, OrgSpec, Request,
@@ -57,6 +57,10 @@ pub(crate) struct OrgState {
     pub goal_target: Option<String>,
     /// Card wake-ups waiting for a window: (head chat, text).
     pub wake: Vec<(i64, String)>,
+    /// Project the page shows, picked from its sidebar row; `None` follows the current project.
+    pub project: Option<String>,
+    /// Page and sidebar view to return to when the Org page closes.
+    pub back: (Page, SidebarView),
 }
 
 impl OrgState {
@@ -69,6 +73,8 @@ impl OrgState {
             goal,
             goal_target: None,
             wake: Vec::new(),
+            project: None,
+            back: (Page::Chat, SidebarView::Projects),
         }
     }
 }
@@ -164,9 +170,12 @@ impl ChatApp {
         }
     }
 
-    /// Board project the page shows: the current project folder.
+    /// Project the page shows: the one picked from its sidebar row, else the current project.
     pub(crate) fn org_project(&self) -> Option<String> {
-        self.current_project_folder().map(|p| p.display().to_string())
+        self.org
+            .project
+            .clone()
+            .or_else(|| self.current_project_folder().map(|p| p.display().to_string()))
     }
 
     pub(crate) fn org_current(&self) -> Option<&Org> {
@@ -206,10 +215,54 @@ impl ChatApp {
             return;
         }
         if self.page == Page::Org {
-            self.open_page(Page::Chat, cx);
-            self.composer.update(cx, |c, cx| c.focus(window, cx));
+            self.org_back(window, cx);
         } else {
-            self.open_page(Page::Org, cx);
+            self.open_org_page(None, cx);
+        }
+    }
+
+    /// Opens the Org page for `project`, or for the current project when `None`.
+    pub(crate) fn open_org_page(&mut self, project: Option<String>, cx: &mut Context<Self>) {
+        let shown = self.org_project();
+        self.org.project = project;
+        if self.org_project() != shown {
+            self.org.overlay = OrgOverlay::None;
+            self.org.selected = None;
+        }
+        self.open_page(Page::Org, cx);
+    }
+
+    /// Org page for a project's sidebar row; `setup` opens the setup wizard.
+    pub(crate) fn open_org_for(&mut self, folder: &Path, setup: bool, cx: &mut Context<Self>) {
+        self.open_org_page(Some(folder.display().to_string()), cx);
+        if setup {
+            self.org_open_wizard();
+        }
+    }
+
+    pub(crate) fn org_open_wizard(&mut self) {
+        let s = &self.settings;
+        let draft = OrgSpec::from_template(&s.org_template, s.org_workers_per_head);
+        self.org.overlay = OrgOverlay::Wizard { step: 0, draft };
+    }
+
+    /// Leaves the Org page for the page it was opened from.
+    pub(crate) fn org_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_page(self.org.back.0, cx);
+        if self.page == Page::Chat {
+            self.composer.update(cx, |c, cx| c.focus(window, cx));
+        }
+    }
+
+    /// Off the Org page: the sidebar view from before it comes back and a picked project is dropped.
+    pub(crate) fn leave_org(&mut self) {
+        if self.page == Page::Org {
+            return;
+        }
+        self.sidebar_view = self.sidebar_view.off_org(self.page, self.org.back.1);
+        if self.org.project.take().is_some() {
+            self.org.overlay = OrgOverlay::None;
+            self.org.selected = None;
         }
     }
 
@@ -221,7 +274,11 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<i64, String> {
+        let o = &self.org;
+        let keep = (o.back, o.project.clone(), o.overlay.clone(), o.selected.clone());
         self.new_chat_in(PathBuf::from(project), window, cx);
+        self.open_page(Page::Org, cx);
+        (self.org.back, self.org.project, self.org.overlay, self.org.selected) = keep;
         let ix = self.active;
         let access = self.settings.default_access(head.provider);
         let chat = &mut self.chats[ix];

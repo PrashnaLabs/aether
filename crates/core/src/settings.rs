@@ -1039,7 +1039,6 @@ pub struct Settings {
     /// Context percent at which a head's session should be rotated.
     pub org_rotate_at: u8,
     pub org_template: String,
-    pub org_section_collapsed: bool,
 }
 
 impl Settings {
@@ -1189,7 +1188,6 @@ impl Default for Settings {
             org_hire: OrgHire::Rules,
             org_rotate_at: 75,
             org_template: "startup".into(),
-            org_section_collapsed: false,
         }
     }
 }

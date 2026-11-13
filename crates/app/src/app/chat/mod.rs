@@ -393,8 +393,10 @@ impl ChatApp {
         self.active = ix;
         self.activate_session_ui(id, window, cx);
         self.draft_owner = Some(id);
-        self.sidebar_view =
-            self.sidebar_view.after_select(self.chats[ix].is_agent(), self.locked(ix));
+        self.sidebar_view = self
+            .sidebar_view
+            .off_org(Page::Chat, self.org.back.1)
+            .after_select(self.chats[ix].is_agent(), self.locked(ix));
 
         self.copied = None;
         self.selection_bar = None;
@@ -416,7 +418,7 @@ impl ChatApp {
         if std::mem::replace(&mut self.chats[ix].archived, false) {
             self.persist(ix);
         }
-        self.page = Page::Chat;
+        self.open_page(Page::Chat, cx);
         let host = self.host_of(window);
         self.set_side_tab(host, crate::side_panel::SideTab::Agent);
         self.chats[ix].view = ChatViewMode::Chat;

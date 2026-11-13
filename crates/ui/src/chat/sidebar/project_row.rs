@@ -74,6 +74,7 @@ pub(super) struct ProjectRow {
     pub(super) on_files: Option<RowHandler>,
     pub(super) on_hide: Option<RowHandler>,
     pub(super) on_page: Option<RowHandler>,
+    pub(super) org: Option<(bool, RowHandler)>,
     pub(super) now: i64,
 }
 
@@ -100,6 +101,7 @@ impl ProjectRow {
             on_files,
             on_hide,
             on_page,
+            org,
             now,
         } = self;
         let ProjectHeader {
@@ -127,6 +129,11 @@ impl ProjectRow {
         } else {
             format!("New agent chat in {name}").into()
         };
+        let (on_org, on_setup) = match org {
+            Some((true, on_click)) => (Some(on_click), None),
+            Some((false, on_click)) => (None, Some(on_click)),
+            None => (None, None),
+        };
         let menu = {
             let (path, on_new, on_files, on_hide, on_page) =
                 (path.clone(), on_new.clone(), on_files.clone(), on_hide.clone(), on_page.clone());
@@ -139,6 +146,7 @@ impl ProjectRow {
                     on_files.clone(),
                     on_hide.clone(),
                     on_page.clone(),
+                    on_setup.clone(),
                 )
             }
         };
@@ -230,6 +238,20 @@ impl ProjectRow {
             group.clone(),
             show_actions,
         )
+        .when_some(on_org, |act, on_org| {
+            act.child(
+                crate::components::button(("project-org", id))
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide::Users)
+                    .accessibility_label("Organization")
+                    .tooltip("Organization")
+                    .on_click(move |ev, window, cx| {
+                        cx.stop_propagation();
+                        on_org(ev, window, cx)
+                    }),
+            )
+        })
         .when_some(on_files, |act, on_files| {
             act.child(
                 crate::components::button(("project-files", id))

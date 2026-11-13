@@ -97,9 +97,15 @@ pub(crate) enum SidebarView {
     DirectChats,
     Outside,
     Archived,
+    Org,
 }
 
 impl SidebarView {
+    /// Org lasts only while the Org page shows; off it the view goes `back`.
+    pub(crate) fn off_org(self, page: Page, back: Self) -> Self {
+        if self == Self::Org && page != Page::Org { back } else { self }
+    }
+
     /// View listing a just-selected chat; Outside keeps chats an outside agent holds.
     fn after_select(self, agent: bool, locked: bool) -> Self {
         match self {
@@ -763,6 +769,13 @@ impl ChatApp {
         if page == Page::Usage {
             self.ensure_usage_history(false, cx);
         }
+        if page == Page::Org {
+            if self.page != Page::Org {
+                let view = self.sidebar_view.off_org(self.page, self.org.back.1);
+                self.org.back = (self.page, view);
+            }
+            self.sidebar_view = SidebarView::Org;
+        }
         if page != Page::Chat
             && let Some(window) =
                 cx.active_window().or_else(|| self.workspace.windows.get(&0).copied())
@@ -778,6 +791,7 @@ impl ChatApp {
             });
         }
         self.page = page;
+        self.leave_org();
         if page == Page::Settings {
             let focus = self.settings_sidebar_focus.clone();
             let search = self.settings_search_input.clone();
