@@ -337,6 +337,7 @@ impl ChatApp {
             },
         };
         let _ = call.reply.send(result);
+        self.org_flush_wake(window, cx);
     }
 
     pub(super) fn list_agents(&self, lead_ix: usize) -> Value {
@@ -422,9 +423,13 @@ impl ChatApp {
             .iter_mut()
             .find(|c| c.id == id && c.project == project)
             .ok_or_else(|| format!("card #{id} not found"))?;
+        let from = card.col;
         let msg = lead_move(card, to)?;
         let col = card.col;
         self.board_move(id, col, None);
+        if from != Col::Review && col == Col::Review {
+            self.org_card_review(id);
+        }
         Ok(Value::String(msg))
     }
 
@@ -527,6 +532,12 @@ impl ChatApp {
             self.board_save(id);
         } else {
             self.board_move(id, col, before);
+        }
+        if from != Col::Review && col == Col::Review {
+            self.org_card_review(id);
+        }
+        if let Some(note) = args["note"].as_str().filter(|n| !n.trim().is_empty()) {
+            self.org_card_note(id, self.chats[lead_ix].id, note);
         }
         Ok(Value::String(msg))
     }

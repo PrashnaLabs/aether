@@ -71,6 +71,19 @@ session** (clear the CLI session and onboard again with the same role),
 Budgets warn; they don't stop anything yet. Context bars turn amber at
 **Settings > Organization > Rotate a head's session at**.
 
+## Card review and notes
+
+Cards carry `dept:<role>` (owning head) and `review:<role>` (reviewer) labels.
+Aether wakes heads on board changes so nobody has to poll:
+
+- When a card enters Review (agent finished, a lead moved it, or you dragged
+  it), the head named by `review:<role>` gets a message to review it and leave
+  approve or concrete changes as a card note.
+- When a head leaves a note on a card with `update_card`, the owning head
+  (`dept:<role>`) and the CEO get the note, except whoever wrote it.
+
+Done stays yours: move reviewed cards to Done on the board.
+
 ## Workers and hiring rules
 
 Workers are child chats of a head, in their own worktree by default. A hire

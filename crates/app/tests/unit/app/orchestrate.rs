@@ -2182,3 +2182,56 @@ fn expired_call_is_skipped_before_mutating_chat(cx: &mut TestAppContext) {
         })
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn org_cards_wake_their_reviewer_and_owner(cx: &mut TestAppContext) {
+    use crate::org::model::{Head, Org};
+    let window = lead_app(cx);
+    window
+        .update(cx, |app, window, cx| {
+            let ix = app.chats.iter().position(|c| c.id == 10).unwrap();
+            let project = app.lead_project(ix);
+            for id in [20, 21] {
+                app.chats.push(lead_chat(id));
+                app.chats.last_mut().unwrap().cancel = Some(aether_agent::Cancel::inert());
+            }
+            let head = |role: &str, chat: i64| Head { chat: Some(chat), ..Head::new(role, 2) };
+            app.org.orgs.push(Org {
+                project: project.clone(),
+                heads: vec![head("CEO", 10), head("SEC", 20), head("ENG", 21)],
+                ..Org::default()
+            });
+            let card = app.board_add("Fix".into(), String::new(), Col::Doing, project, None, false);
+            app.cards.iter_mut().find(|c| c.id == card).unwrap().labels =
+                vec!["dept:eng".into(), "review:sec".into()];
+            let mut call = |tool: &str, args: Value| {
+                let (reply, answer) = std::sync::mpsc::channel();
+                app.orchestrate(
+                    OrchCall {
+                        deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                        lead: "10".into(),
+                        tool: tool.into(),
+                        args,
+                        reply,
+                    },
+                    window,
+                    cx,
+                );
+                answer.try_recv().unwrap()
+            };
+            call("move_card", json!({"id": card, "col": "review"})).unwrap();
+            call("update_card", json!({"id": card, "note": "ship it"})).unwrap();
+            let queued = |id: i64| {
+                let chat = app.chats.iter().find(|c| c.id == id).unwrap();
+                chat.queue.iter().map(|q| q.text.clone()).collect::<Vec<_>>()
+            };
+            assert!(
+                queued(20)
+                    .iter()
+                    .any(|t| t.contains(&format!("Card #{card}")) && t.contains("reviewer"))
+            );
+            assert!(queued(21).iter().any(|t| t.contains("left a note") && t.contains("ship it")));
+            assert!(app.org.wake.is_empty());
+        })
+        .unwrap();
+}

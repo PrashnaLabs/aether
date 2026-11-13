@@ -73,12 +73,16 @@ impl ChatApp {
     pub(crate) fn board_move(&mut self, id: i64, col: Col, before: Option<i64>) {
         let position = slot(&self.cards, id, col, before);
         let Some(card) = self.cards.iter_mut().find(|c| c.id == id) else { return };
+        let entered_review = card.col != Col::Review && col == Col::Review;
         card.col = col;
         card.position = position;
         card.updated_at = now_ms();
         self.board_save(id);
         if col == Col::Done {
             self.board_unblock(id);
+        }
+        if entered_review {
+            self.org_card_review(id);
         }
     }
 

@@ -288,6 +288,25 @@ impl Org {
         self.heads.iter().find(|h| h.chat == Some(chat))
     }
 
+    /// Head chat named by a `<prefix>:<role>` card label.
+    pub(crate) fn labelled(&self, labels: &[String], prefix: &str) -> Option<i64> {
+        labels.iter().find_map(|l| {
+            let role = l.strip_prefix(prefix)?.strip_prefix(':')?;
+            self.heads.iter().find(|h| h.role.eq_ignore_ascii_case(role))?.chat
+        })
+    }
+
+    /// Chats to wake when `author` notes a card: its owning head and the CEO.
+    pub(crate) fn note_wake(&self, labels: &[String], author: i64) -> Vec<i64> {
+        let mut out = Vec::new();
+        for chat in [self.labelled(labels, "dept"), self.ceo_chat()].into_iter().flatten() {
+            if chat != author && !out.contains(&chat) {
+                out.push(chat);
+            }
+        }
+        out
+    }
+
     pub(crate) fn ceo_chat(&self) -> Option<i64> {
         self.head("CEO").and_then(|h| h.chat)
     }

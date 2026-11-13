@@ -55,6 +55,8 @@ pub(crate) struct OrgState {
     pub goal: Entity<InputState>,
     /// Head role the goal goes to; `None` is the CEO.
     pub goal_target: Option<String>,
+    /// Card wake-ups waiting for a window: (head chat, text).
+    pub wake: Vec<(i64, String)>,
 }
 
 impl OrgState {
@@ -66,6 +68,7 @@ impl OrgState {
             tab: OrgTab::NeedsYou,
             goal,
             goal_target: None,
+            wake: Vec::new(),
         }
     }
 }
@@ -122,6 +125,42 @@ fn role_text(dir: &Path, head: &Head) -> Result<String, String> {
 impl ChatApp {
     pub(crate) fn org_for_project(&self, project: &str) -> Option<&Org> {
         self.org.orgs.iter().find(|o| o.project == project)
+    }
+
+    /// Queues a wake-up for the reviewer head named by `review:<role>` on a card entering Review.
+    pub(crate) fn org_card_review(&mut self, card: i64) {
+        let Some(c) = self.cards.iter().find(|c| c.id == card) else { return };
+        let Some(org) = self.org_for_project(&c.project) else { return };
+        let Some(chat) = org.labelled(&c.labels, "review") else { return };
+        let text = format!(
+            "[Aether] Card #{card} \"{}\" is in Review and you are its reviewer. read_card {card}, then leave approve or concrete changes as a note with update_card.",
+            c.title
+        );
+        self.org.wake.push((chat, text));
+    }
+
+    /// Queues wake-ups for the card's owning head and the CEO when a head leaves a note.
+    pub(crate) fn org_card_note(&mut self, card: i64, author: i64, note: &str) {
+        let Some(c) = self.cards.iter().find(|c| c.id == card) else { return };
+        let Some(org) = self.org_for_project(&c.project) else { return };
+        let Some(head) = org.head_of_chat(author) else { return };
+        let text = format!(
+            "[Aether] {} left a note on card #{card} \"{}\" ({}): {}",
+            head.title,
+            c.title,
+            c.col.key(),
+            note.chars().take(600).collect::<String>()
+        );
+        for chat in org.note_wake(&c.labels, author) {
+            self.org.wake.push((chat, text.clone()));
+        }
+    }
+
+    /// Delivers queued card wake-ups; board changes happen where no window is at hand.
+    pub(crate) fn org_flush_wake(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for (chat, text) in std::mem::take(&mut self.org.wake) {
+            self.tell_lead(chat, text, window, cx);
+        }
     }
 
     /// Board project the page shows: the current project folder.

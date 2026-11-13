@@ -462,8 +462,9 @@ impl ChatApp {
             .border_1()
             .border_color(gpui_kit::transparent_black())
             .drag_over::<CardDrag>(move |s, _, _, _| s.border_color(ring))
-            .on_drop(cx.listener(move |this, drag: &CardDrag, _, cx| {
+            .on_drop(cx.listener(move |this, drag: &CardDrag, window, cx| {
                 this.board_move(drag.id, col, None);
+                this.org_flush_wake(window, cx);
                 cx.notify();
             }))
             .child(
@@ -708,9 +709,10 @@ impl ChatApp {
             .active(move |s| s.bg(pressed))
             .drag_over::<CardDrag>(move |s, _, _, _| s.border_color(ring))
             .on_drag(drag, |d: &CardDrag, _, _, cx| cx.new(|_| d.clone()))
-            .on_drop(cx.listener(move |this, drag: &CardDrag, _, cx| {
+            .on_drop(cx.listener(move |this, drag: &CardDrag, window, cx| {
                 if drag.id != id {
                     this.board_move(drag.id, col, Some(id));
+                    this.org_flush_wake(window, cx);
                     cx.notify();
                 }
             }))

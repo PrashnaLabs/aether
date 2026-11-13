@@ -700,6 +700,7 @@ impl ChatApp {
             if !self.spawn_queue.is_empty() {
                 self.drain_spawn_queue(window, cx);
             }
+            self.org_flush_wake(window, cx);
         }
         let blocked = self.worktree_blocks_send(ix).is_some();
         let follow = ix != self.active || !self.scroller.read(cx).is_scrolled_up();

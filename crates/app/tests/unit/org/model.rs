@@ -135,3 +135,16 @@ fn hire_policy_decides_from_the_checks() {
         assert_eq!(hire_outcome(policy, checks), want, "{policy:?}");
     }
 }
+
+#[test]
+fn card_labels_pick_who_to_wake() {
+    let head = |role: &str, chat: i64| Head { chat: Some(chat), ..Head::new(role, 2) };
+    let org = Org { heads: vec![head("CEO", 1), head("ENG", 2), head("SEC", 3)], ..Org::default() };
+    let labels = ["dept:eng".to_string(), "review:sec".to_string()];
+    assert_eq!(org.labelled(&labels, "review"), Some(3));
+    assert_eq!(org.labelled(&labels, "dept"), Some(2));
+    assert_eq!(org.labelled(&["review:qa".to_string()], "review"), None);
+    assert_eq!(org.note_wake(&labels, 3), [2, 1]);
+    assert_eq!(org.note_wake(&labels, 2), [1]);
+    assert_eq!(org.note_wake(&[], 1), Vec::<i64>::new());
+}
