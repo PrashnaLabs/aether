@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -161,6 +162,25 @@ pub const THEME_FAMILIES: [ThemeFamily; 9] = [
 
 pub fn family_index(a: Appearance) -> usize {
     THEME_FAMILIES.iter().position(|f| f.variants.contains(&a)).unwrap_or(0)
+}
+
+/// Where a chat notification shows up; `Settings::notifications` off silences both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyDelivery {
+    Toast,
+    #[default]
+    Os,
+}
+
+/// Which notifications also play a sound.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifySound {
+    #[default]
+    None,
+    Done,
+    Request,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -851,6 +871,14 @@ impl Default for NotesSettings {
     }
 }
 
+/// A named login for one provider's CLI, kept in its own config dir.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Account {
+    pub provider: Provider,
+    pub name: String,
+    pub dir: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -971,6 +999,13 @@ pub struct Settings {
     pub background_panel_width: f32,
     /// Desktop notifications when a chat finishes, fails or needs you while you look elsewhere.
     pub notifications: bool,
+    #[serde(default, deserialize_with = "or_default")]
+    pub notify_delivery: NotifyDelivery,
+    #[serde(default, deserialize_with = "or_default")]
+    pub notify_sound: NotifySound,
+    /// POST target for `{title, body, chat, state}` on each notification; empty is off.
+    #[serde(default)]
+    pub notify_webhook: String,
     /// Status bar clock 12-hour or 24-hour time format.
     #[serde(default)]
     pub status_bar_time_format: TimeFormat,
@@ -986,6 +1021,12 @@ pub struct Settings {
     /// Providers omitted from the compact usage strip, but still shown in its popover.
     #[serde(default = "default_bottom_bar_hidden_agents")]
     pub bottom_bar_hidden_agents: Vec<Provider>,
+    /// Extra CLI logins, each a config dir the CLI keeps its own credentials in.
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    /// Account name in use per provider key; unlisted providers use the CLI's own login.
+    #[serde(default)]
+    pub default_accounts: BTreeMap<String, String>,
     /// Show hook runs in a reply's timeline. Failed hooks always show.
     #[serde(default)]
     pub show_hooks: bool,
@@ -1050,6 +1091,30 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// The account chosen for `provider`, if it still exists and has a dir.
+    pub fn active_account(&self, provider: Provider) -> Option<&Account> {
+        let name = self.default_accounts.get(provider.key())?;
+        self.accounts
+            .iter()
+            .find(|a| a.provider == provider && a.name == *name && !a.dir.trim().is_empty())
+    }
+
+    /// The active account's config dir, `~` expanded.
+    pub fn account_dir(&self, provider: Provider) -> Option<PathBuf> {
+        self.active_account(provider).map(|a| crate::paths::expand_tilde(a.dir.trim()))
+    }
+
+    /// Env that points the CLI at the active account, without logging out of the other.
+    pub fn account_env(&self, provider: Provider) -> Vec<(String, String)> {
+        let var = match provider {
+            Provider::Claude => "CLAUDE_CONFIG_DIR",
+            Provider::Codex => "CODEX_HOME",
+            _ => return Vec::new(),
+        };
+        let dir = self.account_dir(provider);
+        dir.map(|d| vec![(var.to_string(), d.to_string_lossy().into_owned())]).unwrap_or_default()
+    }
+
     pub fn provider(&self) -> Provider {
         self.provider.unwrap_or_default()
     }
@@ -1165,11 +1230,16 @@ impl Default for Settings {
             browser_panel_width: 480.,
             background_panel_width: default_background_panel_width(),
             notifications: true,
+            notify_delivery: NotifyDelivery::default(),
+            notify_sound: NotifySound::default(),
+            notify_webhook: String::new(),
             status_bar_time_format: TimeFormat::default(),
             status_bar_date_format: DateFormat::default(),
             status_bar_show_seconds: false,
             bottom_bar_hidden: Vec::new(),
             bottom_bar_hidden_agents: default_bottom_bar_hidden_agents(),
+            accounts: Vec::new(),
+            default_accounts: BTreeMap::new(),
             show_hooks: false,
             chat_detail: ChatDetail::Normal,
             show_running_agents: false,

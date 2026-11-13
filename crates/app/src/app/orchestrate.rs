@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use aether_agent::orchestrator::{OrchCall, check_args, history_specs, tool_specs};
+use aether_agent::usage::best_provider;
 use aether_core::{AccessMode, Message, Provider, Role, ToolDetail};
 use aether_driver::ProviderProbe;
 use aether_driver::antigravity::AgyEntry;
@@ -10,6 +11,7 @@ use gpui_kit::{Context, Window};
 use serde_json::{Value, json};
 
 use super::format::chat_spend;
+use super::providers::{USAGE_STALE_MS, initial_model};
 use super::{
     Bulk, CLIS, Chat, ChatApp, ChatViewMode, Delivery, Queued, chat_cwd, now_ms, project_dir,
 };
@@ -73,7 +75,10 @@ impl SpawnArgs {
             .filter(|p| p.installed)
             .ok_or_else(|| format!("{key} is not installed"))?;
         let model = text("model");
-        if !probe.models.is_empty() && !probe.models.iter().any(|m| m.id == model) {
+        if !model.is_empty()
+            && !probe.models.is_empty()
+            && !probe.models.iter().any(|m| m.id == model)
+        {
             return Err(format!(r#"unknown model "{model}" for {key}; call the list_agents tool"#));
         }
         let worktree = match &args["worktree"] {
@@ -828,6 +833,60 @@ impl ChatApp {
         ix != self.active || !self.scroller.read(cx).is_scrolled_up()
     }
 
+    /// An omitted or "auto" provider becomes the installed one with the most quota left, ranked
+    /// on snapshots under USAGE_STALE_MS old; with none, the lead's own provider (then the first
+    /// usable one). Returns the rewritten args and the pick's tightest percent left, if ranked.
+    pub(super) fn resolve_auto(
+        &mut self,
+        lead_ix: usize,
+        args: &Value,
+        cx: &mut Context<Self>,
+    ) -> Result<(Value, Option<f32>), String> {
+        if !matches!(args["provider"].as_str().map(str::trim), None | Some("" | "auto")) {
+            return Ok((args.clone(), None));
+        }
+        self.refresh_usage_for_spawn(cx);
+        let (access, lead_provider, now) =
+            (self.chats[lead_ix].access, self.chats[lead_ix].provider, now_ms());
+        let usable: Vec<Provider> = CLIS
+            .into_iter()
+            .filter(|p| self.probes.get(p).is_some_and(|probe| probe.installed))
+            .filter(|&p| child_access(access, p).is_ok())
+            .collect();
+        let running = |p: Provider| {
+            self.chats
+                .iter()
+                .filter(|c| !c.archived && c.provider == p && (c.busy() || starting(c)))
+                .count()
+        };
+        let ranked = best_provider(usable.iter().filter_map(|&p| {
+            let fresh = self.plan_usage_at.get(&p).is_some_and(|&at| now - at <= USAGE_STALE_MS);
+            Some((p, self.provider_plan_usages.get(&p).filter(|_| fresh)?, running(p)))
+        }));
+        let (provider, left) = match ranked {
+            Some((p, left)) => (p, Some(left)),
+            None => {
+                let first = usable.iter().find(|&&p| p == lead_provider).or(usable.first());
+                (
+                    *first
+                        .ok_or("no installed agent provider can run as restricted as this lead")?,
+                    None,
+                )
+            }
+        };
+        let mut args = args.clone();
+        args["provider"] = provider.key().into();
+        let model = args["model"].as_str().unwrap_or_default().trim();
+        if model.is_empty() {
+            let default = initial_model(&self.settings, provider);
+            let known = self.probes.get(&provider).is_some_and(|probe| {
+                probe.models.is_empty() || probe.models.iter().any(|m| m.id == default)
+            });
+            args["model"] = if known { default } else { String::new() }.into();
+        }
+        Ok((args, left))
+    }
+
     pub(super) fn spawn_agent(
         &mut self,
         lead_ix: usize,
@@ -847,7 +906,8 @@ impl ChatApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Value, String> {
-        let a = SpawnArgs::parse(args, &self.probes)?;
+        let (args, quota_left) = self.resolve_auto(lead_ix, args, cx)?;
+        let a = SpawnArgs::parse(&args, &self.probes)?;
         let lead_id = self.chats[lead_ix].id;
         if !a.nonce.is_empty() {
             let key = (lead_id, a.nonce.clone());
@@ -937,6 +997,9 @@ impl ChatApp {
             "provider": a.provider.key(),
             "model": a.model,
         });
+        if let Some(left) = quota_left {
+            reply["quota_left"] = left.into();
+        }
         match base {
             Some(base) => {
                 let (prompt, text) = (a.title.clone(), child_prompt(&a.task));

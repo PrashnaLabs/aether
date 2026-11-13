@@ -385,9 +385,9 @@ impl ChatApp {
                     })
                 }),
             );
-        let card = pop
-            .card
-            .and_then(|p| Some(self.usage_card(p, self.provider_plan_usages.get(&p)?, max_h, cx)));
+        let card = pop.card.and_then(|p| {
+            Some(self.usage_card(p, self.provider_plan_usages.get(&p)?, max_h, view, cx))
+        });
         let narrow = is_narrow(window);
         Some(
             h_flex()
@@ -467,7 +467,51 @@ impl ChatApp {
             })
     }
 
-    fn usage_card(&self, p: Provider, u: &PlanUsage, max_h: f32, cx: &App) -> Stateful<Div> {
+    /// Account picker for a provider with saved accounts; the pick applies to new CLI runs.
+    fn account_chips(&self, p: Provider, view: &Entity<ChatApp>, cx: &App) -> Option<Div> {
+        let accounts: Vec<&str> = self
+            .settings
+            .accounts
+            .iter()
+            .filter(|a| a.provider == p)
+            .map(|a| a.name.as_str())
+            .collect();
+        if accounts.is_empty() {
+            return None;
+        }
+        let current = self.settings.active_account(p).map(|a| a.name.as_str());
+        let chip = |name: Option<&str>| {
+            let view = view.clone();
+            let owned = name.map(str::to_string);
+            let label = name.unwrap_or("Default login").to_string();
+            let on = current == name;
+            div()
+                .id(SharedString::from(format!("usage-account-{}-{label}", p.key())))
+                .px(px(8.))
+                .py(px(2.))
+                .corner(px(6.))
+                .text_xs()
+                .cursor_pointer()
+                .bg(if on { overlay_strong(cx) } else { overlay(cx) })
+                .child(label)
+                .on_click(move |_, _, cx| {
+                    let owned = owned.clone();
+                    view.update(cx, |this, cx| this.switch_account(p, owned, cx))
+                })
+        };
+        Some(h_flex().flex_wrap().gap(px(4.)).children(
+            std::iter::once(chip(None)).chain(accounts.into_iter().map(|n| chip(Some(n)))),
+        ))
+    }
+
+    fn usage_card(
+        &self,
+        p: Provider,
+        u: &PlanUsage,
+        max_h: f32,
+        view: &Entity<ChatApp>,
+        cx: &App,
+    ) -> Stateful<Div> {
         let metered = p != Provider::OpenRouter;
         let theme = cx.theme();
         let (fg, muted) = (theme.foreground, theme.muted_foreground);
@@ -509,6 +553,7 @@ impl ChatApp {
                             .map(|text| div().flex_none().text_xs().text_color(muted).child(text)),
                     ),
             )
+            .children(self.account_chips(p, view, cx))
             .child(
                 v_flex()
                     .p(px(10.))

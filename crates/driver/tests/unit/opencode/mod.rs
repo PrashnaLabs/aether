@@ -61,6 +61,7 @@ fn live_opencode_smoke() {
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: dir.clone(),
         model: std::env::var("AETHER_OPENCODE_SMOKE_MODEL").unwrap_or_default(),

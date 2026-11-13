@@ -6,7 +6,9 @@ use aether_core::{
 use aether_ui::ChatStatus;
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
+use gpui_kit::component::WindowExt;
 use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::notification::Notification;
 use gpui_kit::{App, Context, SharedString, Window};
 
 use super::{Changed, btw_question, btw_rest, handoff_history};
@@ -564,9 +566,18 @@ impl ChatApp {
     }
 
     /// Tells the user about chat `ix` unless they're looking at it.
-    fn notify_chat(&self, ix: usize, what: &str, window: &Window, cx: &App) {
+    fn notify_chat(
+        &self,
+        ix: usize,
+        what: &str,
+        state: crate::notify::State,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let watching = self.session_is_watched(self.chats[ix].id, window, cx);
-        if !self.settings.notifications || watching {
+        if !crate::notify::should_notify(self.settings.notifications, watching)
+            || !crate::notify::allow(self.chats[ix].id, state, std::time::Instant::now())
+        {
             return;
         }
         let chat = &self.chats[ix];
@@ -589,12 +600,24 @@ impl ChatApp {
             }
             _ => chat.title.to_string(),
         };
+        let body = crate::notify::preview(&body, 180);
+        crate::notify::sound(self.settings.notify_sound, state);
+        crate::notify::webhook(&self.settings.notify_webhook, &title, &body, chat.id, state);
+        let subtitle = format!("{} {what} · {model}", chat.provider.label());
+        if self.settings.notify_delivery == aether_core::NotifyDelivery::Toast {
+            // a request waits for the user, so it stays until dismissed
+            let toast = match state {
+                crate::notify::State::Request => Notification::warning(subtitle).autohide(false),
+                crate::notify::State::Done => Notification::info(subtitle),
+            };
+            return window.push_notification(toast.title(title), cx);
+        }
         crate::notify::post(
             crate::notify::Note {
                 tag: chat.id.to_string(),
                 title,
-                subtitle: format!("{} {what} · {model}", chat.provider.label()),
-                body: crate::notify::preview(&body, 180),
+                subtitle,
+                body,
                 provider: chat.provider,
             },
             cx,
@@ -692,7 +715,13 @@ impl ChatApp {
             self.sync_chat_rows(ix, Some(reply_ix), cx);
             let chat = &self.chats[ix];
             if chat.run == run && !chat.stopped {
-                self.notify_chat(ix, if failed { "failed" } else { "finished" }, window, cx);
+                self.notify_chat(
+                    ix,
+                    if failed { "failed" } else { "finished" },
+                    crate::notify::State::Done,
+                    window,
+                    cx,
+                );
             }
             if self.chats[ix].run == run {
                 self.deliver_to_lead(ix, reply_ix, failed, window, cx);
@@ -871,7 +900,7 @@ impl ChatApp {
                 Ask::Plan(_) => "proposed a plan",
                 Ask::Unknown => "needs you",
             };
-            self.notify_chat(ix, what, window, cx);
+            self.notify_chat(ix, what, crate::notify::State::Request, window, cx);
         }
         if let Update::AskResolved(id) = update {
             self.drop_request(id, window, cx);

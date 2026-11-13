@@ -41,9 +41,33 @@ fn describe_hides_env() {
 }
 
 #[test]
+fn command_applies_account_env() {
+    let opts = DriverStartOptions {
+        ephemeral: false,
+        env: vec![("CLAUDE_CONFIG_DIR".into(), "/w/claude".into())],
+        binary: std::env::current_exe().unwrap().to_string_lossy().into_owned(),
+        cwd: "/tmp".into(),
+        model: String::new(),
+        effort: String::new(),
+        access: aether_core::AccessMode::Full,
+        resume: String::new(),
+        fork: false,
+        rollback: String::new(),
+        reattach: false,
+        attachments: None,
+        background: Vec::new(),
+        lead: None,
+    };
+    let cmd = command(&opts, "sh").unwrap();
+    let want = (std::ffi::OsStr::new("CLAUDE_CONFIG_DIR"), Some(std::ffi::OsStr::new("/w/claude")));
+    assert!(cmd.get_envs().any(|e| e == want));
+}
+
+#[test]
 fn command_strips_lead_env() {
     let opts = DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: std::env::current_exe().unwrap().to_string_lossy().into_owned(),
         cwd: "/tmp".into(),
         model: String::new(),

@@ -1,7 +1,8 @@
-use aether_core::home_dir;
+use aether_core::{Provider, home_dir};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -502,7 +503,13 @@ pub fn forget_claude_credentials() {
 }
 
 /// Reads Claude credentials and optional subscription type from environment, system keychain, or local credentials files.
-pub fn read_claude_credentials() -> Option<(String, Option<String>)> {
+pub fn read_claude_credentials(dir: Option<&Path>) -> Option<(String, Option<String>)> {
+    // An account's dir holds its own file; env and the shared keychain entry are the default login's.
+    if let Some(dir) = dir {
+        let raw = fs::read_to_string(dir.join(".credentials.json")).ok()?;
+        let (token, sub) = extract_claude_token_and_sub(&raw);
+        return Some((token?, sub));
+    }
     if let Ok(tok) = std::env::var("ANTHROPIC_AUTH_TOKEN")
         && !tok.trim().is_empty()
     {
@@ -571,13 +578,18 @@ pub fn fetch_claude_plan_usage(token: &str, subscription_hint: Option<&str>) -> 
     })
 }
 
-/// Reads Codex auth token from ~/.codex/auth.json.
-pub fn read_codex_token() -> Option<String> {
-    let home = home_dir();
-    let auth_path = match std::env::var_os("CODEX_HOME") {
-        Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir).join("auth.json"),
-        _ => home.join(".codex").join("auth.json"),
-    };
+/// Codex's auth file: the account's `dir`, else `CODEX_HOME`, else `~/.codex`.
+pub fn codex_auth_path(dir: Option<&Path>) -> PathBuf {
+    match (dir, std::env::var_os("CODEX_HOME")) {
+        (Some(dir), _) => dir.join("auth.json"),
+        (None, Some(dir)) if !dir.is_empty() => PathBuf::from(dir).join("auth.json"),
+        _ => home_dir().join(".codex").join("auth.json"),
+    }
+}
+
+/// Reads the Codex auth token for the account in `dir` (None: the CLI's own login).
+pub fn read_codex_token(dir: Option<&Path>) -> Option<String> {
+    let auth_path = codex_auth_path(dir);
     if let Ok(raw) = fs::read_to_string(auth_path)
         && let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
         && let Some(tok) = val.pointer("/tokens/access_token").and_then(|t| t.as_str())
@@ -682,6 +694,28 @@ pub fn fetch_antigravity_plan_usage() -> Option<PlanUsage> {
 /// Placeholder until a provider's real limits load; never invented numbers.
 pub fn default_plan_usage(provider: &str) -> PlanUsage {
     PlanUsage { plan_name: provider.to_string(), ..PlanUsage::default() }
+}
+
+/// Tightest remaining window; `None` when the plan exposes no meters.
+pub fn headroom(usage: &PlanUsage) -> Option<f32> {
+    usage.limits.iter().map(|l| l.percent_left).reduce(f32::min)
+}
+
+/// Picks the provider with the most headroom per running chat, returning it with its raw
+/// tightest percent left. Candidates are `(provider, usage, running chats)`; ties keep the
+/// earlier candidate, so callers pass them in a fixed order.
+pub fn best_provider<'a>(
+    cands: impl IntoIterator<Item = (Provider, &'a PlanUsage, usize)>,
+) -> Option<(Provider, f32)> {
+    let mut best: Option<(Provider, f32, f32)> = None;
+    for (provider, usage, running) in cands {
+        let Some(left) = headroom(usage) else { continue };
+        let score = left / (1 + running) as f32;
+        if best.is_none_or(|(_, _, top)| score > top) {
+            best = Some((provider, left, score));
+        }
+    }
+    best.map(|(provider, left, _)| (provider, left))
 }
 
 #[cfg(test)]

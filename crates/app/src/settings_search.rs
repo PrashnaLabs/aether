@@ -131,7 +131,7 @@ static SETTING_CATALOG: &[SettingItem] = &[
         tab: SettingsTab::Appearance,
         title: "Notifications",
         description: "Notify when a chat finishes, fails or needs you while looking elsewhere.",
-        keywords: &["desktop", "alerts"],
+        keywords: &["desktop", "alerts", "toast", "sound", "webhook"],
     },
     SettingItem {
         id: "font",

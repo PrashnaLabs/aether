@@ -1,4 +1,4 @@
-use aether_core::Provider;
+use aether_core::{NotifySound, Provider};
 use gpui_kit::{App, SystemNotification};
 
 /// What a chat notification says; `tag` replaces an earlier one and routes the click.
@@ -8,6 +8,97 @@ pub(crate) struct Note {
     pub subtitle: String,
     pub body: String,
     pub provider: Provider,
+}
+
+/// Why a chat is notifying: `Request` is blocked on the user, `Done` finished or failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum State {
+    Done,
+    Request,
+}
+
+impl State {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Request => "request",
+        }
+    }
+}
+
+/// Never for a chat the user is looking at, nor when notifications are off.
+pub(crate) fn should_notify(enabled: bool, watching: bool) -> bool {
+    enabled && !watching
+}
+
+/// Shortest gap between two notifications of one kind for one chat.
+const MIN_GAP: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Remembers when each (chat, state) last notified.
+#[derive(Default)]
+pub(crate) struct RateLimit(std::collections::HashMap<(i64, State), std::time::Instant>);
+
+impl RateLimit {
+    /// True, and records `now`, unless the same chat and state notified within `MIN_GAP`.
+    pub(crate) fn allow(&mut self, chat: i64, state: State, now: std::time::Instant) -> bool {
+        match self.0.get(&(chat, state)) {
+            Some(last) if now.saturating_duration_since(*last) < MIN_GAP => false,
+            _ => {
+                self.0.insert((chat, state), now);
+                true
+            }
+        }
+    }
+}
+
+/// `RateLimit::allow` on the process-wide limiter.
+pub(crate) fn allow(chat: i64, state: State, now: std::time::Instant) -> bool {
+    static LIMIT: std::sync::Mutex<Option<RateLimit>> = std::sync::Mutex::new(None);
+    let mut limit = LIMIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    limit.get_or_insert_with(RateLimit::default).allow(chat, state, now)
+}
+
+/// Plays a short system sound when `choice` covers `state`. Best effort, off the UI thread.
+pub(crate) fn sound(choice: NotifySound, state: State) {
+    if !matches!(
+        (choice, state),
+        (NotifySound::Done, State::Done) | (NotifySound::Request, State::Request)
+    ) {
+        return;
+    }
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("afplay", &["/System/Library/Sounds/Glass.aiff"])
+    } else {
+        ("canberra-gtk-play", &["-i", "complete"])
+    };
+    std::thread::spawn(move || std::process::Command::new(program).args(args).status());
+}
+
+/// POSTs `{title, body, chat, state}` to `url`; nothing when `url` is blank. Best effort.
+pub(crate) fn webhook(url: &str, title: &str, body: &str, chat: i64, state: State) {
+    let url = url.trim().to_owned();
+    if url.is_empty() {
+        return;
+    }
+    let payload = serde_json::json!({
+        "title": title, "body": body, "chat": chat, "state": state.key(),
+    })
+    .to_string();
+    std::thread::spawn(move || {
+        let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+            return;
+        };
+        runtime.block_on(async {
+            let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(8));
+            let Ok(client) = client.build() else { return };
+            let _ = client
+                .post(url)
+                .header("content-type", "application/json")
+                .body(payload)
+                .send()
+                .await;
+        });
+    });
 }
 
 /// Posts a desktop notification. macOS uses the notification center directly for the
@@ -27,6 +118,16 @@ pub(crate) fn post(note: Note, cx: &App) {
         );
         std::thread::spawn(move || {
             std::process::Command::new("osascript").args(["-e", &script]).status()
+        });
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let (summary, body) = (format!("{} · {}", note.title, note.subtitle), note.body);
+        std::thread::spawn(move || {
+            std::process::Command::new("notify-send")
+                .args(["--app-name=Aether", &summary, &body])
+                .status()
         });
         return;
     }

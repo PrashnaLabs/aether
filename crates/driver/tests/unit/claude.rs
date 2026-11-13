@@ -922,6 +922,7 @@ fn cancelled_error_result_only_settles() {
 fn full_access_args_start_fresh_session() {
     let opts = DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp".into(),
         model: "opus".into(),
@@ -951,6 +952,7 @@ fn full_access_args_start_fresh_session() {
 fn launch_args_let_claude_read_attachments() {
     let opts = DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp".into(),
         model: "opus".into(),
@@ -991,6 +993,7 @@ fn user_message_puts_images_after_the_text() {
 fn auto_access_uses_auto_permission_mode_without_bypass() {
     let opts = DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp".into(),
         model: String::new(),
@@ -1063,6 +1066,7 @@ fn live_claude_smoke() {
     std::fs::create_dir_all(&dir).unwrap();
     let opts = |resume: &str| DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: dir.clone(),
         model: String::new(),
@@ -1152,6 +1156,7 @@ fn live_wake_smoke() {
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let opts = DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: dir,
         model: "haiku".into(),
@@ -1232,6 +1237,7 @@ fn every_fixture_replays_without_panicking() {
 fn ask_opts() -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp".into(),
         model: String::new(),
@@ -2117,6 +2123,7 @@ fn only_the_latest_interrupt_can_time_out() {
 fn test_opts() -> DriverStartOptions {
     DriverStartOptions {
         ephemeral: false,
+        env: Vec::new(),
         binary: String::new(),
         cwd: "/tmp".into(),
         model: "opus".into(),

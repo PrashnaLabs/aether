@@ -16,7 +16,10 @@ use gpui_kit::{Context, SharedString, Window};
 use super::{Chat, ChatApp, apply_font_size, apply_look, chat_cwd, now_ms};
 
 // ponytail: fixed 10 min usage poll, agy spawns a process per fetch; make it a setting if users want fresher
-const USAGE_STALE_MS: i64 = 10 * 60_000;
+pub(super) const USAGE_STALE_MS: i64 = 10 * 60_000;
+// auto-spawn wants numbers under a minute old, but fetches are costly: one burst per 10 s
+const SPAWN_USAGE_TTL_MS: i64 = 60_000;
+const SPAWN_USAGE_RETRY_MS: i64 = 10_000;
 
 // gated on last attempt too: a failing fetch would otherwise respawn agy every tick
 pub(super) fn usage_due(newest: Option<i64>, attempted: i64, configured: bool, now: i64) -> bool {
@@ -41,8 +44,8 @@ impl ChatApp {
             let found = bg
                 .spawn(async {
                     subscription_provider(
-                        read_claude_credentials().is_some(),
-                        read_codex_token().is_some(),
+                        read_claude_credentials(None).is_some(),
+                        read_codex_token(None).is_some(),
                     )
                 })
                 .await;
@@ -53,14 +56,15 @@ impl ChatApp {
 
     pub(super) fn refresh_provider_usage(&mut self, provider: Provider, cx: &mut Context<Self>) {
         let bg = cx.background_executor().clone();
+        let dir = self.settings.account_dir(provider);
         match provider {
             Provider::Claude => {
                 cx.spawn(async move |this, cx| {
                     let usage = bg
                         .spawn(async move {
-                            let (tok, sub) = read_claude_credentials()?;
+                            let (tok, sub) = read_claude_credentials(dir.as_deref())?;
                             let usage = fetch_claude_plan_usage(&tok, sub.as_deref());
-                            if usage.is_none() {
+                            if usage.is_none() && dir.is_none() {
                                 forget_claude_credentials();
                             }
                             usage
@@ -79,7 +83,10 @@ impl ChatApp {
             Provider::Codex => {
                 cx.spawn(async move |this, cx| {
                     let usage =
-                        bg.spawn(async move { fetch_codex_plan_usage(&read_codex_token()?) }).await;
+                        bg.spawn(async move {
+                            fetch_codex_plan_usage(&read_codex_token(dir.as_deref())?)
+                        })
+                        .await;
                     if let Some(usage) = usage {
                         let _ = this.update(cx, |this, cx| {
                             this.store_plan_usage(Provider::Codex, usage);
@@ -136,6 +143,22 @@ impl ChatApp {
         self.provider_plan_usages.insert(provider, usage);
     }
 
+    /// Makes `name` (None: the CLI's own login) the account new runs of `provider` use.
+    pub(crate) fn switch_account(
+        &mut self,
+        provider: Provider,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_settings(cx, |s| match name {
+            Some(name) => drop(s.default_accounts.insert(provider.key().into(), name)),
+            None => drop(s.default_accounts.remove(provider.key())),
+        });
+        // another login's numbers must not linger under this one
+        self.provider_plan_usages.remove(&provider);
+        self.refresh_provider_usage(provider, cx);
+    }
+
     pub(super) fn refresh_stale_usage(&mut self, cx: &mut Context<Self>) {
         let newest = self.plan_usage_at.values().max().copied();
         let configured = self.api_key.is_some()
@@ -143,6 +166,18 @@ impl ChatApp {
                 .iter()
                 .any(|p| self.probes.get(p).is_some_and(|probe| probe.installed));
         if usage_due(newest, self.usage_attempt_at, configured, now_ms()) {
+            self.refresh_all_provider_usages(cx);
+        }
+    }
+
+    /// Fire and forget: the spawn in progress ranks the snapshot it has, the next one gets fresh numbers.
+    pub(super) fn refresh_usage_for_spawn(&mut self, cx: &mut Context<Self>) {
+        let now = now_ms();
+        let stale = [Provider::Claude, Provider::Codex, Provider::Antigravity, Provider::OpenCode]
+            .iter()
+            .filter(|p| self.probes.get(p).is_some_and(|probe| probe.installed))
+            .any(|p| self.plan_usage_at.get(p).is_none_or(|&at| now - at >= SPAWN_USAGE_TTL_MS));
+        if stale && now - self.usage_attempt_at >= SPAWN_USAGE_RETRY_MS {
             self.refresh_all_provider_usages(cx);
         }
     }
