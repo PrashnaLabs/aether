@@ -1,4 +1,5 @@
 use aether_ui::ChatStatus;
+use aether_ui::theme::Corners;
 use std::path::Path;
 
 use gpui_kit::component::button::{ButtonVariant, ButtonVariants};
@@ -226,17 +227,41 @@ impl ChatApp {
                 .tooltip_with_action("Expand sidebar", &ToggleSidebar, None)
                 .on_click(cx.listener(|this, _, window, cx| this.toggle_sidebar(window, cx)))
         });
-        let muted = cx.theme().muted_foreground;
         let project = self.org_project().map(|dir| {
             let path = display_path(&dir, &aether_core::home_dir());
-            div()
+            let name: SharedString = self.project_name(Path::new(&dir)).into();
+            let (ring, fill) = (cx.theme().ring, aether_ui::overlay(cx));
+            let page = std::path::PathBuf::from(&dir);
+            h_flex()
                 .id("org-project")
+                .role(Role::Link)
+                .tab_index(0)
+                .aria_label(SharedString::from(format!("Open {name} project page")))
                 .min_w_0()
-                .truncate()
-                .text_xs()
-                .text_color(muted)
+                .gap(px(6.))
+                .items_center()
+                .min_h(px(24.))
+                .px(px(4.))
+                .corner(px(6.))
+                .border_1()
+                .border_color(gpui_kit::transparent_black())
+                .focus_visible(move |s| s.border_color(ring))
+                .cursor_pointer()
+                .hover(move |s| s.bg(fill))
+                .active(move |s| s.bg(fill))
                 .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx))
-                .child(self.project_name(Path::new(&dir)))
+                .child(aether_ui::project_mark(Some(&name), cx))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .text_color(aether_ui::project_color(&name, cx))
+                        .child(name.clone()),
+                )
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.open_project_page(page.clone(), cx)),
+                )
         });
         let status = org.map(|org| org_header_status(org, &self.chats, cx));
         let buttons = org.map(|org| {
@@ -575,8 +600,21 @@ impl ChatApp {
         self.board_open_chat(chat, window, cx);
     }
 
+    /// The project's board in an org chat (its owning head, else the CEO), so the org
+    /// sidebar stays; falls back to the global board without an org chat.
     pub(crate) fn org_open_card(&mut self, card: i64, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_page(Page::Board, cx);
+        let labels = self.cards.iter().find(|c| c.id == card).map(|c| c.labels.clone());
+        let chat = self
+            .org_current()
+            .and_then(|o| o.labelled(&labels.unwrap_or_default(), "dept").or(o.ceo_chat()))
+            .and_then(|id| self.chat_ix(id));
+        match chat {
+            Some(ix) => {
+                self.select(ix, window, cx);
+                self.open_board_tab(window, cx);
+            }
+            None => self.open_page(Page::Board, cx),
+        }
         self.board_pick(card, window, cx);
     }
 

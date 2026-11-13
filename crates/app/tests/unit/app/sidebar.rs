@@ -945,3 +945,56 @@ fn org_sidebar_lists_every_org_as_a_project_row(cx: &mut gpui_kit::TestAppContex
         assert!(app.settings.collapsed_projects.is_empty(), "main sidebar keeps its own folds");
     });
 }
+
+#[gpui_kit::test]
+fn org_open_card_shows_the_project_board_in_an_org_chat(cx: &mut gpui_kit::TestAppContext) {
+    use crate::board::model::Col;
+    use crate::org::model::{Head, Org};
+    use crate::side_panel::SideTab;
+    cx.background_executor.allow_parking();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        ChatApp::with_state(
+            aether_agent::Agent::new().unwrap(),
+            aether_core::Settings::default(),
+            None,
+            None,
+            false,
+            window,
+            cx,
+        )
+    });
+    window
+        .update(cx, |app, window, cx| {
+            app.settings.org_enabled = true;
+            let a = PathBuf::from("/tmp/aether-org-card");
+            app.new_chat_in(a.clone(), window, cx);
+            app.chats[app.active].messages = vec![aether_core::Message::user("hi")];
+            let head = app.chats[app.active].id;
+            let project = a.display().to_string();
+            app.org.orgs.push(Org {
+                project: project.clone(),
+                heads: vec![Head { chat: Some(head), ..Head::new("CEO", 2) }],
+                ..Org::default()
+            });
+            let card = app.board_add(
+                "Fix".into(),
+                String::new(),
+                Col::Review,
+                project.clone(),
+                None,
+                false,
+            );
+            app.open_org_for(&a, false, cx);
+            app.org_open_card(card, window, cx);
+            assert_eq!((app.page, app.sidebar_view), (Page::Chat, SidebarView::Org));
+            assert_eq!(app.chats[app.active].id, head);
+            assert!(app.board_tab);
+            assert_eq!(app.board_selected, Some(card));
+            assert!(
+                app.settings.chat_layout != aether_core::ChatLayout::Tabbed
+                    || app.side_tab == SideTab::Board
+            );
+        })
+        .unwrap();
+}
