@@ -89,12 +89,95 @@ Aether prompts to register it when a lead first starts.
 back to the lead automatically; leads should not poll `read_agent` for
 completion.
 
-`message_agent` also reaches chats that aren't the lead's children (not
-the lead itself, not archived). Their answers don't come back on their own;
-read them with `read_history` and the chat's `id`, which leads can pass to
-read any chat. A negative `offset` counts back from the end, so `-3` reads
-the last three messages. `list_chats` and the other chat filters take
-`search`, words that must all appear in the title.
+Leads also have access to `list_chats`, `read_history`, `update_chat`,
+`stop_chat`, `archive_chats`, `delete_chats`, and board tools (`list_cards`,
+`read_card`, `add_card`, `move_card`, `update_card`, `delete_cards`).
+
+### Chat and agent inspection (`list_chats`, `list_agents`)
+
+`list_chats` lists Aether chats matching an optional filter. Each chat entry
+includes:
+- `id`, `title`, `project`, `provider`, `state`, `last_active`, `pinned`,
+  `archived`, `lead`.
+- `model`: the raw stored provider model string for the chat
+  (`c.provider_model`), which may be empty; it does not resolve global or
+  provider fallback models.
+- `queued`: count of messages currently queued for the chat (`c.queue.len()`).
+- `cost`: total spend across all messages in the chat in USD, rounded to
+  cents (e.g. `2.23`).
+
+`list_agents` lists available CLI providers with the models reported by their
+installed CLI probes, plus the lead's non-archived direct `children` (including
+idle, running, and failed chats). Each child entry includes `id`, `title`,
+`provider`, `model`, `status`, and `cost` (total spend for that child chat in
+USD, rounded to cents).
+
+#### Cost calculation
+
+Cost for both `list_chats` and `list_agents` children is computed across the
+chat's messages:
+- If a reply reports spend (`cost_micros > 0`), that exact value is used.
+- If `cost_micros` is 0, cost is estimated from model token pricing
+  (`prompt_tokens * prompt_price + completion_tokens * completion_price`)
+  when the message's model is found in Aether's configured model prices. If
+  pricing for that model is unavailable, the reply contributes 0 micros (which
+  readers should note does not confirm zero spend).
+- Total micros across all replies are converted to USD rounded to the nearest
+  cent (`(micros / 1e4).round() / 100.0`).
+
+### Peer messaging and loop guard (`message_agent`)
+
+`message_agent` sends or queues a prompt for direct child agents as well as
+other chats (peer leads or standalone chats; not the lead itself, and not
+archived chats).
+
+- **Parent-to-child messages:** Messages sent by a lead to its own direct child
+  (`chat.parent == Some(lead.id)`) are delivered directly without tags and are
+  not subject to access-level checks or the loop guard.
+
+When messaging a chat that is **not** the caller's direct child:
+- **Access restriction:** The send is refused if the destination chat runs with
+  a higher access level than the calling lead.
+- **Answers do not return automatically:** The tool call returns a status
+  (`{"status": "sent"}` or `{"status": "queued"}`) along with the note:
+  `"not your child: its answer won't be sent to you; read it later with read_history and this chat's id"`.
+  Peer replies are not delivered back automatically; leads should inspect
+  replies using `read_history` with the destination chat's `id`. (Ending the
+  caller's turn after messaging is workflow guidance for the agent, not
+  enforced tool behavior.)
+- **Sender tagging:** Aether automatically prepends `[from <title> #<id>] ` to
+  the message text, where `<title>` is the sending chat's title and `<id>` is its
+  chat id. This tag lets the recipient identify the sender and reply back via
+  `message_agent`.
+- **Loop guard:** To prevent unattended agent-to-agent message loops, Aether
+  enforces a 6-message streak limit (`MAX_AGENT_STREAK = 6`).
+  - **What is counted:** `agent_streak` counts the trailing tagged suffix of
+    stored `Role::User` messages plus queued messages in the destination chat,
+    ignoring assistant messages. It scans backwards through user-role and
+    queued text, counting consecutive entries starting with the caller's exact
+    sender tag (`[from <title> #<id>]`). The streak is tracked per sender
+    (counting consecutive messages sent to that destination chat by the same
+    sender).
+  - **Limit behavior:** If the caller has sent 6 or more consecutive tagged
+    messages in a row to the destination chat with no intervening message
+    (`n >= 6`), `message_agent` refuses to send and returns an error before
+    queueing:
+    `agent-to-agent loop guard: you sent chat <id> <n> messages in a row with no reply from another sender or the user; ask the user before sending more`
+    (e.g. reporting `you sent chat <id> 6 messages...`).
+  - **Resetting the guard:** The backward scan stops at the first entry that
+    does not start with this caller's exact `[from <title> #<id>]` tag. The
+    streak count is the number of newer entries from this sender following that
+    entry (and is 0 when the newest entry is not from this sender). Entries that
+    end the scan include messages from other senders (tagged with a different
+    sender title/id), prompts sent by a human user, child result deliveries, or
+    spawn-queue notices. Note that if a user prompt literally starts with the
+    exact `[from <title> #<id>]` prefix, it matches and counts toward that
+    sender's streak.
+
+`read_history` reads earlier messages of this chat (or, for a lead, any chat)
+with full tool calls and output. A negative `offset` counts back from the end,
+so `-3` reads the last three messages. `list_chats` and the other chat filters
+take `search`, words that must all appear in the title.
 
 `request_worker` is for organization heads only (`title`, `task`, optional
 `card`, `provider`, `model`, `why`). Aether checks the hiring rules (the
