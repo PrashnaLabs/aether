@@ -313,6 +313,40 @@ fn background_tasks_settle_their_original_row() {
 }
 
 #[test]
+fn background_task_done_before_its_result_still_settles() {
+    let mut s = State { active: true, ..State::default() };
+    map_line(
+        &mut s,
+        &BASH_USE.replace(r#""command":"echo hi""#, r#""command":"true","run_in_background":true"#),
+    );
+    map_line(
+        &mut s,
+        r#"{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_1","status":"completed","summary":"exit 0"}"#,
+    );
+    let started = r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Command running in background with ID: b1"}]}}"#;
+    assert_eq!(calls(map_line(&mut s, started))[0].status, ToolStatus::Done);
+    assert!(s.background.is_empty());
+}
+
+#[test]
+fn timed_out_command_goes_to_the_background() {
+    for text in [
+        "Command did not complete within its 120s timeout and was moved to the background (ID: b1). Output is being written to: /tmp/b1.out",
+        "Command was manually backgrounded by user with ID: b1. Output is being written to: /tmp/b1.out",
+        "Command was moved to the background (ID: b1) so that a message that arrived while it was running can reach you.",
+    ] {
+        let mut s = State { active: true, ..State::default() };
+        map_line(&mut s, BASH_USE);
+        let moved = format!(
+            r#"{{"type":"user","parent_tool_use_id":null,"message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_1","content":"{text}"}}]}}}}"#
+        );
+        assert_eq!(calls(map_line(&mut s, &moved))[0].status, ToolStatus::Background, "{text}");
+        let done = r#"{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_1","status":"completed","summary":"exit 0"}"#;
+        assert_eq!(calls(map_line(&mut s, done))[0].status, ToolStatus::Done, "{text}");
+    }
+}
+
+#[test]
 fn wake_without_a_reason_still_says_so() {
     let mut s = State::default();
     let woke = map_line(

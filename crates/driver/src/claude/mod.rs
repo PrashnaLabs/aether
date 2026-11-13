@@ -147,6 +147,8 @@ pub(crate) struct State {
     agents: HashMap<String, String>,
     /// Rows whose tool result said the work went to the background; their notification settles them.
     background: HashSet<String>,
+    /// Rows whose notification beat the tool result that would have backgrounded them.
+    early: HashSet<String>,
     /// Forwarded subagent text deltas per parent row, until its assistant message lands.
     sub_text: HashMap<String, String>,
     wake_reason: Option<String>,

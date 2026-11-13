@@ -235,6 +235,9 @@ pub(crate) fn task_line(s: &mut State, subtype: &str, v: &Value) -> Vec<Update> 
             let status = v["status"].as_str().unwrap_or_default();
             let summary = text("summary").unwrap_or_default();
             if !s.background.remove(&row) {
+                if !row.is_empty() {
+                    s.early.insert(row);
+                }
                 return vec![];
             }
             let described = s.tasks.remove(&task).map(|t| t.1).filter(|d| !d.is_empty());
@@ -636,9 +639,13 @@ pub(crate) fn map_value(s: &mut State, v: &Value) -> Vec<Update> {
                     });
                     call.parent = call.parent.take().or_else(|| parent.map(str::to_string));
                     let mut text = result_text(&b["content"]);
-                    if text.starts_with("Command running in background with ID:")
+                    if (text.starts_with("Command running in background with ID:")
+                        || text.starts_with("Command did not complete within")
+                        || text.starts_with("Command was manually backgrounded")
+                        || text.starts_with("Command was moved to the background")
                         || text.starts_with("Async agent launched")
-                        || text.contains("\"resumedAgentId\"")
+                        || text.contains("\"resumedAgentId\""))
+                        && !s.early.remove(id)
                     {
                         call.status = ToolStatus::Background;
                         s.background.insert(id.to_string());
