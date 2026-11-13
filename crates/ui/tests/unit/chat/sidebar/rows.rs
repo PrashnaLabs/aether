@@ -903,6 +903,20 @@ fn collapsed_project_keeps_its_pinned_chats_when_asked() {
 }
 
 #[test]
+fn folded_project_highlights_only_when_the_open_chat_is_hidden() {
+    let project_active = |selected: Option<usize>, lead_open: bool| {
+        let mut sidebar =
+            default_crew_sidebar(&[ChatStatus::Done; 3], selected).keep_pinned_when_collapsed(true);
+        sidebar.projects[0].header.collapsed = true;
+        sidebar.projects[0].chats[0].pinned = true;
+        sidebar.projects[0].chats[0].active = lead_open;
+        sidebar.rows().iter().any(|r| matches!(r, ChatRow::Project { active: true, .. }))
+    };
+    assert!(!project_active(None, true), "the listed pinned chat carries the highlight");
+    assert!(project_active(Some(1), false), "a hidden open chat still highlights the project");
+}
+
+#[test]
 fn lead_card_is_big_only_while_its_crew_is_open_in_a_pane() {
     let big = |sidebar: &mut ChatSidebar| {
         sidebar.rows().iter().find_map(|r| match r {

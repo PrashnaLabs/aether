@@ -999,15 +999,15 @@ impl ChatSidebar {
         for (k, project) in projects.into_iter().filter(|_| !projects_collapsed).enumerate() {
             let collapsed = project.header.collapsed;
             let holds = |chats: &[ChatItem]| chats.iter().any(|chat| chat.active);
-            let active = project.active
-                || collapsed
-                    && (holds(&project.chats) || project.worktrees.iter().any(|w| holds(&w.chats)));
             let keep = self.keep_pins;
-            let chats: Vec<ChatItem> = project
+            let (chats, hidden): (Vec<ChatItem>, Vec<ChatItem>) = project
                 .chats
                 .into_iter()
-                .filter(|chat| !collapsed || keep && chat.pinned && chat.depth == 0)
-                .collect();
+                .partition(|chat| !collapsed || keep && chat.pinned && chat.depth == 0);
+            // a pinned chat still listed under the folded project carries the highlight itself
+            let active = project.active
+                || collapsed
+                    && (holds(&hidden) || project.worktrees.iter().any(|w| holds(&w.chats)));
             let mut held: Vec<(WorktreeItem, Vec<ChatItem>, bool)> = Vec::new();
             for mut worktree in project.worktrees.into_iter().filter(|_| !collapsed) {
                 let all = std::mem::take(&mut worktree.chats);
