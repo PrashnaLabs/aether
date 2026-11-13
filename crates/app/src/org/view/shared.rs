@@ -3,10 +3,13 @@ use aether_ui::field;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, Hsla, Role, Window, div, prelude::*, px, rgb,
 };
+
+use gpui_kit::assets::IconName;
 
 use crate::app::{Chat, ChatApp, Page, display_path, now_ms};
 use crate::board::model::Col;
@@ -52,22 +55,104 @@ pub(crate) fn avatar(role: &str, size: f32) -> impl IntoElement {
         .justify_center()
         .rounded(px(size * 0.27))
         .bg(rgb(role_color(role)))
-        .text_color(rgb(0x000000))
+        .text_color(rgb(avatar_foreground(role_color(role))))
         .text_size(px(size * 0.34))
         .font_weight(FontWeight::BOLD)
         .child(role_badge(role))
 }
 
-pub(crate) fn status_dot(status: ChatStatus, cx: &App) -> impl IntoElement {
-    let color: Hsla = match status {
-        ChatStatus::Starting | ChatStatus::Working { .. } | ChatStatus::Quiet { .. } => {
-            rgb(BLUE).into()
-        }
-        ChatStatus::Waiting | ChatStatus::Retrying => rgb(AMBER).into(),
-        ChatStatus::Failed => rgb(RED).into(),
-        _ => cx.theme().muted_foreground,
+/// WCAG relative luminance, after converting sRGB channels to linear light.
+fn luminance(color: u32) -> f64 {
+    let linear = |shift: u32| {
+        let channel = f64::from((color >> shift) & 0xff_u32) / 255.;
+        if channel <= 0.04045 { channel / 12.92 } else { ((channel + 0.055) / 1.055).powf(2.4) }
     };
-    div().size(px(7.)).flex_none().rounded_full().bg(color)
+    0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0)
+}
+
+/// Choose whichever of black or white has the greater measured contrast.
+fn avatar_foreground(background: u32) -> u32 {
+    let light = luminance(background);
+    if (light + 0.05) / 0.05 >= 1.05 / (light + 0.05) { 0x000000 } else { 0xffffff }
+}
+
+fn status_visual(status: ChatStatus) -> (IconName, String, Option<u32>) {
+    match status {
+        ChatStatus::Idle => (IconName::Circle, "Idle".into(), None),
+        ChatStatus::Starting => (IconName::LoaderCircle, "Starting".into(), Some(BLUE)),
+        ChatStatus::Working { .. } => (IconName::Play, "Working".into(), Some(BLUE)),
+        ChatStatus::Waiting => (IconName::CircleAlert, "Needs you".into(), Some(AMBER)),
+        ChatStatus::Retrying => (IconName::RefreshCw, "Retrying".into(), Some(AMBER)),
+        ChatStatus::Quiet { .. } => (IconName::Pause, "No output".into(), Some(BLUE)),
+        ChatStatus::Background(n) => (IconName::Layers, format!("{n} tasks in background"), None),
+        ChatStatus::Done => (IconName::CircleCheck, "New reply".into(), None),
+        ChatStatus::Failed => (IconName::CircleX, "Failed".into(), Some(RED)),
+    }
+}
+
+/// Stable, clock-free status name shared by roster row/cell and icon semantics.
+pub(super) fn status_label(status: ChatStatus) -> String {
+    status_visual(status).1
+}
+
+/// A fixed-size, static status icon for the org roster and chart.
+pub(crate) fn status_dot(status: ChatStatus, cx: &App) -> impl IntoElement {
+    let (icon, label, color) = status_visual(status);
+    let color = color.map_or(cx.theme().muted_foreground, |c| rgb(c).into());
+    div()
+        .id("org-status")
+        .debug_selector(|| "org-status".into())
+        .role(Role::Image)
+        .aria_label(label)
+        .size(px(12.))
+        .flex_none()
+        .child(Icon::new(icon).size(px(12.)).text_color(color))
+}
+
+/// Busy heads and workers in this org only; archived chats no longer belong to its live roster.
+fn org_busy_counts(org: &Org, chats: &[Chat]) -> (usize, usize) {
+    chats.iter().filter(|chat| !chat.archived && chat.busy()).fold(
+        (0, 0),
+        |(heads, workers), chat| {
+            if org.head_of_chat(chat.id).is_some() {
+                (heads + 1, workers)
+            } else if chat.parent.is_some_and(|parent| org.head_of_chat(parent).is_some()) {
+                (heads, workers + 1)
+            } else {
+                (heads, workers)
+            }
+        },
+    )
+}
+
+fn org_header_status(org: &Org, chats: &[Chat], cx: &App) -> impl IntoElement {
+    let (heads, workers) = org_busy_counts(org, chats);
+    let busy = heads + workers;
+    // org_pause stops turns; there is no persisted paused state to display.
+    let label = if busy == 0 { "idle".into() } else { format!("{busy} busy") };
+    let worker_word = if workers == 1 { "worker" } else { "workers" };
+    let head_word = if heads == 1 { "head" } else { "heads" };
+    let description = format!("{workers} {worker_word} busy · {heads} {head_word} busy");
+    let (icon, color) = if busy == 0 {
+        (IconName::Circle, cx.theme().muted_foreground)
+    } else {
+        (IconName::LoaderCircle, aether_ui::theme::success_text(cx))
+    };
+    h_flex()
+        .id("org-header-status")
+        .debug_selector(|| "org-header-status".into())
+        .role(Role::Status)
+        .aria_label(format!("Organization {label}"))
+        .aria_description(description.clone())
+        .aria_value(label.clone())
+        .tooltip(move |window, cx| Tooltip::new(description.clone()).build(window, cx))
+        .gap(px(5.))
+        .px(px(7.))
+        .rounded(px(5.))
+        .text_size(px(11.))
+        .text_color(color)
+        .child(Icon::new(icon).size(px(12.)).flex_none())
+        .child(label)
 }
 
 fn bar(fraction: f64, fill: Hsla, cx: &App) -> impl IntoElement {
@@ -101,7 +186,7 @@ impl ChatApp {
         (chat.context_used() * 100 / limit).min(100) as u8
     }
 
-    /// Title, project, running pill and the page buttons; `None` org shows Settings only.
+    /// Title, project, current org activity and the page buttons; `None` org shows Settings only.
     pub(crate) fn org_header(
         &self,
         org: Option<&Org>,
@@ -125,16 +210,7 @@ impl ChatApp {
             .org_project()
             .map(|p| display_path(&p, &aether_core::home_dir()))
             .unwrap_or_default();
-        let running = org.is_some().then(|| {
-            h_flex()
-                .gap(px(5.))
-                .px(px(7.))
-                .rounded(px(5.))
-                .text_size(px(11.))
-                .text_color(rgb(GREEN))
-                .child(div().size(px(7.)).rounded_full().bg(rgb(GREEN)))
-                .child("running")
-        });
+        let status = org.map(|org| org_header_status(org, &self.chats, cx));
         let buttons = org.map(|_| {
             h_flex()
                 .gap(px(6.))
@@ -174,7 +250,7 @@ impl ChatApp {
                     .child("Organization"),
             )
             .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(project))
-            .children(running)
+            .children(status)
             .child(div().flex_1())
             .children(extra)
             .children(buttons)

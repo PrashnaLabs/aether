@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use aether_core::{OrgHire, Provider};
 use aether_ui::{AgentSelector, AgentSelectorEvent, AgentSelectorState, field, field_area};
+use gpui_kit::base::{FocusTrapElement, actions::Cancel};
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputState, TextareaState};
@@ -9,8 +10,8 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, Div, ElementId, Entity, FontWeight, Hsla, MouseButton, Role, Window,
-    div, prelude::*, px, rgb,
+    AnyElement, App, Context, Div, ElementId, Entity, FocusHandle, FontWeight, Hsla, MouseButton,
+    Role, Window, div, prelude::*, px, rgb,
 };
 
 use crate::app::{CLIS, ChatApp, Page, stored_model};
@@ -172,6 +173,166 @@ fn heading(id: &'static str, text: impl Into<gpui_kit::SharedString>) -> impl In
         .child(text.into())
 }
 
+/// Lives exactly as long as the modal is rendered. Release also covers success paths
+/// which dismiss the overlay in the org model or navigate to another page.
+struct OrgDialogFocus {
+    focus: FocusHandle,
+    initial: FocusHandle,
+    invoking: Option<FocusHandle>,
+}
+
+fn dialog_focus(window: &mut Window, cx: &mut App) -> Entity<OrgDialogFocus> {
+    window.use_keyed_state("org-dialog-focus", cx, |window, cx| {
+        let invoking = window.focused(cx);
+        let focus = cx.focus_handle();
+        let initial = cx.focus_handle();
+        initial.focus(window, cx);
+        // Wizard steps and staff removal can unmount the focused control.
+        // Keep the app's general focus-lost fallback from returning to the page.
+        cx.on_focus_lost(window, |state: &mut OrgDialogFocus, window, cx| {
+            let target = window.focus_lost_restore_target(cx);
+            if target.as_ref() == Some(&state.initial) || target.as_ref() == Some(&state.focus) {
+                state.initial.focus(window, cx);
+            }
+        })
+        .detach();
+        cx.on_release_in(window, |state: &mut OrgDialogFocus, window, cx| {
+            // Navigation may already have focused a destination control.
+            let restore = window.focused(cx).is_none()
+                || state.focus.contains_focused(window, cx)
+                || state.initial.is_focused(window);
+            if restore && let Some(invoking) = state.invoking.take() {
+                invoking.focus(window, cx);
+            }
+        })
+        .detach();
+        OrgDialogFocus { focus, initial, invoking }
+    })
+}
+
+fn dialog_panel(panel: Div, name: String, initial: &FocusHandle) -> gpui_kit::Stateful<Div> {
+    panel
+        .id("org-dialog")
+        .role(Role::Dialog)
+        .aria_label(name)
+        .a11y_synthetic_children(|tree| tree.parent_node().set_modal())
+        .track_focus(initial)
+}
+
+/// Use the native dialog action, rather than a raw key listener: nested menus
+/// and AgentSelector consume their own Escape binding before it reaches us.
+fn dialog_surface(
+    panel: Div,
+    name: String,
+    focus: &FocusHandle,
+    initial: &FocusHandle,
+    drawer: bool,
+    close: impl Fn(&Cancel, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let panel_focus = initial.clone();
+    // Keep the semantic node inside the trap: FocusTrapContainer does not
+    // forward Element's accessibility hooks to its wrapped div in GPUI Base.
+    div()
+        .flex()
+        .when(drawer, |d| d.h_full())
+        .child(dialog_panel(panel, name, initial).key_context("Dialog").on_action(
+            move |action: &Cancel, window, cx| {
+                // Native input and popup handlers get first chance. An unhandled
+                // field Escape exits editing before a deliberate panel dismissal.
+                if window.has_focused_input(cx) {
+                    panel_focus.focus(window, cx);
+                } else {
+                    close(action, window, cx);
+                }
+            },
+        ))
+        .focus_trap("org-dialog-trap", focus)
+}
+
+/// Shared by org overlays and their native interaction regressions.
+fn dialog_scrim(
+    drawer: bool,
+    panel: Div,
+    name: String,
+    window: &mut Window,
+    cx: &mut App,
+    close: impl Fn(&mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let state = dialog_focus(window, cx);
+    let focus = state.read(cx).focus.clone();
+    let initial = state.read(cx).initial.clone();
+    let close: Rc<dyn Fn(&mut Window, &mut App)> = Rc::new(close);
+    let backdrop_close = close.clone();
+    div()
+        .id("org-scrim")
+        .absolute()
+        .inset_0()
+        .occlude()
+        .flex()
+        .bg(gpui_kit::black().opacity(0.55))
+        .map(|d| if drawer { d.justify_end() } else { d.items_center().justify_center() })
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| backdrop_close(window, cx))
+        .child(dialog_surface(
+            panel
+                .occlude()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .bg(cx.theme().background)
+                .border_1()
+                .border_color(cx.theme().border)
+                .text_size(px(13.)),
+            name,
+            &focus,
+            &initial,
+            drawer,
+            move |_: &Cancel, window, cx| close(window, cx),
+        ))
+        .into_any_element()
+}
+
+/// A non-modal picker closes when Tab leaves it. Otherwise its deferred
+/// popup stays open while Escape is routed to the surrounding modal instead.
+fn dialog_agent_selector(
+    state: &Entity<AgentSelectorState>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let selector = state.downgrade();
+    let marker = format!("OrgAgentSelector{}", state.entity_id().as_u64());
+    let observed_marker = marker.clone();
+    let tab_selector = selector.clone();
+    let boundary =
+        window.use_keyed_state(("org-agent-boundary", state.entity_id()), cx, |window, cx| {
+            let focus = cx.focus_handle();
+            // Tab may return to the trigger, which is still inside this boundary.
+            // Observe after native key actions, without intercepting rail/effort navigation.
+            cx.observe_keystrokes(move |_, event, window, cx| {
+                let contains = |contexts: &[gpui_kit::KeyContext], name: &str| {
+                    contexts.iter().any(|context| context.contains(name))
+                };
+                if event.keystroke.key == "tab"
+                    && contains(&event.context_stack, &observed_marker)
+                    && contains(&event.context_stack, aether_ui::AGENT_SELECTOR_CONTEXT)
+                    && !contains(&window.context_stack(), aether_ui::AGENT_SELECTOR_CONTEXT)
+                {
+                    tab_selector.update(cx, |state, cx| state.dismiss(cx)).ok();
+                }
+            })
+            .detach();
+            cx.on_focus_out(&focus, window, move |_, _, _, cx| {
+                selector.update(cx, |state, cx| state.dismiss(cx)).ok();
+            })
+            .detach();
+            focus
+        });
+    div()
+        .key_context(marker.as_str())
+        .track_focus(boundary.read(cx))
+        .child(AgentSelector::new(state))
+        .into_any_element()
+}
+
 impl ChatApp {
     fn org_close(&mut self, cx: &mut Context<Self>) {
         self.org.overlay = OrgOverlay::None;
@@ -179,28 +340,18 @@ impl ChatApp {
     }
 
     /// Dimmed backdrop; a click on it closes the overlay. `drawer` docks the panel right.
-    fn org_scrim(&self, drawer: bool, panel: Div, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .id("org-scrim")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .flex()
-            .bg(gpui_kit::black().opacity(0.55))
-            .map(|d| if drawer { d.justify_end() } else { d.items_center().justify_center() })
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.org_close(cx)))
-            .child(
-                panel
-                    .occlude()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .text_size(px(13.)),
-            )
-            .into_any_element()
+    fn org_scrim(
+        &self,
+        drawer: bool,
+        panel: Div,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let app = cx.entity().downgrade();
+        dialog_scrim(drawer, panel, name, window, cx, move |_, cx| {
+            app.update(cx, |this, cx| this.org_close(cx)).ok();
+        })
     }
 
     /// The composer's agent picker over the lead CLIs; its Reasoning row offers the model's efforts.
@@ -256,7 +407,7 @@ impl ChatApp {
         state.update(cx, |s, cx| {
             s.sync(providers, favorites, provider, picked, efforts, effort, cx)
         });
-        AgentSelector::new(&state).into_any_element()
+        dialog_agent_selector(&state, window, cx)
     }
 
     fn org_wizard_draft(&mut self) -> Option<&mut OrgSpec> {
@@ -447,7 +598,7 @@ impl ChatApp {
                     })
                     .child(primary),
             );
-        Some(self.org_scrim(false, panel, cx))
+        Some(self.org_scrim(false, panel, "Set up organization".into(), window, cx))
     }
 
     fn wizard_templates(&self, draft: &OrgSpec, cx: &mut Context<Self>) -> impl IntoElement {
@@ -554,6 +705,9 @@ impl ChatApp {
                         .ghost()
                         .label("✕")
                         .tooltip("Remove")
+                        .accessibility_label(format!("Remove {} from staff", h.title))
+                        .min_w(px(24.))
+                        .min_h(px(24.))
                         .disabled(role == "CEO")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(d) = this.org_wizard_draft() {
@@ -1005,12 +1159,21 @@ impl ChatApp {
                         aether_ui::button("org-head-close")
                             .small()
                             .label("Close")
+                            .accessibility_label("Close head editor")
+                            .min_w(px(24.))
+                            .min_h(px(24.))
                             .on_click(cx.listener(|this, _, _, cx| this.org_close(cx))),
                     ),
             )
             .child(body)
             .child(footer);
-        Some(self.org_scrim(true, panel, cx))
+        Some(self.org_scrim(
+            true,
+            panel,
+            format!("{} head: {}", if adding { "Add" } else { "Edit" }, head.title),
+            window,
+            cx,
+        ))
     }
 
     /// Writes the edited role file first so onboarding sends it, then adds the head.
@@ -1120,7 +1283,11 @@ impl ChatApp {
                     .gap(px(8.))
                     .items_center()
                     .text_size(px(12.5))
-                    .child(Checkbox::new("org-hire-worktree").checked(draft.worktree).on_click(
+                    .child(Checkbox::new("org-hire-worktree")
+                        .accessibility_label("Run worker in isolated worktree")
+                        .min_w(px(24.))
+                        .min_h(px(24.))
+                        .checked(draft.worktree).on_click(
                         cx.listener(|this, checked: &bool, _, cx| {
                             if let Some(d) = this.org_hire_draft() {
                                 d.worktree = *checked;
@@ -1193,7 +1360,7 @@ impl ChatApp {
                             .on_click(hire),
                     ),
             );
-        Some(self.org_scrim(false, panel, cx))
+        Some(self.org_scrim(false, panel, "Hire a worker".into(), window, cx))
     }
 }
 
