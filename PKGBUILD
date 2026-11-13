@@ -1,5 +1,5 @@
 pkgname=aether
-pkgver=0.1.0alpha
+pkgver=0.1.1alpha
 pkgrel=1
 pkgdesc="Coding agents side by side, in one native window"
 arch=('x86_64')

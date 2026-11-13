@@ -166,6 +166,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/releases
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -176,4 +179,7 @@ jobs:
         run: |
           flags=(--generate-notes --verify-tag)
           [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          # Hand-written notes go above the generated PR list.
+          notes="docs/releases/$GITHUB_REF_NAME.md"
+          [[ -f "$notes" ]] && flags+=(--notes-file "$notes")
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
